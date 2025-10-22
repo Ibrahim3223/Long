@@ -1,9 +1,12 @@
-name: Daily Long Videos (all channels)
+name: Daily Long Video (single channel)
 
 on:
-  schedule:
-    - cron: "0 12 * * *"  # Once daily at 12:00 UTC (longer videos = less frequent)
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (channel) name"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -16,54 +19,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  make-matrix:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.mk.outputs.matrix }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Python (for matrix build)
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Install PyYAML
-        run: pip install pyyaml
-
-      - name: Build matrix from channels_long.yml
-        id: mk
-        shell: bash
-        run: |
-          python - <<'PY'
-          import yaml, json
-          data = yaml.safe_load(open("channels_long.yml","r",encoding="utf-8")) or {}
-          chs = []
-          for ch in data.get("channels", []):
-              chs.append({
-                  "name": ch.get("name"),
-                  "env": ch.get("env", ch.get("name")),
-                  "mode": ch.get("mode","educational"),
-                  "lang": ch.get("lang","en"),
-                  "visibility": ch.get("visibility","public"),
-                  "seed": str(ch.get("seed","0")),
-              })
-          open("mx.json","w",encoding="utf-8").write(json.dumps({"include": chs}))
-          PY
-          echo "matrix=$(cat mx.json)" >> "$GITHUB_OUTPUT"
-
   build-upload:
-    needs: make-matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 90  # Longer timeout for long videos
-    strategy:
-      fail-fast: false
-      max-parallel: 3  # Less parallel (long videos = more resources)
-      matrix: ${{ fromJSON(needs.make-matrix.outputs.matrix) }}
-    environment: ${{ matrix.env }}
+    timeout-minutes: 90
+    environment: ${{ inputs.environment }}
 
     steps:
       - name: Checkout
@@ -102,33 +61,30 @@ jobs:
             mkdir -p .state
           fi
 
-      # ---------- ENV export ----------
+      # ---------- Kanal ENV'leri ----------
       - name: Export channel variables (safe)
         shell: bash
         env:
-          MATRIX_NAME:           ${{ matrix.name }}
-          DEFAULT_LANG:          ${{ matrix.lang }}
-          DEFAULT_MODE:          ${{ matrix.mode }}
-          DEFAULT_VISIBILITY:    ${{ matrix.visibility }}
-          DEFAULT_SEED:          ${{ matrix.seed }}
+          INPUT_ENV:            ${{ inputs.environment }}
 
-          VARS_TOPIC:            ${{ vars.TOPIC }}
-          VARS_LANG:             ${{ vars.LANG }}
-          VARS_MODE:             ${{ vars.MODE }}
-          VARS_VISIBILITY:       ${{ vars.VISIBILITY }}
-          VARS_ROTATION_SEED:    ${{ vars.ROTATION_SEED }}
-          VARS_SEARCH_TERMS:     ${{ vars.SEARCH_TERMS }}
-          VARS_GEMINI_PROMPT:    ${{ vars.GEMINI_PROMPT }}
-          VARS_TTS_RATE:         ${{ vars.TTS_RATE }}
-          VARS_TTS_VOICE:        ${{ vars.TTS_VOICE }}
-          VARS_BGM_URLS:         ${{ vars.BGM_URLS }}
+          VARS_TOPIC:           ${{ vars.TOPIC }}
+          VARS_LANG:            ${{ vars.LANG }}
+          VARS_MODE:            ${{ vars.MODE }}
+          VARS_VISIBILITY:      ${{ vars.VISIBILITY }}
+          VARS_ROTATION_SEED:   ${{ vars.ROTATION_SEED }}
+          VARS_SEARCH_TERMS:    ${{ vars.SEARCH_TERMS }}
+          VARS_GEMINI_PROMPT:   ${{ vars.GEMINI_PROMPT }}
+          VARS_TTS_RATE:        ${{ vars.TTS_RATE }}
+          VARS_TTS_VOICE:       ${{ vars.TTS_VOICE }}
+          VARS_BGM_URLS:        ${{ vars.BGM_URLS }}
         run: |
           set -euo pipefail
-          CHANNEL_NAME="${MATRIX_NAME}"
-          LANG_VAL="${VARS_LANG:-$DEFAULT_LANG}"
-          MODE_VAL="${VARS_MODE:-$DEFAULT_MODE}"
-          VIS_VAL="${VARS_VISIBILITY:-$DEFAULT_VISIBILITY}"
-          SEED_VAL="${VARS_ROTATION_SEED:-$DEFAULT_SEED}"
+
+          CHANNEL_NAME="$INPUT_ENV"
+          LANG_VAL="${VARS_LANG:-}"
+          MODE_VAL="${VARS_MODE:-}"
+          VIS_VAL="${VARS_VISIBILITY:-}"
+          SEED_VAL="${VARS_ROTATION_SEED:-}"
 
           wenv () {
             local __name="$1"; shift
@@ -167,10 +123,10 @@ jobs:
       - name: Restore channel state cache
         uses: actions/cache/restore@v4
         with:
-          path: state_${{ env.CHANNEL_NAME }}.json
-          key: chstate-long-${{ env.CHANNEL_NAME }}-${{ github.run_id }}
+          path: state_${{ inputs.environment }}.json
+          key: chstate-long-${{ inputs.environment }}-${{ github.run_id }}
           restore-keys: |
-            chstate-long-${{ env.CHANNEL_NAME }}-
+            chstate-long-${{ inputs.environment }}-
 
       - name: Install Python dependencies
         run: |
@@ -202,23 +158,23 @@ jobs:
           VIDEO_WIDTH: "1920"
           VIDEO_HEIGHT: "1080"
           ASPECT_RATIO: "16:9"
-          TARGET_DURATION: "240"        # 4 minutes
-          TARGET_MIN_SEC: "180"         # 3 minutes
-          TARGET_MAX_SEC: "600"         # 10 minutes
+          TARGET_DURATION: "240"
+          TARGET_MIN_SEC: "180"
+          TARGET_MAX_SEC: "600"
           MIN_SENTENCES: "20"
           MAX_SENTENCES: "35"
           TARGET_SENTENCES: "25"
 
           # ===== TTS (Natural Pacing) =====
           TTS_SSML: "0"
-          TTS_RATE: "+5%"               # Slower than shorts (+12%)
+          TTS_RATE: "+5%"
 
-          # ===== CAPTIONS (Bottom Positioned for Landscape) =====
+          # ===== CAPTIONS (Bottom Positioned) =====
           REQUIRE_CAPTIONS: "1"
           KARAOKE_CAPTIONS: "1"
           CAPTIONS_UPPER: "1"
           CAPTION_POSITION: "bottom"
-          CAPTION_FONT_SIZE: "48"       # Smaller for 16:9
+          CAPTION_FONT_SIZE: "48"
           CAPTION_MAX_LINES: "2"
           CAPTION_MARGIN_V: "100"
           KARAOKE_INACTIVE: "#FFD700"
@@ -231,15 +187,15 @@ jobs:
           KARAOKE_EARLY_END_MS: "0"
           CAPTION_LEAD_MS: "0"
 
-          # ===== VIDEO EFFECTS (Subtle for Long-Form) =====
+          # ===== VIDEO EFFECTS (Subtle) =====
           KARAOKE_EFFECTS: "1"
           EFFECT_STYLE: "subtle"
           VIDEO_MOTION: "1"
-          MOTION_INTENSITY: "1.08"      # 8% zoom (subtle)
+          MOTION_INTENSITY: "1.08"
           SCENE_MIN_DURATION: "8.0"
           SCENE_MAX_DURATION: "15.0"
 
-          # ===== QUALITY THRESHOLDS (Higher for Long-Form) =====
+          # ===== QUALITY THRESHOLDS =====
           MIN_QUALITY_SCORE: "6.5"
           MIN_VIRAL_SCORE: "6.0"
           MIN_OVERALL_SCORE: "7.0"
@@ -247,37 +203,37 @@ jobs:
           # ===== NOVELTY & COOLDOWN =====
           NOVELTY_ENFORCE: "1"
           NOVELTY_WINDOW: "30"
-          NOVELTY_JACCARD_MAX: "0.60"   # More lenient
+          NOVELTY_JACCARD_MAX: "0.60"
           NOVELTY_RETRIES: "5"
           ENTITY_COOLDOWN_DAYS: "45"
           SIM_TH_SCRIPT: "0.90"
           SIM_TH_ENTITY: "0.92"
           STATE_DIR: ".state"
 
-          # ===== PEXELS STRATEGY (Reuse Allowed) =====
+          # ===== PEXELS (Reuse Allowed) =====
           SCENE_STRATEGY: "topic_only"
           PEXELS_DEEP_SEARCH: "1"
-          PEXELS_STRICT_VERTICAL: "0"   # Allow landscape
+          PEXELS_STRICT_VERTICAL: "0"
           PEXELS_ALLOW_LANDSCAPE: "1"
           PEXELS_MIN_HEIGHT: "720"
           PEXELS_PER_PAGE: "80"
-          PEXELS_ALLOW_REUSE: "1"       # CRITICAL for 20+ clips
+          PEXELS_ALLOW_REUSE: "1"
           PEXELS_MAX_USES_PER_CLIP: "2"
           PEXELS_MAX_PAGES: "15"
           ALLOW_PIXABAY_FALLBACK: "1"
           STRICT_ENTITY_FILTER: "0"
 
-          # ===== BGM (Background Music) =====
+          # ===== BGM =====
           BGM_ENABLE: "1"
           BGM_DIR: "bgm"
           BGM_FADE: "1.5"
-          BGM_GAIN_DB: "-28"            # Quieter for long-form
+          BGM_GAIN_DB: "-28"
           BGM_DUCK_THRESH: "0.09"
           BGM_DUCK_RATIO: "4"
           BGM_DUCK_ATTACK_MS: "20"
           BGM_DUCK_RELEASE_MS: "300"
 
-          # ===== UPLOAD (Normal Video, Not Shorts) =====
+          # ===== UPLOAD (Normal Video) =====
           UPLOAD_AS_SHORTS: "0"
           ENABLE_CHAPTERS: "1"
           MIN_CHAPTER_DURATION: "30"
@@ -294,18 +250,18 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.CHANNEL_NAME }}-long
+          name: ${{ inputs.environment }}-long
           path: |
             out/**/*.mp4
             out/*.mp4
           if-no-files-found: ignore
-          retention-days: 14  # Keep longer for long-form
+          retention-days: 14
 
       - name: Upload logs & meta
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.CHANNEL_NAME }}-logs
+          name: ${{ inputs.environment }}-logs
           path: |
             build_${{ env.CHANNEL_NAME }}.log
             out/**/*.json
@@ -326,8 +282,8 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: state_${{ env.CHANNEL_NAME }}.json
-          key: chstate-long-${{ env.CHANNEL_NAME }}-${{ github.run_id }}
+          path: state_${{ inputs.environment }}.json
+          key: chstate-long-${{ inputs.environment }}-${{ github.run_id }}
 
       # ---------- POST: .state'i 'state' branch'ine kaydet ----------
       - name: Persist .state to 'state' branch (worktree-safe)
@@ -353,7 +309,7 @@ jobs:
 
           pushd _state_wt >/dev/null
           git add .state
-          git commit -m "update .state $(date -u +%F_%T) [${CHANNEL_NAME:-long}]" || true
+          git commit -m "update .state $(date -u +%F_%T) [${CHANNEL_NAME:-single}]" || true
           git push origin state
           popd >/dev/null
 
