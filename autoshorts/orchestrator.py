@@ -263,7 +263,7 @@ class LongFormOrchestrator:
         # Add BGM if enabled
         if settings.BGM_ENABLE:
             logger.info("   🎵 Adding background music...")
-            final_with_bgm = self.bgm_manager.add_bgm(final_video, self.temp_dir)
+            final_with_bgm = self._add_bgm_to_video(final_video, audio_segments)
             if final_with_bgm:
                 final_video = final_with_bgm
         
@@ -294,6 +294,69 @@ class LongFormOrchestrator:
         except Exception as e:
             logger.error(f"      ❌ Download failed: {e}")
             raise
+    
+    def _add_bgm_to_video(self, video_path: str, audio_segments: List[Dict[str, Any]]) -> Optional[str]:
+        """
+        Add background music to video file.
+        
+        Args:
+            video_path: Path to video file (with voice audio)
+            audio_segments: Audio segments with durations
+            
+        Returns:
+            Path to video with BGM, or None if failed
+        """
+        try:
+            # Calculate total duration
+            total_duration = sum(seg['duration'] for seg in audio_segments)
+            
+            # Extract audio from video
+            logger.info("      📤 Extracting audio from video...")
+            voice_audio = os.path.join(self.temp_dir, "voice_only.wav")
+            
+            import subprocess
+            subprocess.run([
+                'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                '-i', video_path,
+                '-vn', '-ar', '48000', '-ac', '1', '-c:a', 'pcm_s16le',
+                voice_audio
+            ], check=True, capture_output=True)
+            
+            # Add BGM to audio
+            logger.info("      🎵 Mixing background music...")
+            mixed_audio = self.bgm_manager.add_bgm(
+                voice_path=voice_audio,
+                duration=total_duration,
+                temp_dir=self.temp_dir
+            )
+            
+            if not mixed_audio or mixed_audio == voice_audio:
+                logger.warning("      ⚠️ BGM mixing failed or skipped")
+                return None
+            
+            # Combine video with new audio
+            logger.info("      🎬 Combining video with BGM...")
+            output_path = os.path.join(self.temp_dir, "final_with_bgm.mp4")
+            
+            subprocess.run([
+                'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                '-i', video_path,
+                '-i', mixed_audio,
+                '-c:v', 'copy',
+                '-c:a', 'aac', '-b:a', '192k',
+                '-map', '0:v:0', '-map', '1:a:0',
+                '-shortest',
+                output_path
+            ], check=True, capture_output=True)
+            
+            logger.info(f"      ✅ BGM added successfully")
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"      ❌ BGM addition failed: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return None
     
     def _upload(
         self,
