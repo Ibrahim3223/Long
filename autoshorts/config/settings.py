@@ -1,6 +1,7 @@
 """
 Settings module - LONG-FORM VIDEO CONFIGURATION
-Optimized for 3-10 minute landscape videos (16:9)
+Optimized for 4-7 minute landscape videos (16:9)
+✅ FIXED: Proper sentence count and duration targets
 """
 
 import os
@@ -106,12 +107,13 @@ ADDITIONAL_PROMPT_CONTEXT = os.getenv("ADDITIONAL_PROMPT_CONTEXT", "")
 
 # ============================================================
 # VIDEO SETTINGS - LONG-FORM LANDSCAPE (16:9)
+# ✅ FIXED: 4-7 minute duration targets
 # ============================================================
 
-# Duration: 3-10 minutes
-TARGET_DURATION = _env_int("TARGET_DURATION", 240)  # 4 minutes default
-TARGET_MIN_SEC = _env_float("TARGET_MIN_SEC", 180.0)  # 3 minutes minimum
-TARGET_MAX_SEC = _env_float("TARGET_MAX_SEC", 600.0)  # 10 minutes maximum
+# Duration: 4-7 minutes (240-420 seconds)
+TARGET_DURATION = _env_int("TARGET_DURATION", 360)  # 6 minutes default (was 240)
+TARGET_MIN_SEC = _env_float("TARGET_MIN_SEC", 240.0)  # 4 minutes minimum (was 180)
+TARGET_MAX_SEC = _env_float("TARGET_MAX_SEC", 480.0)  # 8 minutes maximum (was 600)
 
 # Resolution: 16:9 LANDSCAPE (1920x1080 Full HD)
 VIDEO_WIDTH = _env_int("VIDEO_WIDTH", 1920)
@@ -126,8 +128,8 @@ VIDEO_MOTION = _env_bool("VIDEO_MOTION", True)
 MOTION_INTENSITY = _env_float("MOTION_INTENSITY", 1.08)  # Subtle zoom (8% max)
 
 # Scene timing (longer scenes for long-form)
-SCENE_MIN_DURATION = _env_float("SCENE_MIN_DURATION", 8.0)  # Shorts: 5.0
-SCENE_MAX_DURATION = _env_float("SCENE_MAX_DURATION", 15.0)  # Shorts: 10.0
+SCENE_MIN_DURATION = _env_float("SCENE_MIN_DURATION", 8.0)
+SCENE_MAX_DURATION = _env_float("SCENE_MAX_DURATION", 15.0)
 
 # ============================================================
 # TTS SETTINGS - NATURAL PACING FOR LONG-FORM
@@ -135,7 +137,7 @@ SCENE_MAX_DURATION = _env_float("SCENE_MAX_DURATION", 15.0)  # Shorts: 10.0
 
 TTS_VOICE = os.getenv("TTS_VOICE", "en-US-GuyNeural")
 VOICE = TTS_VOICE
-TTS_RATE = os.getenv("TTS_RATE", "+5%")  # Slower, more natural (Shorts: +12%)
+TTS_RATE = os.getenv("TTS_RATE", "+5%")  # Slower, more natural
 TTS_PITCH = os.getenv("TTS_PITCH", "+0Hz")
 TTS_STYLE = os.getenv("TTS_STYLE", "narration-professional")
 
@@ -144,14 +146,14 @@ TTS_STYLE = os.getenv("TTS_STYLE", "narration-professional")
 # ============================================================
 
 PEXELS_PER_PAGE = _env_int("PEXELS_PER_PAGE", 80)
-PEXELS_MAX_USES_PER_CLIP = _env_int("PEXELS_MAX_USES_PER_CLIP", 2)  # Allow reuse
-PEXELS_ALLOW_REUSE = _env_bool("PEXELS_ALLOW_REUSE", True)  # CRITICAL for 20+ clips
+PEXELS_MAX_USES_PER_CLIP = _env_int("PEXELS_MAX_USES_PER_CLIP", 3)  # Allow more reuse
+PEXELS_ALLOW_REUSE = _env_bool("PEXELS_ALLOW_REUSE", True)  # CRITICAL for 40-70 clips
 PEXELS_ALLOW_LANDSCAPE = _env_bool("PEXELS_ALLOW_LANDSCAPE", True)  # 16:9 videos
-PEXELS_MIN_DURATION = _env_int("PEXELS_MIN_DURATION", 6)
+PEXELS_MIN_DURATION = _env_int("PEXELS_MIN_DURATION", 5)  # Lower for looping
 PEXELS_MAX_DURATION = _env_int("PEXELS_MAX_DURATION", 20)
-PEXELS_MIN_HEIGHT = _env_int("PEXELS_MIN_HEIGHT", 720)  # Lower requirement
+PEXELS_MIN_HEIGHT = _env_int("PEXELS_MIN_HEIGHT", 720)
 PEXELS_STRICT_VERTICAL = _env_bool("PEXELS_STRICT_VERTICAL", False)  # Allow landscape
-PEXELS_MAX_PAGES = _env_int("PEXELS_MAX_PAGES", 15)  # More search depth
+PEXELS_MAX_PAGES = _env_int("PEXELS_MAX_PAGES", 20)  # More search depth for 40-70 clips
 
 ALLOW_PIXABAY_FALLBACK = _env_bool("ALLOW_PIXABAY_FALLBACK", True)
 
@@ -160,9 +162,10 @@ STRICT_ENTITY_FILTER = _env_bool("STRICT_ENTITY_FILTER", False)
 
 # ============================================================
 # CAPTION SETTINGS - BOTTOM POSITIONED FOR LANDSCAPE
+# ✅ FIXED: Force enabled captions
 # ============================================================
 
-KARAOKE_CAPTIONS = _env_bool("KARAOKE_CAPTIONS", True)
+KARAOKE_CAPTIONS = _env_bool("KARAOKE_CAPTIONS", True)  # Force enabled
 KARAOKE_EFFECTS = _env_bool("KARAOKE_EFFECTS", True)
 EFFECT_STYLE = os.getenv("EFFECT_STYLE", "subtle")  # More subtle for long-form
 
@@ -172,7 +175,7 @@ CAPTION_MAX_LINE = _env_int("CAPTION_MAX_LINE", 40)  # More characters per line
 CAPTION_MAX_LINES = _env_int("CAPTION_MAX_LINES", 2)  # Max 2 lines at bottom
 CAPTION_POSITION = os.getenv("CAPTION_POSITION", "bottom")  # BOTTOM for landscape
 
-# Karaoke colors (same as shorts)
+# Karaoke colors
 CAPTION_PRIMARY_COLOR = os.getenv("CAPTION_PRIMARY_COLOR", "&H00FFFFFF")
 CAPTION_OUTLINE_COLOR = os.getenv("CAPTION_OUTLINE_COLOR", "&H00000000")
 CAPTION_HIGHLIGHT_COLOR = os.getenv("CAPTION_HIGHLIGHT_COLOR", "&H0000FFFF")
@@ -221,7 +224,7 @@ NOVELTY_RETRIES = _env_int("NOVELTY_RETRIES", 5)
 # ============================================================
 
 # Higher quality threshold for long-form content
-MIN_QUALITY_SCORE = _env_float("MIN_QUALITY_SCORE", 6.5)  # Shorts: 5.0
+MIN_QUALITY_SCORE = _env_float("MIN_QUALITY_SCORE", 6.5)
 MAX_GENERATION_ATTEMPTS = _env_int("MAX_GENERATION_ATTEMPTS", 5)
 
 # ============================================================
@@ -238,16 +241,18 @@ MIN_CHAPTER_DURATION = _env_int("MIN_CHAPTER_DURATION", 30)  # 30 seconds min
 
 # ============================================================
 # CONTENT STRUCTURE - LONG-FORM SPECIFIC
+# ✅ FIXED: 40-70 sentences for 4-7 minute videos
 # ============================================================
 
-# Sentence count: 20-35 sentences for 3-10 minutes
-MIN_SENTENCES = _env_int("MIN_SENTENCES", 20)
-MAX_SENTENCES = _env_int("MAX_SENTENCES", 35)
-TARGET_SENTENCES = _env_int("TARGET_SENTENCES", 25)
+# Sentence count: 40-70 sentences for 4-7 minutes
+# Average ~5-6 seconds per sentence with TTS
+MIN_SENTENCES = _env_int("MIN_SENTENCES", 40)  # Was 20
+MAX_SENTENCES = _env_int("MAX_SENTENCES", 70)  # Was 35
+TARGET_SENTENCES = _env_int("TARGET_SENTENCES", 55)  # Was 25
 
 # Chapter structure (auto-generated from content)
 CHAPTERS_ENABLED = _env_bool("CHAPTERS_ENABLED", True)
-MIN_CHAPTER_SENTENCES = _env_int("MIN_CHAPTER_SENTENCES", 4)  # 4+ sentences per chapter
+MIN_CHAPTER_SENTENCES = _env_int("MIN_CHAPTER_SENTENCES", 5)  # 5+ sentences per chapter
 
 # ============================================================
 # LANGUAGE SETTINGS
