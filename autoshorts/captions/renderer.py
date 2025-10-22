@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Caption rendering - BULLETPROOF SYNC
-No animation drift, EXACT timing, aggressive validation
+✅ FIXED: Audio stream preserved during caption rendering
 """
 import os
 import pathlib
@@ -104,7 +104,7 @@ class CaptionRenderer:
         sentence_type: str = "buildup",
         temp_dir: str = None
     ) -> str:
-        """Render captions with EXACT timing."""
+        """Render captions with EXACT timing - AUDIO PRESERVED"""
         try:
             if duration <= 0:
                 duration = ffprobe_duration(video_path)
@@ -128,12 +128,13 @@ class CaptionRenderer:
                 tmp_out = output.replace(".mp4", ".tmp.mp4")
                 
                 try:
+                    # ✅ CRITICAL FIX: Preserve audio with -c:a copy
                     run([
                         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                         "-i", video_path,
                         "-vf", f"subtitles='{ass_path}':force_style='Kerning=1',setsar=1,fps={settings.TARGET_FPS}",
                         "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
-                        "-an",
+                        "-c:a", "copy",  # ✅ FIX: Keep audio stream!
                         "-c:v", "libx264", "-preset", "medium",
                         "-crf", str(max(16, settings.CRF_VISUAL - 3)),
                         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
@@ -144,12 +145,13 @@ class CaptionRenderer:
                         logger.error(f"      ❌ FFmpeg subtitle burn failed")
                         return video_path
                     
+                    # ✅ CRITICAL FIX: Preserve audio in final output too
                     run([
                         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                         "-i", tmp_out,
                         "-vf", f"setsar=1,fps={settings.TARGET_FPS},trim=start_frame=0:end_frame={frames}",
                         "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
-                        "-an",
+                        "-c:a", "copy",  # ✅ FIX: Keep audio stream!
                         "-c:v", "libx264", "-preset", "medium",
                         "-crf", str(settings.CRF_VISUAL),
                         "-pix_fmt", "yuv420p",
@@ -197,73 +199,74 @@ class CaptionRenderer:
         # Enforce min/max bounds
         fixed = []
         for word, dur in word_timings:
-            dur = max(self.MIN_WORD_DURATION, min(dur, 3.0))
-            fixed.append((word, round(dur, 3)))
+            # Clamp duration
+            dur = max(self.MIN_WORD_DURATION, min(dur, 5.0))
+            fixed.append((word, dur))
         
-        # CRITICAL: Check total sum
+        if not fixed:
+            return []
+        
+        # Calculate total
         current_total = sum(d for _, d in fixed)
         
-        # If total exceeds target by >0.5%, scale DOWN
-        if current_total > total_duration * 1.005:
-            scale = total_duration / current_total
-            logger.info(f"      📏 Scaling DOWN: {scale:.3f}x (prevent overflow)")
+        # AGGRESSIVE CORRECTION - Force EXACT match
+        if abs(current_total - total_duration) > 0.001:
+            # Scale all durations proportionally
+            scale_factor = total_duration / current_total if current_total > 0 else 1.0
+            
             fixed = [
-                (w, max(self.MIN_WORD_DURATION, round(d * scale, 3)))
+                (w, max(self.MIN_WORD_DURATION, round(d * scale_factor, 3)))
                 for w, d in fixed
             ]
+            
+            # Fine-tune last word for precision
+            new_total = sum(d for _, d in fixed)
+            diff = total_duration - new_total
+            
+            if abs(diff) > 0.001 and fixed:
+                last_word, last_dur = fixed[-1]
+                fixed[-1] = (last_word, max(self.MIN_WORD_DURATION, last_dur + diff))
         
-        # EXACT match (±1ms tolerance)
-        current_total = sum(d for _, d in fixed)
-        diff = total_duration - current_total
-        
-        if abs(diff) > 0.001:
-            # Distribute difference across ALL words proportionally
-            for i in range(len(fixed)):
-                word, dur = fixed[i]
-                weight = dur / current_total if current_total > 0 else 1.0 / len(fixed)
-                adjustment = diff * weight
-                new_dur = max(self.MIN_WORD_DURATION, round(dur + adjustment, 3))
-                fixed[i] = (word, new_dur)
-        
-        # Final check
+        # Final validation
         final_total = sum(d for _, d in fixed)
         diff_ms = abs(final_total - total_duration) * 1000
         
         if diff_ms > 1.0:
-            # Last resort: adjust last word
-            last_word, last_dur = fixed[-1]
-            final_diff = total_duration - final_total
-            fixed[-1] = (last_word, max(self.MIN_WORD_DURATION, round(last_dur + final_diff, 3)))
-        
-        # Validation log
-        validated_total = sum(d for _, d in fixed)
-        diff_ms = abs(validated_total - total_duration) * 1000
-        logger.info(f"      ✅ Validated: {validated_total:.3f}s (target: {total_duration:.3f}s, diff: {diff_ms:.1f}ms)")
+            logger.warning(f"      ⚠️ Word timing drift: {diff_ms:.1f}ms")
         
         return fixed
     
-    def _smart_fallback_timings(self, text: str, duration: float) -> List[Tuple[str, float]]:
-        """Smart fallback timing generation."""
-        words = [w for w in text.split() if w.strip()]
+    def _smart_fallback_timings(
+        self,
+        text: str,
+        duration: float
+    ) -> List[Tuple[str, float]]:
+        """Generate smart fallback timings."""
+        import re
+        
+        words = [w for w in re.split(r'\s+', text.strip()) if w]
+        
         if not words:
             return []
         
-        # Character-based weights
-        total_chars = sum(len(w) for w in words)
-        if total_chars == 0:
-            dur_per_word = duration / len(words)
-            return [(w, round(dur_per_word, 3)) for w in words]
+        # Equal distribution
+        per_word = max(self.MIN_WORD_DURATION, duration / len(words))
         
-        word_timings = []
-        for word in words:
-            char_ratio = len(word) / total_chars
-            dur = max(self.MIN_WORD_DURATION, duration * char_ratio)
-            word_timings.append((word, round(dur, 3)))
+        timings = [(w, per_word) for w in words]
         
-        return word_timings
+        # Adjust last word for exact duration
+        if timings:
+            current_sum = sum(d for _, d in timings)
+            diff = duration - current_sum
+            
+            if abs(diff) > 0.001:
+                last_word, last_dur = timings[-1]
+                timings[-1] = (last_word, max(self.MIN_WORD_DURATION, last_dur + diff))
+        
+        return timings
     
     # ========================================================================
-    # EXACT ASS WRITER - NO ANIMATION, PURE TIMING
+    # ASS GENERATION - Frame-perfect timing
     # ========================================================================
     
     def _write_exact_ass(
@@ -273,32 +276,18 @@ class CaptionRenderer:
         sentence_type: str,
         output_path: str
     ):
-        """
-        Write ASS with EXACT timing (no animation drift).
+        """Write ASS file with EXACT frame-aligned timing."""
         
-        CRITICAL: No scale animations, minimal fade, exact cumulative timing.
-        """
-        if not words:
-            logger.warning("      ⚠️ No words to write to ASS")
-            return
-        
-        try:
-            style = CAPTION_STYLES[get_random_style()]
-        except Exception:
-            style = CAPTION_STYLES["classic_yellow"]
-        
+        # Determine styling
         is_hook = (sentence_type == "hook")
-        fontname = style.get("fontname", "Arial Black")
-        fontsize = style.get("fontsize_hook" if is_hook else "fontsize_normal", 60)
-        outline = style.get("outline", 7)
-        shadow = style.get("shadow", "5")
-        margin_v = style.get("margin_v", 320)
         
-        primary_color = style.get("color_active", "&H0000FFFF")
-        secondary_color = style.get("color_inactive", "&H00FFFFFF")
-        outline_color = style.get("color_outline", "&H00000000")
+        # Select style
+        import random
+        style = get_random_style(is_hook)
         
+        # ASS header
         ass = f"""[Script Info]
+Title: Caption
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
@@ -307,7 +296,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{fontname},{fontsize},{primary_color},{secondary_color},{outline_color},&H00000000,-1,0,0,0,100,100,1,0,1,{outline},{shadow},2,50,50,{margin_v},1
+Style: Default,{style['fontname']},{style['fontsize']},{style['primary_color']},{style['secondary_color']},{style['outline_color']},&H00000000,-1,0,0,0,100,100,1,0,1,{style['outline']},{style['shadow']},2,50,50,{style['margin_v']},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
