@@ -310,17 +310,43 @@ class LongFormOrchestrator:
             # Calculate total duration
             total_duration = sum(seg['duration'] for seg in audio_segments)
             
+            # Check if video has audio track
+            logger.info("      🔍 Checking for audio track...")
+            import subprocess
+            
+            probe_cmd = [
+                'ffprobe', '-v', 'error',
+                '-select_streams', 'a:0',
+                '-show_entries', 'stream=codec_type',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                video_path
+            ]
+            
+            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True)
+            
+            if probe_result.returncode != 0 or 'audio' not in probe_result.stdout:
+                logger.warning("      ⚠️ Video has no audio track - skipping BGM")
+                return None
+            
             # Extract audio from video
             logger.info("      📤 Extracting audio from video...")
             voice_audio = os.path.join(self.temp_dir, "voice_only.wav")
             
-            import subprocess
-            subprocess.run([
+            extract_result = subprocess.run([
                 'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
                 '-i', video_path,
                 '-vn', '-ar', '48000', '-ac', '1', '-c:a', 'pcm_s16le',
                 voice_audio
-            ], check=True, capture_output=True)
+            ], capture_output=True)
+            
+            if extract_result.returncode != 0:
+                logger.warning(f"      ⚠️ Audio extraction failed: {extract_result.stderr.decode()[:100]}")
+                return None
+            
+            # Verify extracted audio exists and is not empty
+            if not os.path.exists(voice_audio) or os.path.getsize(voice_audio) < 1000:
+                logger.warning("      ⚠️ Extracted audio is empty - skipping BGM")
+                return None
             
             # Add BGM to audio
             logger.info("      🎵 Mixing background music...")
@@ -332,6 +358,10 @@ class LongFormOrchestrator:
             
             if not mixed_audio or mixed_audio == voice_audio:
                 logger.warning("      ⚠️ BGM mixing failed or skipped")
+                return None
+            
+            if not os.path.exists(mixed_audio):
+                logger.warning("      ⚠️ Mixed audio file not found")
                 return None
             
             # Combine video with new audio
@@ -348,6 +378,10 @@ class LongFormOrchestrator:
                 '-shortest',
                 output_path
             ], check=True, capture_output=True)
+            
+            if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
+                logger.warning("      ⚠️ Final video creation failed")
+                return None
             
             logger.info(f"      ✅ BGM added successfully")
             return output_path
