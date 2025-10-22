@@ -72,6 +72,7 @@ class YouTubeUploader:
             logger.info(f"[YouTube] Title: {optimized_title}")
             logger.info(f"[YouTube] Category: {smart_category}")
             logger.info(f"[YouTube] Chapters: {len(chapters) if chapters else 0}")
+            logger.info(f"[YouTube] Tags: {len(optimized_tags) if optimized_tags else 0}")
             
             # Validate
             if not optimized_title:
@@ -93,22 +94,35 @@ class YouTubeUploader:
             # Build service
             youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
             
-            # Upload body
+            # ✅ FIXED: Build body with proper validation
             body = {
                 "snippet": {
                     "title": optimized_title,
                     "description": optimized_description,
-                    "tags": optimized_tags,
-                    "categoryId": smart_category,
-                    "defaultLanguage": settings.LANG,
-                    "defaultAudioLanguage": settings.LANG
+                    "categoryId": smart_category
                 },
                 "status": {
                     "privacyStatus": privacy_status,
-                    "selfDeclaredMadeForKids": False,
-                    "madeForKids": False
+                    "selfDeclaredMadeForKids": False
                 }
             }
+            
+            # Add tags only if they exist and are not empty
+            if optimized_tags and len(optimized_tags) > 0:
+                body["snippet"]["tags"] = optimized_tags
+                logger.info(f"[YouTube] Adding {len(optimized_tags)} tags")
+            
+            # Add language only if valid (2-letter ISO code)
+            if hasattr(settings, 'LANG') and settings.LANG:
+                lang_code = str(settings.LANG)[:2].lower()  # Get first 2 chars
+                # Valid YouTube language codes
+                valid_langs = ['en', 'tr', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'ja', 'ko', 'zh', 'ar', 'hi', 'nl', 'pl', 'sv']
+                if lang_code in valid_langs:
+                    body["snippet"]["defaultLanguage"] = lang_code
+                    body["snippet"]["defaultAudioLanguage"] = lang_code
+                    logger.info(f"[YouTube] Language: {lang_code}")
+            
+            logger.info("[YouTube] Uploading video...")
             
             # Upload
             media = MediaFileUpload(video_path, chunksize=-1, resumable=True)
@@ -120,6 +134,10 @@ class YouTubeUploader:
             
             response = request.execute()
             video_id = response.get("id", "")
+            
+            if not video_id:
+                raise ValueError("No video ID returned from YouTube")
+            
             video_url = f"https://youtube.com/watch?v={video_id}"
             
             logger.info(f"[YouTube] ✅ Uploaded: {video_url}")
@@ -127,7 +145,9 @@ class YouTubeUploader:
             
         except Exception as e:
             logger.error(f"[YouTube] ❌ Upload failed: {e}")
-            return ""
+            import traceback
+            logger.debug(traceback.format_exc())
+            raise
     
     def _build_description_with_chapters(
         self,
@@ -138,7 +158,7 @@ class YouTubeUploader:
         """Add chapter timestamps to description"""
         
         # Start with original description
-        full_description = description
+        full_description = description if description else ""
         
         # Add chapters if available
         if chapters and audio_durations:
@@ -148,14 +168,16 @@ class YouTubeUploader:
             current_time = 0.0
             for chapter in chapters:
                 timestamp = self._format_timestamp(current_time)
-                chapter_text += f"{timestamp} {chapter.get('title', 'Chapter')}\n"
+                chapter_title = chapter.get('title', 'Chapter')
+                chapter_text += f"{timestamp} {chapter_title}\n"
                 
                 # Add duration of sentences in this chapter
                 start_idx = chapter.get('start_sentence', 0)
                 end_idx = chapter.get('end_sentence', 0)
                 
                 for i in range(start_idx, min(end_idx + 1, len(audio_durations))):
-                    current_time += audio_durations[i]
+                    if i < len(audio_durations):
+                        current_time += audio_durations[i]
             
             full_description += chapter_text
         
@@ -179,6 +201,9 @@ class YouTubeUploader:
     
     def _optimize_title(self, title: str) -> str:
         """Optimize title for YouTube"""
+        if not title:
+            return "Untitled Video"
+        
         title = title.strip()
         if len(title) > 100:
             title = title[:97] + "..."
@@ -193,24 +218,26 @@ class YouTubeUploader:
         total_length = 0
         
         for tag in tags[:30]:  # Max 30 tags
-            tag = tag.strip()
-            if len(tag) + total_length < 500:
+            if not tag:
+                continue
+            tag = str(tag).strip()
+            if len(tag) > 0 and len(tag) + total_length < 500:
                 optimized.append(tag)
-                total_length += len(tag)
+                total_length += len(tag) + 1  # +1 for comma
         
         return optimized
     
     def _detect_category(self, topic: str, title: str, description: str) -> str:
         """Smart category detection"""
-        text = f"{topic} {title} {description}".lower()
+        text = f"{topic or ''} {title or ''} {description or ''}".lower()
         
         patterns = {
-            "27": ["fact", "learn", "explain", "teach", "science", "history", "educational"],
-            "28": ["tech", "ai", "robot", "future", "innovation", "computer", "digital"],
-            "24": ["story", "tale", "movie", "entertainment"],
-            "26": ["how to", "tutorial", "guide", "tips", "diy"],
-            "19": ["travel", "country", "city", "geography", "world"],
-            "22": ["life", "daily", "personal", "vlog"]
+            "27": ["fact", "learn", "explain", "teach", "science", "history", "educational", "education"],
+            "28": ["tech", "ai", "robot", "future", "innovation", "computer", "digital", "technology"],
+            "24": ["story", "tale", "movie", "entertainment", "fun"],
+            "26": ["how to", "tutorial", "guide", "tips", "diy", "howto"],
+            "19": ["travel", "country", "city", "geography", "world", "place"],
+            "22": ["life", "daily", "personal", "vlog", "lifestyle"]
         }
         
         # Count matches
@@ -220,5 +247,5 @@ class YouTubeUploader:
             scores[cat_id] = score
         
         # Return best match
-        best_category = max(scores, key=scores.get)
-        return best_category if scores[best_category] > 0 else "27"
+        best_category = max(scores, key=scores.get) if scores else "27"
+        return best_category if scores.get(best_category, 0) > 0 else "27"
