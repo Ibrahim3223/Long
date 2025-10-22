@@ -1,6 +1,6 @@
 """
-Gemini Client - LONG-FORM EDUCATIONAL CONTENT (3-10 min)
-Generates 20-35 sentence structured content with chapter markers
+Gemini Client - LONG-FORM EDUCATIONAL CONTENT (4-7 min)
+✅ ULTIMATE: Generates 40-70 sentence content with chapters
 """
 
 import json
@@ -25,7 +25,7 @@ class ContentResponse:
     search_queries: List[str]
     main_visual_focus: str
     metadata: Dict[str, Any]
-    chapters: List[Dict[str, Any]]  # NEW: Chapter structure
+    chapters: List[Dict[str, Any]]
 
 
 # ============================================================================
@@ -41,7 +41,6 @@ EDUCATIONAL_HOOKS = [
     "We're about to uncover the complete truth about {topic_keyword}."
 ]
 
-# CTA for long-form (educational)
 EDUCATIONAL_CTA = [
     "Want to learn more? Subscribe for deeper dives into fascinating topics.",
     "If you enjoyed this explanation, hit subscribe for more educational content.",
@@ -72,19 +71,24 @@ class GeminiClient:
         self,
         topic: str,
         style: str,
-        duration: int,  # 180-600 seconds (3-10 minutes)
+        duration: int,  # 240-480 seconds (4-8 minutes)
         additional_context: Optional[str] = None
     ) -> ContentResponse:
-        """Generate long-form educational content (20-35 sentences)"""
+        """
+        Generate long-form educational content (40-70 sentences)
         
-        # Calculate sentences based on duration
-        # Target: ~8-10 words per sentence, ~165 words per minute
-        words_per_minute = 165
-        total_words = int((duration / 60) * words_per_minute)
-        words_per_sentence = 9  # Average
-        target_sentences = min(35, max(20, total_words // words_per_sentence))
+        ✅ ULTIMATE FIX: Correct sentence calculation for 4-7 minute videos
+        """
         
-        logger.info(f"[Gemini] Target: {duration}s = {target_sentences} sentences")
+        # ✅ CRITICAL FIX: New formula for 40-70 sentences
+        # Average TTS: ~5-6 seconds per sentence (educational pace)
+        seconds_per_sentence = 6
+        target_sentences = duration // seconds_per_sentence
+        
+        # Enforce 40-70 range
+        target_sentences = min(70, max(40, target_sentences))
+        
+        logger.info(f"[Gemini] Target: {duration}s = {target_sentences} sentences (40-70 range)")
         
         # Select hooks
         hook_formula = random.choice(EDUCATIONAL_HOOKS)
@@ -118,17 +122,18 @@ class GeminiClient:
         
         return f"""Create an educational long-form YouTube video script about: {topic}
 
-STRUCTURE (CRITICAL):
-1. HOOK (1-2 sentences): {hook_formula}
-2. INTRODUCTION (3-4 sentences): Set context and overview
-3. MAIN CONTENT (15-25 sentences): Divided into 3-5 logical sections
-4. CONCLUSION (2-3 sentences): Summary and key takeaway
-5. CTA (1 sentence): {cta}
-
-REQUIREMENTS:
-- Total sentences: {target_sentences} sentences
+CRITICAL REQUIREMENTS:
+- MUST generate EXACTLY {target_sentences} sentences (between 40-70 sentences)
 - Each sentence: 8-12 words (clear and concise)
 - Educational tone: informative but engaging
+- Divided into 5-7 logical chapters
+
+STRUCTURE:
+1. HOOK (1-2 sentences): {hook_formula}
+2. INTRODUCTION (5-8 sentences): Set context and overview
+3. MAIN CONTENT (30-55 sentences): Divided into 3-5 logical sections
+4. CONCLUSION (3-5 sentences): Summary and key takeaway
+5. CTA (1 sentence): {cta}
 
 CHAPTER STRUCTURE:
 Divide content into 5-7 logical chapters for YouTube timestamps
@@ -142,23 +147,27 @@ Return this EXACT JSON structure (no markdown, no code blocks):
 
 {{
   "hook": "Your hook sentence",
-  "script": ["sentence 1", "sentence 2", ... exactly {target_sentences} sentences],
+  "script": ["sentence 1", "sentence 2", ... EXACTLY {target_sentences} sentences],
   "cta": "Call to action",
-  "search_queries": ["visual term 1", "term 2", ... 15-25 terms],
+  "search_queries": ["visual term 1", "term 2", ... 20-30 terms for variety],
   "main_visual_focus": "Primary visual theme",
   "chapters": [
-    {{"title": "Introduction", "start_sentence": 0, "end_sentence": 4, "description": "Overview"}},
-    {{"title": "Main Point 1", "start_sentence": 5, "end_sentence": 12, "description": "First section"}},
-    ... 5-7 chapters total
+    {{"title": "Introduction", "start_sentence": 0, "end_sentence": 7, "description": "Overview"}},
+    {{"title": "Main Point 1", "start_sentence": 8, "end_sentence": 20, "description": "First section"}},
+    ... 5-7 chapters total covering all {target_sentences} sentences
   ],
   "metadata": {{
     "title": "Title (60-70 chars)",
     "description": "Description (300-500 words)",
-    "tags": ["tag1", "tag2", ... 15-25 tags]
+    "tags": ["tag1", "tag2", ... 20-30 tags]
   }}
 }}
 
-CRITICAL: Return ONLY JSON. No markdown. No truncation. Complete all fields."""
+CRITICAL: 
+- Return ONLY JSON (no markdown, no code blocks)
+- Include ALL {target_sentences} sentences
+- No truncation
+- Complete all fields"""
     
     def _call_api(self, prompt: str) -> str:
         """Call Gemini API"""
@@ -168,11 +177,10 @@ CRITICAL: Return ONLY JSON. No markdown. No truncation. Complete all fields."""
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.8,
-                    max_output_tokens=8000,  # ✅ INCREASED for long-form
+                    max_output_tokens=16000,  # ✅ INCREASED for 40-70 sentences
                 )
             )
             
-            # ✅ FIXED: Safely extract text from response
             if hasattr(response, 'text'):
                 text = response.text
                 logger.debug(f"[Gemini] Response received: {len(text)} chars")
@@ -195,37 +203,36 @@ CRITICAL: Return ONLY JSON. No markdown. No truncation. Complete all fields."""
     def _parse_response(self, raw_response: str, topic: str) -> ContentResponse:
         """Parse JSON response with robust error handling"""
         
-        # ✅ FIXED: Validate input first
         if not raw_response or not isinstance(raw_response, str):
             raise ValueError(f"Invalid response type: {type(raw_response)}")
         
         logger.debug(f"[Gemini] Raw response length: {len(raw_response)} chars")
         
-        # Check if response is truncated
-        if len(raw_response) > 3000 and not raw_response.rstrip().endswith('}'):
-            logger.warning("[Gemini] Response appears truncated (doesn't end with '}')")
+        # Check truncation
+        if len(raw_response) > 5000 and not raw_response.rstrip().endswith('}'):
+            logger.warning("[Gemini] Response appears truncated")
         
-        # Try multiple extraction methods
+        # Extract JSON
         json_str = None
         
-        # Method 1: Extract from markdown code block
+        # Method 1: Markdown block
         markdown_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw_response, re.DOTALL)
         if markdown_match:
             json_str = markdown_match.group(1)
-            logger.debug("[Gemini] Extracted JSON from markdown block")
+            logger.debug("[Gemini] Extracted JSON from markdown")
         
-        # Method 2: Find COMPLETE JSON object (balanced braces)
+        # Method 2: Complete JSON object
         if not json_str:
             json_str = self._extract_complete_json(raw_response)
             if json_str:
-                logger.debug("[Gemini] Extracted complete JSON object")
+                logger.debug("[Gemini] Extracted complete JSON")
         
-        # Method 3: Try parsing entire response as JSON
+        # Method 3: Entire response
         if not json_str:
             try:
                 json.loads(raw_response.strip())
                 json_str = raw_response.strip()
-                logger.debug("[Gemini] Entire response is valid JSON")
+                logger.debug("[Gemini] Entire response is JSON")
             except json.JSONDecodeError:
                 pass
         
@@ -233,30 +240,33 @@ CRITICAL: Return ONLY JSON. No markdown. No truncation. Complete all fields."""
             logger.error(f"[Gemini] Response preview: {raw_response[:500]}...")
             raise ValueError("No valid JSON found in response")
         
-        # Parse JSON
+        # Parse
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
             logger.error(f"[Gemini] JSON parse error: {e}")
-            logger.error(f"[Gemini] JSON string preview: {json_str[:500]}...")
-            logger.error(f"[Gemini] JSON string ending: ...{json_str[-200:]}")
+            logger.error(f"[Gemini] Preview: {json_str[:500]}...")
             raise ValueError(f"Invalid JSON: {e}")
         
-        # Validate required fields
+        # Validate
         required = ["hook", "script", "cta", "search_queries", "main_visual_focus", "metadata"]
         missing = [key for key in required if key not in data]
         if missing:
-            logger.error(f"[Gemini] Parsed data keys: {list(data.keys())}")
-            raise ValueError(f"Missing required keys: {missing}")
+            raise ValueError(f"Missing keys: {missing}")
         
-        # Validate script is a list
         if not isinstance(data["script"], list):
-            raise ValueError("Script must be a list of sentences")
+            raise ValueError("Script must be a list")
         
-        if len(data["script"]) < 15:
-            raise ValueError(f"Script too short: {len(data['script'])} sentences (minimum 15)")
+        # ✅ UPDATED: Check for 40-70 range
+        sentence_count = len(data["script"])
+        if sentence_count < 40:
+            raise ValueError(f"Script too short: {sentence_count} sentences (minimum 40)")
         
-        # Chapters (optional, auto-generate if missing)
+        if sentence_count > 70:
+            logger.warning(f"[Gemini] Script too long: {sentence_count} sentences, truncating to 70")
+            data["script"] = data["script"][:70]
+        
+        # Chapters
         if "chapters" not in data or not data["chapters"]:
             logger.info("[Gemini] Auto-generating chapters...")
             data["chapters"] = self._auto_generate_chapters(data["script"])
@@ -274,13 +284,11 @@ CRITICAL: Return ONLY JSON. No markdown. No truncation. Complete all fields."""
         )
     
     def _extract_complete_json(self, text: str) -> Optional[str]:
-        """Extract a complete JSON object with balanced braces"""
-        # Find the first '{'
+        """Extract complete JSON object with balanced braces"""
         start = text.find('{')
         if start == -1:
             return None
         
-        # Count braces to find matching '}'
         brace_count = 0
         in_string = False
         escape_next = False
@@ -288,7 +296,6 @@ CRITICAL: Return ONLY JSON. No markdown. No truncation. Complete all fields."""
         for i in range(start, len(text)):
             char = text[i]
             
-            # Handle string escaping
             if escape_next:
                 escape_next = False
                 continue
@@ -297,31 +304,26 @@ CRITICAL: Return ONLY JSON. No markdown. No truncation. Complete all fields."""
                 escape_next = True
                 continue
             
-            # Track if we're inside a string
             if char == '"':
                 in_string = not in_string
                 continue
             
-            # Only count braces outside strings
             if not in_string:
                 if char == '{':
                     brace_count += 1
                 elif char == '}':
                     brace_count -= 1
                     
-                    # Found matching closing brace
                     if brace_count == 0:
                         return text[start:i+1]
         
-        # No complete JSON found
         return None
     
     def _auto_generate_chapters(self, script: List[str]) -> List[Dict[str, Any]]:
-        """Auto-generate chapter structure if not provided"""
+        """Auto-generate chapter structure for 40-70 sentences"""
         total_sentences = len(script)
         
-        if total_sentences < 15:
-            # Too short for chapters
+        if total_sentences < 30:
             return [{
                 "title": "Full Content",
                 "start_sentence": 0,
@@ -329,31 +331,41 @@ CRITICAL: Return ONLY JSON. No markdown. No truncation. Complete all fields."""
                 "description": "Complete video content"
             }]
         
-        # Simple chapter division
-        chapter_size = total_sentences // 5  # 5 chapters
+        # ✅ UPDATED: Better chapter distribution for 40-70 sentences
+        # Aim for 6-8 chapters
+        num_chapters = min(8, max(6, total_sentences // 8))
+        chapter_size = total_sentences // num_chapters
         
-        chapters = [
-            {
-                "title": "Introduction",
-                "start_sentence": 0,
-                "end_sentence": min(4, total_sentences // 4),
-                "description": "Overview and context"
-            }
-        ]
+        chapters = []
+        
+        # Introduction (first 10%)
+        intro_end = max(4, total_sentences // 10)
+        chapters.append({
+            "title": "Introduction",
+            "start_sentence": 0,
+            "end_sentence": intro_end,
+            "description": "Overview and context"
+        })
         
         # Main content chapters
-        start = chapters[0]["end_sentence"] + 1
-        for i in range(3):
-            end = min(start + chapter_size, total_sentences - 5)
+        start = intro_end + 1
+        main_chapters = num_chapters - 2  # Exclude intro and conclusion
+        
+        for i in range(main_chapters):
+            end = start + chapter_size - 1
+            if i == main_chapters - 1:
+                # Last main chapter goes to 90% of video
+                end = int(total_sentences * 0.9)
+            
             chapters.append({
                 "title": f"Part {i+1}",
                 "start_sentence": start,
-                "end_sentence": end,
+                "end_sentence": min(end, total_sentences - 5),
                 "description": f"Main content section {i+1}"
             })
-            start = end + 1
+            start = min(end, total_sentences - 5) + 1
         
-        # Conclusion
+        # Conclusion (last 10%)
         chapters.append({
             "title": "Conclusion",
             "start_sentence": chapters[-1]["end_sentence"] + 1,
