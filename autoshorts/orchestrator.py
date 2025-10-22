@@ -33,7 +33,7 @@ class LongFormOrchestrator:
             model=settings.GEMINI_MODEL
         )
         self.tts = TTSHandler()  # Voice is read from settings internally
-        self.pexels = PexelsClient(api_key=settings.PEXELS_API_KEY)
+        self.pexels = PexelsClient()  # ✅ FIXED: No api_key parameter needed
         self.caption_renderer = CaptionRenderer()
         self.bgm_manager = BGMManager()
         self.uploader = YouTubeUploader()
@@ -188,20 +188,22 @@ class LongFormOrchestrator:
         
         logger.info(f"   Need {clips_needed} video clips for {len(audio_segments)} sentences")
         
-        # Search and download videos
+        # Search and download videos using PexelsClient methods
         logger.info("   🔍 Searching for video clips...")
         all_videos = []
         
+        # Use the search_simple method for better results
         for term in search_queries[:20]:  # Use more search terms
-            videos = self.pexels.search(
-                query=term,
-                per_page=5,
-                orientation='landscape'  # 16:9 for long-form
-            )
-            all_videos.extend(videos[:3])
-            
-            if len(all_videos) >= clips_needed:
-                break
+            try:
+                # search_simple returns List[Tuple[video_id, download_url]]
+                results = self.pexels.search_simple(query=term, count=3)
+                all_videos.extend(results)
+                
+                if len(all_videos) >= clips_needed:
+                    break
+            except Exception as e:
+                logger.warning(f"   ⚠️ Search failed for '{term}': {e}")
+                continue
         
         # If not enough, allow reuse
         if len(all_videos) < clips_needed:
@@ -217,10 +219,10 @@ class LongFormOrchestrator:
         logger.info("   🎨 Creating video segments with captions...")
         video_segments = []
         
-        for i, (audio_seg, video) in enumerate(zip(audio_segments, all_videos)):
+        for i, (audio_seg, (video_id, download_url)) in enumerate(zip(audio_segments, all_videos)):
             try:
                 # Download video
-                video_path = self.pexels.download(video, self.temp_dir, index=i)
+                video_path = self._download_video(download_url, video_id, i)
                 
                 # Add captions
                 captioned_path = self.caption_renderer.render(
@@ -268,6 +270,27 @@ class LongFormOrchestrator:
         
         logger.info(f"   ✅ Video saved: {output_path}")
         return output_path
+    
+    def _download_video(self, url: str, video_id: int, index: int) -> str:
+        """Download a single video clip"""
+        import requests
+        
+        output_path = os.path.join(self.temp_dir, f"clip_{index:03d}.mp4")
+        
+        try:
+            logger.info(f"      Downloading clip {index+1} (ID: {video_id})...")
+            response = requests.get(url, stream=True, timeout=60)
+            response.raise_for_status()
+            
+            with open(output_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"      ❌ Download failed: {e}")
+            raise
     
     def _upload(
         self,
