@@ -1,9 +1,8 @@
-name: Daily Shorts (all channels)
+name: Daily Long Videos (all channels)
 
 on:
   schedule:
-    - cron: "0 16 * * *"
-    - cron: "0 0 * * *"
+    - cron: "0 12 * * *"  # Once daily at 12:00 UTC
   workflow_dispatch: {}
 
 permissions:
@@ -35,19 +34,19 @@ jobs:
       - name: Install PyYAML
         run: pip install pyyaml
 
-      - name: Build matrix from channels.yml
+      - name: Build matrix from channels_long.yml
         id: mk
         shell: bash
         run: |
           python - <<'PY'
           import yaml, json
-          data = yaml.safe_load(open("channels.yml","r",encoding="utf-8")) or {}
+          data = yaml.safe_load(open("channels_long.yml","r",encoding="utf-8")) or {}
           chs = []
           for ch in data.get("channels", []):
               chs.append({
                   "name": ch.get("name"),
                   "env": ch.get("env", ch.get("name")),
-                  "mode": ch.get("mode","freeform"),
+                  "mode": ch.get("mode","educational"),
                   "lang": ch.get("lang","en"),
                   "visibility": ch.get("visibility","public"),
                   "seed": str(ch.get("seed","0")),
@@ -59,10 +58,10 @@ jobs:
   build-upload:
     needs: make-matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
-      max-parallel: 6
+      max-parallel: 3
       matrix: ${{ fromJSON(needs.make-matrix.outputs.matrix) }}
     environment: ${{ matrix.env }}
 
@@ -88,7 +87,7 @@ jobs:
           echo "✅ FFmpeg version:"
           ffmpeg -version | head -n1
 
-      # ---------- PRE: .state'i 'state' branch'inden geri yükle (worktree-safe) ----------
+      # ---------- PRE: .state'i 'state' branch'inden geri yükle ----------
       - name: Restore .state from 'state' branch (worktree-safe)
         shell: bash
         run: |
@@ -123,9 +122,6 @@ jobs:
           VARS_TTS_RATE:         ${{ vars.TTS_RATE }}
           VARS_TTS_VOICE:        ${{ vars.TTS_VOICE }}
           VARS_BGM_URLS:         ${{ vars.BGM_URLS }}
-
-          KARAOKE_OFFSET_MS: "+50"
-          KARAOKE_SPEED: "1.0"
         run: |
           set -euo pipefail
           CHANNEL_NAME="${MATRIX_NAME}"
@@ -153,7 +149,7 @@ jobs:
           wenv ROTATION_SEED       "${SEED_VAL}"
           wenv SEARCH_TERMS        "${VARS_SEARCH_TERMS}"
           wenv GEMINI_PROMPT       "${VARS_GEMINI_PROMPT}"
-          wenv TTS_RATE            "${VARS_TTS_RATE:-+12%}"
+          wenv TTS_RATE            "${VARS_TTS_RATE:-+5%}"
           wenv TTS_VOICE           "${VARS_TTS_VOICE}"
           wenv BGM_URLS            "${VARS_BGM_URLS}"
           wenv UPLOAD_TO_YT        "1"
@@ -164,17 +160,17 @@ jobs:
           path: |
             state_global.json
             state_global_topics.json
-          key: global-state-${{ github.run_id }}
+          key: global-state-long-${{ github.run_id }}
           restore-keys: |
-            global-state-
+            global-state-long-
 
       - name: Restore channel state cache
         uses: actions/cache/restore@v4
         with:
           path: state_${{ env.CHANNEL_NAME }}.json
-          key: chstate-${{ env.CHANNEL_NAME }}-${{ github.run_id }}
+          key: chstate-long-${{ env.CHANNEL_NAME }}-${{ github.run_id }}
           restore-keys: |
-            chstate-${{ env.CHANNEL_NAME }}-
+            chstate-long-${{ env.CHANNEL_NAME }}-
 
       - name: Install Python dependencies
         run: |
@@ -193,7 +189,7 @@ jobs:
           echo "✅ stable-ts installed - milisecond caption sync enabled!"
           echo "   Caption precision: ~10-20ms (phoneme-level)"
 
-      - name: Build video
+      - name: Build long-form video
         env:
           GEMINI_API_KEY:   ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY:   ${{ secrets.PEXELS_API_KEY }}
@@ -202,99 +198,108 @@ jobs:
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
 
-          # ===== UNIVERSAL TTS (Natural Speech) =====
-          TTS_SSML: "0"                     # SSML prosody for all topics
-          TTS_RATE: "+12%"                  # Universal speech speed
+          # ===== LONG-FORM VIDEO SETTINGS =====
+          VIDEO_WIDTH: "1920"
+          VIDEO_HEIGHT: "1080"
+          ASPECT_RATIO: "16:9"
+          TARGET_DURATION: "240"
+          TARGET_MIN_SEC: "180"
+          TARGET_MAX_SEC: "600"
+          MIN_SENTENCES: "20"
+          MAX_SENTENCES: "35"
+          TARGET_SENTENCES: "25"
 
-          # ===== CAPTIONS / KARAOKE (stable-ts Word-Level Timing) =====
+          # ===== TTS (Natural Pacing) =====
+          TTS_SSML: "0"
+          TTS_RATE: "+5%"
+
+          # ===== CAPTIONS (Bottom Positioned) =====
           REQUIRE_CAPTIONS: "1"
           KARAOKE_CAPTIONS: "1"
           CAPTIONS_UPPER: "1"
-          KARAOKE_INACTIVE: "#FFD700"       # Gold (inactive words)
-          KARAOKE_ACTIVE: "#3EA6FF"         # Blue (active words)
-          KARAOKE_OUTLINE: "#000000"        # Black outline
-          KARAOKE_OFFSET_MS: "0"            # stable-ts = perfect sync (no offset needed)
-          KARAOKE_SPEED: "1.0"              # No tempo adjustment needed
-          KARAOKE_SPEEDUP_PCT: "0.0"        # Trust stable-ts timing
-          KARAOKE_RAMP_PCT: "0.0"           # No progressive speed
-          KARAOKE_EARLY_END_MS: "0"         # Full duration
-          CAPTION_LEAD_MS: "0"              # No lead offset
+          CAPTION_POSITION: "bottom"
+          CAPTION_FONT_SIZE: "48"
+          CAPTION_MAX_LINES: "2"
+          CAPTION_MARGIN_V: "100"
+          KARAOKE_INACTIVE: "#FFD700"
+          KARAOKE_ACTIVE: "#3EA6FF"
+          KARAOKE_OUTLINE: "#000000"
+          KARAOKE_OFFSET_MS: "0"
+          KARAOKE_SPEED: "1.0"
+          KARAOKE_SPEEDUP_PCT: "0.0"
+          KARAOKE_RAMP_PCT: "0.0"
+          KARAOKE_EARLY_END_MS: "0"
+          CAPTION_LEAD_MS: "0"
 
-          # ===== UNIVERSAL EFFECTS (Adaptive) =====
-          KARAOKE_EFFECTS: "1"              # Enable ASS effects
-          EFFECT_STYLE: "moderate"          # subtle/moderate/dynamic
-          VIDEO_MOTION: "1"                 # Enable zoom/pan
-          MOTION_INTENSITY: "subtle"        # subtle/moderate/dynamic
+          # ===== VIDEO EFFECTS (Subtle) =====
+          KARAOKE_EFFECTS: "1"
+          EFFECT_STYLE: "subtle"
+          VIDEO_MOTION: "1"
+          MOTION_INTENSITY: "1.08"
+          SCENE_MIN_DURATION: "8.0"
+          SCENE_MAX_DURATION: "15.0"
 
-          # ===== UNIVERSAL QUALITY THRESHOLDS =====
-          MIN_QUALITY_SCORE: "6.5"          # Content quality (0-10)
-          MIN_VIRAL_SCORE: "6.0"            # Viral potential (0-10)
-          MIN_OVERALL_SCORE: "7.0"          # Weighted average
+          # ===== QUALITY THRESHOLDS =====
+          MIN_QUALITY_SCORE: "6.5"
+          MIN_VIRAL_SCORE: "6.0"
+          MIN_OVERALL_SCORE: "7.0"
 
           # ===== NOVELTY & COOLDOWN =====
           NOVELTY_ENFORCE: "1"
-          NOVELTY_WINDOW: "40"
-          NOVELTY_JACCARD_MAX: "0.55"
-          NOVELTY_RETRIES: "4"
+          NOVELTY_WINDOW: "30"
+          NOVELTY_JACCARD_MAX: "0.60"
+          NOVELTY_RETRIES: "5"
           ENTITY_COOLDOWN_DAYS: "45"
-          SIM_TH_SCRIPT: "0.92"
-          SIM_TH_ENTITY: "0.94"
+          SIM_TH_SCRIPT: "0.90"
+          SIM_TH_ENTITY: "0.92"
           STATE_DIR: ".state"
 
-          # ===== FOCUS & HOOK (Universal) =====
-          HOOK_MAX_WORDS: "8"
-          STRICT_ENTITY_FILTER: "1"
-          ENTITY_VISUAL_MIN: "0.95"
-          ENTITY_VISUAL_STRICT: "1"
-
-          # ===== SEO & METADATA (Universal) =====
-          SEO_KEYWORD_DENSITY: "1"
-          TITLE_POWER_WORDS: "1"
-          MAX_DESCRIPTION_LENGTH: "4900"
-          MAX_TAGS: "30"
-
-          # ===== PEXELS STRATEGY (Focus-First) =====
+          # ===== PEXELS (Reuse Allowed) =====
           SCENE_STRATEGY: "topic_only"
           PEXELS_DEEP_SEARCH: "1"
           PEXELS_STRICT_VERTICAL: "0"
+          PEXELS_ALLOW_LANDSCAPE: "1"
           PEXELS_MIN_HEIGHT: "720"
           PEXELS_PER_PAGE: "80"
-          PEXELS_ALLOW_REUSE: "0"
-          PEXELS_MAX_PAGES: "7"
+          PEXELS_ALLOW_REUSE: "1"
+          PEXELS_MAX_USES_PER_CLIP: "2"
+          PEXELS_MAX_PAGES: "15"
           ALLOW_PIXABAY_FALLBACK: "1"
+          STRICT_ENTITY_FILTER: "0"
 
-          # ===== CTA (Contextual) =====
-          CTA_ENABLE: "1"
-          CTA_SHOW_SEC: "2.8"
-          CTA_MAX_CHARS: "64"
-
-          # ===== BGM (Background Music) =====
+          # ===== BGM =====
           BGM_ENABLE: "1"
           BGM_DIR: "bgm"
-          BGM_FADE: "0.8"
-          BGM_GAIN_DB: "-11"
-          BGM_DUCK_THRESH: "0.035"
-          BGM_DUCK_RATIO: "10"
-          BGM_DUCK_ATTACK_MS: "6"
-          BGM_DUCK_RELEASE_MS: "180"
+          BGM_FADE: "1.5"
+          BGM_GAIN_DB: "-28"
+          BGM_DUCK_THRESH: "0.09"
+          BGM_DUCK_RATIO: "4"
+          BGM_DUCK_ATTACK_MS: "20"
+          BGM_DUCK_RELEASE_MS: "300"
+
+          # ===== UPLOAD (Normal Video) =====
+          UPLOAD_AS_SHORTS: "0"
+          ENABLE_CHAPTERS: "1"
+          MIN_CHAPTER_DURATION: "30"
         run: |
           set -e
-          echo "== ${CHANNEL_NAME} =="
+          echo "== ${CHANNEL_NAME} (LONG-FORM) =="
           echo "TOPIC=${TOPIC}"
           echo "LANG=${LANG}"
-          echo "SEARCH_TERMS=${SEARCH_TERMS}"
+          echo "TARGET: 3-10 minutes (20-35 sentences)"
+          echo "FORMAT: 16:9 landscape"
           python main.py 2>&1 | tee "build_${CHANNEL_NAME}.log"
 
       - name: Upload artifact (mp4)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.CHANNEL_NAME }}-short
+          name: ${{ env.CHANNEL_NAME }}-long
           path: |
             out/**/*.mp4
             out/*.mp4
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 14
 
       - name: Upload logs & meta
         if: always()
@@ -306,7 +311,7 @@ jobs:
             out/**/*.json
             out/*.json
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
 
       - name: Save global state cache
         if: always()
@@ -315,16 +320,16 @@ jobs:
           path: |
             state_global.json
             state_global_topics.json
-          key: global-state-${{ github.run_id }}
+          key: global-state-long-${{ github.run_id }}
 
       - name: Save channel state cache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: state_${{ env.CHANNEL_NAME }}.json
-          key: chstate-${{ env.CHANNEL_NAME }}-${{ github.run_id }}
+          key: chstate-long-${{ env.CHANNEL_NAME }}-${{ github.run_id }}
 
-      # ---------- POST: .state'i 'state' branch'ine kaydet (worktree-safe) ----------
+      # ---------- POST: .state'i 'state' branch'ine kaydet ----------
       - name: Persist .state to 'state' branch (worktree-safe)
         if: always()
         shell: bash
@@ -348,7 +353,7 @@ jobs:
 
           pushd _state_wt >/dev/null
           git add .state
-          git commit -m "update .state $(date -u +%F_%T) [${CHANNEL_NAME:-matrix}]" || true
+          git commit -m "update .state $(date -u +%F_%T) [${CHANNEL_NAME:-long}]" || true
           git push origin state
           popd >/dev/null
 
