@@ -122,53 +122,43 @@ STRUCTURE (CRITICAL):
 1. HOOK (1-2 sentences): {hook_formula}
 2. INTRODUCTION (3-4 sentences): Set context and overview
 3. MAIN CONTENT (15-25 sentences): Divided into 3-5 logical sections
-   - Each section should flow naturally
-   - Build complexity gradually
-   - Include examples and explanations
 4. CONCLUSION (2-3 sentences): Summary and key takeaway
 5. CTA (1 sentence): {cta}
 
 REQUIREMENTS:
 - Total sentences: {target_sentences} sentences
 - Each sentence: 8-12 words (clear and concise)
-- Natural pacing: mix of short and medium sentences
-- Visual descriptions: every sentence must have clear visual anchor
-- No filler words, no meta-instructions
-- Logical flow: each sentence builds on previous
 - Educational tone: informative but engaging
 
 CHAPTER STRUCTURE:
-Divide content into 5-7 logical chapters (for YouTube timestamps):
-- Introduction
-- 3-5 main topic chapters
-- Conclusion
-
-Return STRICT JSON:
-{{
-  "hook": "...",
-  "script": ["sentence1", "sentence2", ...],
-  "cta": "...",
-  "search_queries": ["query1", "query2", ...],
-  "main_visual_focus": "...",
-  "chapters": [
-    {{
-      "title": "Introduction",
-      "start_sentence": 0,
-      "end_sentence": 4,
-      "description": "Brief chapter description"
-    }}
-  ],
-  "metadata": {{
-    "title": "...",
-    "description": "...",
-    "tags": ["tag1", "tag2", ...]
-  }}
-}}
+Divide content into 5-7 logical chapters for YouTube timestamps
 
 Style: {style}
 Additional context: {additional_context or "None"}
 
-CRITICAL: Return ONLY the JSON object. Do not wrap in markdown code blocks. Do not add any text before or after the JSON."""
+YOU MUST RETURN A COMPLETE, VALID JSON OBJECT. DO NOT TRUNCATE.
+
+Return this EXACT JSON structure (no markdown, no code blocks):
+
+{{
+  "hook": "Your hook sentence",
+  "script": ["sentence 1", "sentence 2", ... exactly {target_sentences} sentences],
+  "cta": "Call to action",
+  "search_queries": ["visual term 1", "term 2", ... 15-25 terms],
+  "main_visual_focus": "Primary visual theme",
+  "chapters": [
+    {{"title": "Introduction", "start_sentence": 0, "end_sentence": 4, "description": "Overview"}},
+    {{"title": "Main Point 1", "start_sentence": 5, "end_sentence": 12, "description": "First section"}},
+    ... 5-7 chapters total
+  ],
+  "metadata": {{
+    "title": "Title (60-70 chars)",
+    "description": "Description (300-500 words)",
+    "tags": ["tag1", "tag2", ... 15-25 tags]
+  }}
+}}
+
+CRITICAL: Return ONLY JSON. No markdown. No truncation. Complete all fields."""
     
     def _call_api(self, prompt: str) -> str:
         """Call Gemini API"""
@@ -178,19 +168,23 @@ CRITICAL: Return ONLY the JSON object. Do not wrap in markdown code blocks. Do n
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.8,
-                    max_output_tokens=4000,  # More tokens for long-form
+                    max_output_tokens=8000,  # ✅ INCREASED for long-form
                 )
             )
             
             # ✅ FIXED: Safely extract text from response
             if hasattr(response, 'text'):
-                return response.text
+                text = response.text
+                logger.debug(f"[Gemini] Response received: {len(text)} chars")
+                return text
             elif hasattr(response, 'candidates') and len(response.candidates) > 0:
                 candidate = response.candidates[0]
                 if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
                     parts = candidate.content.parts
                     if parts and len(parts) > 0:
-                        return parts[0].text
+                        text = parts[0].text
+                        logger.debug(f"[Gemini] Response received: {len(text)} chars")
+                        return text
             
             raise ValueError("Could not extract text from Gemini response")
             
@@ -207,6 +201,10 @@ CRITICAL: Return ONLY the JSON object. Do not wrap in markdown code blocks. Do n
         
         logger.debug(f"[Gemini] Raw response length: {len(raw_response)} chars")
         
+        # Check if response is truncated
+        if len(raw_response) > 3000 and not raw_response.rstrip().endswith('}'):
+            logger.warning("[Gemini] Response appears truncated (doesn't end with '}')")
+        
         # Try multiple extraction methods
         json_str = None
         
@@ -216,12 +214,11 @@ CRITICAL: Return ONLY the JSON object. Do not wrap in markdown code blocks. Do n
             json_str = markdown_match.group(1)
             logger.debug("[Gemini] Extracted JSON from markdown block")
         
-        # Method 2: Find JSON object directly
+        # Method 2: Find COMPLETE JSON object (balanced braces)
         if not json_str:
-            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', raw_response, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(0)
-                logger.debug("[Gemini] Extracted JSON directly")
+            json_str = self._extract_complete_json(raw_response)
+            if json_str:
+                logger.debug("[Gemini] Extracted complete JSON object")
         
         # Method 3: Try parsing entire response as JSON
         if not json_str:
@@ -241,13 +238,15 @@ CRITICAL: Return ONLY the JSON object. Do not wrap in markdown code blocks. Do n
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
             logger.error(f"[Gemini] JSON parse error: {e}")
-            logger.error(f"[Gemini] JSON string: {json_str[:500]}...")
+            logger.error(f"[Gemini] JSON string preview: {json_str[:500]}...")
+            logger.error(f"[Gemini] JSON string ending: ...{json_str[-200:]}")
             raise ValueError(f"Invalid JSON: {e}")
         
         # Validate required fields
         required = ["hook", "script", "cta", "search_queries", "main_visual_focus", "metadata"]
         missing = [key for key in required if key not in data]
         if missing:
+            logger.error(f"[Gemini] Parsed data keys: {list(data.keys())}")
             raise ValueError(f"Missing required keys: {missing}")
         
         # Validate script is a list
@@ -273,6 +272,49 @@ CRITICAL: Return ONLY the JSON object. Do not wrap in markdown code blocks. Do n
             metadata=data["metadata"],
             chapters=data["chapters"]
         )
+    
+    def _extract_complete_json(self, text: str) -> Optional[str]:
+        """Extract a complete JSON object with balanced braces"""
+        # Find the first '{'
+        start = text.find('{')
+        if start == -1:
+            return None
+        
+        # Count braces to find matching '}'
+        brace_count = 0
+        in_string = False
+        escape_next = False
+        
+        for i in range(start, len(text)):
+            char = text[i]
+            
+            # Handle string escaping
+            if escape_next:
+                escape_next = False
+                continue
+            
+            if char == '\\':
+                escape_next = True
+                continue
+            
+            # Track if we're inside a string
+            if char == '"':
+                in_string = not in_string
+                continue
+            
+            # Only count braces outside strings
+            if not in_string:
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    
+                    # Found matching closing brace
+                    if brace_count == 0:
+                        return text[start:i+1]
+        
+        # No complete JSON found
+        return None
     
     def _auto_generate_chapters(self, script: List[str]) -> List[Dict[str, Any]]:
         """Auto-generate chapter structure if not provided"""
