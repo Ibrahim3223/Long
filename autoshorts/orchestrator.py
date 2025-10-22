@@ -224,12 +224,15 @@ class LongFormOrchestrator:
                 # Download video
                 video_path = self._download_video(download_url, video_id, i)
                 
-                # Add captions
+                # ✅ FIXED: Pass correct parameters to render()
                 captioned_path = self.caption_renderer.render(
                     video_path=video_path,
-                    audio_segment=audio_seg,
-                    output_dir=self.temp_dir,
-                    index=i
+                    text=audio_seg['text'],
+                    words=audio_seg.get('word_timings', []),
+                    duration=audio_seg['duration'],
+                    is_hook=(i == 0),
+                    sentence_type=audio_seg.get('type', 'body'),
+                    temp_dir=self.temp_dir
                 )
                 
                 video_segments.append(captioned_path)
