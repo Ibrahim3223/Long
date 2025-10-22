@@ -32,7 +32,7 @@ class LongFormOrchestrator:
             api_key=settings.GEMINI_API_KEY,
             model=settings.GEMINI_MODEL
         )
-        self.tts = TTSHandler(voice=settings.TTS_VOICE)
+        self.tts = TTSHandler()  # Voice is read from settings internally
         self.pexels = PexelsClient(api_key=settings.PEXELS_API_KEY)
         self.caption_renderer = CaptionRenderer()
         self.bgm_manager = BGMManager()
