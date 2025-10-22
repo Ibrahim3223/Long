@@ -145,31 +145,30 @@ Divide content into 5-7 logical chapters (for YouTube timestamps):
 
 Return STRICT JSON:
 {{
-  "hook": "...",  // 1-2 sentences
-  "script": ["sentence1", "sentence2", ...],  // {target_sentences} sentences TOTAL
-  "cta": "...",  // 1 sentence
-  "search_queries": ["query1", "query2", ...],  // 15-25 visual search terms
-  "main_visual_focus": "...",  // Primary visual theme
+  "hook": "...",
+  "script": ["sentence1", "sentence2", ...],
+  "cta": "...",
+  "search_queries": ["query1", "query2", ...],
+  "main_visual_focus": "...",
   "chapters": [
     {{
       "title": "Introduction",
       "start_sentence": 0,
       "end_sentence": 4,
       "description": "Brief chapter description"
-    }},
-    ...
+    }}
   ],
   "metadata": {{
-    "title": "...",  // 60-70 characters
-    "description": "...",  // 300-500 words
-    "tags": ["tag1", "tag2", ...]  // 15-25 tags
+    "title": "...",
+    "description": "...",
+    "tags": ["tag1", "tag2", ...]
   }}
 }}
 
 Style: {style}
 Additional context: {additional_context or "None"}
 
-IMPORTANT: Return ONLY valid JSON. No markdown, no explanations."""
+CRITICAL: Return ONLY the JSON object. Do not wrap in markdown code blocks. Do not add any text before or after the JSON."""
     
     def _call_api(self, prompt: str) -> str:
         """Call Gemini API"""
@@ -182,29 +181,88 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no explanations."""
                     max_output_tokens=4000,  # More tokens for long-form
                 )
             )
-            return response.text
+            
+            # ✅ FIXED: Safely extract text from response
+            if hasattr(response, 'text'):
+                return response.text
+            elif hasattr(response, 'candidates') and len(response.candidates) > 0:
+                candidate = response.candidates[0]
+                if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                    parts = candidate.content.parts
+                    if parts and len(parts) > 0:
+                        return parts[0].text
+            
+            raise ValueError("Could not extract text from Gemini response")
+            
         except Exception as e:
             logger.error(f"[Gemini] API error: {e}")
             raise
     
     def _parse_response(self, raw_response: str, topic: str) -> ContentResponse:
-        """Parse JSON response"""
-        # Extract JSON
-        json_match = re.search(r'\{.*\}', raw_response, re.DOTALL)
-        if not json_match:
-            raise ValueError("No JSON found in response")
+        """Parse JSON response with robust error handling"""
         
-        data = json.loads(json_match.group(0))
+        # ✅ FIXED: Validate input first
+        if not raw_response or not isinstance(raw_response, str):
+            raise ValueError(f"Invalid response type: {type(raw_response)}")
         
-        # Validate
+        logger.debug(f"[Gemini] Raw response length: {len(raw_response)} chars")
+        
+        # Try multiple extraction methods
+        json_str = None
+        
+        # Method 1: Extract from markdown code block
+        markdown_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw_response, re.DOTALL)
+        if markdown_match:
+            json_str = markdown_match.group(1)
+            logger.debug("[Gemini] Extracted JSON from markdown block")
+        
+        # Method 2: Find JSON object directly
+        if not json_str:
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', raw_response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                logger.debug("[Gemini] Extracted JSON directly")
+        
+        # Method 3: Try parsing entire response as JSON
+        if not json_str:
+            try:
+                json.loads(raw_response.strip())
+                json_str = raw_response.strip()
+                logger.debug("[Gemini] Entire response is valid JSON")
+            except json.JSONDecodeError:
+                pass
+        
+        if not json_str:
+            logger.error(f"[Gemini] Response preview: {raw_response[:500]}...")
+            raise ValueError("No valid JSON found in response")
+        
+        # Parse JSON
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            logger.error(f"[Gemini] JSON parse error: {e}")
+            logger.error(f"[Gemini] JSON string: {json_str[:500]}...")
+            raise ValueError(f"Invalid JSON: {e}")
+        
+        # Validate required fields
         required = ["hook", "script", "cta", "search_queries", "main_visual_focus", "metadata"]
-        for key in required:
-            if key not in data:
-                raise ValueError(f"Missing required key: {key}")
+        missing = [key for key in required if key not in data]
+        if missing:
+            raise ValueError(f"Missing required keys: {missing}")
+        
+        # Validate script is a list
+        if not isinstance(data["script"], list):
+            raise ValueError("Script must be a list of sentences")
+        
+        if len(data["script"]) < 15:
+            raise ValueError(f"Script too short: {len(data['script'])} sentences (minimum 15)")
         
         # Chapters (optional, auto-generate if missing)
         if "chapters" not in data or not data["chapters"]:
+            logger.info("[Gemini] Auto-generating chapters...")
             data["chapters"] = self._auto_generate_chapters(data["script"])
+        
+        logger.info(f"[Gemini] Parsed: {len(data['script'])} sentences, {len(data['chapters'])} chapters")
         
         return ContentResponse(
             hook=data["hook"],
