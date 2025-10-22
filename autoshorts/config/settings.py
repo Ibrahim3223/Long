@@ -1,6 +1,6 @@
 """
-Settings module - Centralized configuration
-Loads settings from environment variables with sensible defaults
+Settings module - LONG-FORM VIDEO CONFIGURATION
+Optimized for 3-10 minute landscape videos (16:9)
 """
 
 import os
@@ -59,20 +59,20 @@ def _parse_list(s: str) -> List[str]:
 
 CHANNEL_NAME = os.getenv("CHANNEL_NAME", "DefaultChannel")
 
-# ✅ YENİ: Load channel-specific settings from channels.yml
+# Load channel-specific settings from channels_long.yml
 try:
     from .channel_loader import apply_channel_settings
     _channel_settings = apply_channel_settings(CHANNEL_NAME)
-    CHANNEL_TOPIC = _channel_settings.get("CHANNEL_TOPIC", "Interesting facts and knowledge")
-    CHANNEL_MODE = _channel_settings.get("CHANNEL_MODE", "general")
+    CHANNEL_TOPIC = _channel_settings.get("CHANNEL_TOPIC", "Educational content")
+    CHANNEL_MODE = _channel_settings.get("CHANNEL_MODE", "educational")
     CHANNEL_SEARCH_TERMS = _channel_settings.get("CHANNEL_SEARCH_TERMS", [])
     CHANNEL_LANG_OVERRIDE = _channel_settings.get("CHANNEL_LANG", None)
     CHANNEL_VISIBILITY_OVERRIDE = _channel_settings.get("CHANNEL_VISIBILITY", None)
 except Exception as e:
     import logging
     logging.warning(f"⚠️ Failed to load channel config: {e}")
-    CHANNEL_TOPIC = os.getenv("TOPIC", "Interesting facts and knowledge")
-    CHANNEL_MODE = "general"
+    CHANNEL_TOPIC = os.getenv("TOPIC", "Educational content")
+    CHANNEL_MODE = "educational"
     CHANNEL_SEARCH_TERMS = []
     CHANNEL_LANG_OVERRIDE = None
     CHANNEL_VISIBILITY_OVERRIDE = None
@@ -81,13 +81,12 @@ except Exception as e:
 if os.getenv("TOPIC"):
     CHANNEL_TOPIC = os.getenv("TOPIC")
 
-CONTENT_STYLE = os.getenv("CONTENT_STYLE", "Educational and engaging")
+CONTENT_STYLE = os.getenv("CONTENT_STYLE", "In-depth educational and engaging")
 
 # ============================================================
 # API KEYS (from environment)
 # ============================================================
 
-# ✅ DÜZELTME: Empty string yerine None - validation'ı orchestrator'a bırakıyoruz
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or ""
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY") or ""
 PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY") or ""
@@ -101,129 +100,154 @@ YT_REFRESH_TOKEN = os.getenv("YT_REFRESH_TOKEN") or ""
 # GEMINI SETTINGS
 # ============================================================
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "flash")  # Default: gemini-2.5-flash (via mapping)
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "flash")
 USE_GEMINI = _env_bool("USE_GEMINI", True)
 ADDITIONAL_PROMPT_CONTEXT = os.getenv("ADDITIONAL_PROMPT_CONTEXT", "")
 
 # ============================================================
-# VIDEO SETTINGS
+# VIDEO SETTINGS - LONG-FORM LANDSCAPE (16:9)
 # ============================================================
 
-TARGET_DURATION = _env_int("TARGET_DURATION", 30)  # seconds
-TARGET_MIN_SEC = _env_float("TARGET_MIN_SEC", 25.0)
-TARGET_MAX_SEC = _env_float("TARGET_MAX_SEC", 35.0)
+# Duration: 3-10 minutes
+TARGET_DURATION = _env_int("TARGET_DURATION", 240)  # 4 minutes default
+TARGET_MIN_SEC = _env_float("TARGET_MIN_SEC", 180.0)  # 3 minutes minimum
+TARGET_MAX_SEC = _env_float("TARGET_MAX_SEC", 600.0)  # 10 minutes maximum
 
-VIDEO_WIDTH = 1080
-VIDEO_HEIGHT = 1920
+# Resolution: 16:9 LANDSCAPE (1920x1080 Full HD)
+VIDEO_WIDTH = _env_int("VIDEO_WIDTH", 1920)
+VIDEO_HEIGHT = _env_int("VIDEO_HEIGHT", 1080)
+ASPECT_RATIO = "16:9"
+
 TARGET_FPS = _env_int("TARGET_FPS", 30)
-CRF_VISUAL = _env_int("CRF_VISUAL", 20)
+CRF_VISUAL = _env_int("CRF_VISUAL", 18)  # Higher quality for longer videos
 
-# Video motion effects
-VIDEO_MOTION = _env_bool("VIDEO_MOTION", True)  # Enable Ken Burns and motion effects
-MOTION_INTENSITY = _env_float("MOTION_INTENSITY", 1.18)  # Zoom intensity for Ken Burns (1.0 = no zoom, 1.2 = 20% zoom)
+# Video motion effects (more subtle for long content)
+VIDEO_MOTION = _env_bool("VIDEO_MOTION", True)
+MOTION_INTENSITY = _env_float("MOTION_INTENSITY", 1.08)  # Subtle zoom (8% max)
+
+# Scene timing (longer scenes for long-form)
+SCENE_MIN_DURATION = _env_float("SCENE_MIN_DURATION", 8.0)  # Shorts: 5.0
+SCENE_MAX_DURATION = _env_float("SCENE_MAX_DURATION", 15.0)  # Shorts: 10.0
 
 # ============================================================
-# TTS SETTINGS
+# TTS SETTINGS - NATURAL PACING FOR LONG-FORM
 # ============================================================
 
 TTS_VOICE = os.getenv("TTS_VOICE", "en-US-GuyNeural")
-VOICE = TTS_VOICE  # Alias for backward compatibility
-TTS_RATE = os.getenv("TTS_RATE", "+0%")
+VOICE = TTS_VOICE
+TTS_RATE = os.getenv("TTS_RATE", "+5%")  # Slower, more natural (Shorts: +12%)
 TTS_PITCH = os.getenv("TTS_PITCH", "+0Hz")
 TTS_STYLE = os.getenv("TTS_STYLE", "narration-professional")
 
 # ============================================================
-# PEXELS/PIXABAY SETTINGS
+# PEXELS/PIXABAY SETTINGS - MORE REUSE ALLOWED
 # ============================================================
 
-PEXELS_PER_PAGE = _env_int("PEXELS_PER_PAGE", 40)
-PEXELS_MAX_USES_PER_CLIP = _env_int("PEXELS_MAX_USES_PER_CLIP", 1)
-PEXELS_ALLOW_REUSE = _env_bool("PEXELS_ALLOW_REUSE", False)
-PEXELS_ALLOW_LANDSCAPE = _env_bool("PEXELS_ALLOW_LANDSCAPE", False)
-PEXELS_MIN_DURATION = _env_int("PEXELS_MIN_DURATION", 4)
-PEXELS_MAX_DURATION = _env_int("PEXELS_MAX_DURATION", 12)
-PEXELS_MIN_HEIGHT = _env_int("PEXELS_MIN_HEIGHT", 1440)
-PEXELS_STRICT_VERTICAL = _env_bool("PEXELS_STRICT_VERTICAL", True)
+PEXELS_PER_PAGE = _env_int("PEXELS_PER_PAGE", 80)
+PEXELS_MAX_USES_PER_CLIP = _env_int("PEXELS_MAX_USES_PER_CLIP", 2)  # Allow reuse
+PEXELS_ALLOW_REUSE = _env_bool("PEXELS_ALLOW_REUSE", True)  # CRITICAL for 20+ clips
+PEXELS_ALLOW_LANDSCAPE = _env_bool("PEXELS_ALLOW_LANDSCAPE", True)  # 16:9 videos
+PEXELS_MIN_DURATION = _env_int("PEXELS_MIN_DURATION", 6)
+PEXELS_MAX_DURATION = _env_int("PEXELS_MAX_DURATION", 20)
+PEXELS_MIN_HEIGHT = _env_int("PEXELS_MIN_HEIGHT", 720)  # Lower requirement
+PEXELS_STRICT_VERTICAL = _env_bool("PEXELS_STRICT_VERTICAL", False)  # Allow landscape
+PEXELS_MAX_PAGES = _env_int("PEXELS_MAX_PAGES", 15)  # More search depth
 
 ALLOW_PIXABAY_FALLBACK = _env_bool("ALLOW_PIXABAY_FALLBACK", True)
 
-# Entity filtering for video search
+# Entity filtering (less strict for educational content)
 STRICT_ENTITY_FILTER = _env_bool("STRICT_ENTITY_FILTER", False)
 
 # ============================================================
-# CAPTION SETTINGS
+# CAPTION SETTINGS - BOTTOM POSITIONED FOR LANDSCAPE
 # ============================================================
 
-KARAOKE_CAPTIONS = _env_bool("KARAOKE_CAPTIONS", True)  # Enable karaoke-style animated captions
-KARAOKE_EFFECTS = _env_bool("KARAOKE_EFFECTS", True)  # Enable shake/blur effects
-EFFECT_STYLE = os.getenv("EFFECT_STYLE", "moderate")  # dynamic, moderate, subtle
+KARAOKE_CAPTIONS = _env_bool("KARAOKE_CAPTIONS", True)
+KARAOKE_EFFECTS = _env_bool("KARAOKE_EFFECTS", True)
+EFFECT_STYLE = os.getenv("EFFECT_STYLE", "subtle")  # More subtle for long-form
 
 CAPTION_FONT = os.getenv("CAPTION_FONT", "Arial")
-CAPTION_FONT_SIZE = _env_int("CAPTION_FONT_SIZE", 70)
-CAPTION_MAX_LINE = _env_int("CAPTION_MAX_LINE", 26)
-CAPTION_MAX_LINES = _env_int("CAPTION_MAX_LINES", 5)
-CAPTION_POSITION = os.getenv("CAPTION_POSITION", "center")  # top, center, bottom
+CAPTION_FONT_SIZE = _env_int("CAPTION_FONT_SIZE", 48)  # Smaller for landscape
+CAPTION_MAX_LINE = _env_int("CAPTION_MAX_LINE", 40)  # More characters per line
+CAPTION_MAX_LINES = _env_int("CAPTION_MAX_LINES", 2)  # Max 2 lines at bottom
+CAPTION_POSITION = os.getenv("CAPTION_POSITION", "bottom")  # BOTTOM for landscape
 
-# Karaoke effect colors
-CAPTION_PRIMARY_COLOR = os.getenv("CAPTION_PRIMARY_COLOR", "&H00FFFFFF")  # White
-CAPTION_OUTLINE_COLOR = os.getenv("CAPTION_OUTLINE_COLOR", "&H00000000")  # Black
-CAPTION_HIGHLIGHT_COLOR = os.getenv("CAPTION_HIGHLIGHT_COLOR", "&H0000FFFF")  # Yellow
+# Karaoke colors (same as shorts)
+CAPTION_PRIMARY_COLOR = os.getenv("CAPTION_PRIMARY_COLOR", "&H00FFFFFF")
+CAPTION_OUTLINE_COLOR = os.getenv("CAPTION_OUTLINE_COLOR", "&H00000000")
+CAPTION_HIGHLIGHT_COLOR = os.getenv("CAPTION_HIGHLIGHT_COLOR", "&H0000FFFF")
 
-# Karaoke ASS colors (for karaoke_ass.py)
-KARAOKE_INACTIVE = os.getenv("KARAOKE_INACTIVE", "#FFFFFF")  # White (inactive text)
-KARAOKE_ACTIVE = os.getenv("KARAOKE_ACTIVE", "#00FFFF")  # Yellow (active/highlighted text)
-KARAOKE_OUTLINE = os.getenv("KARAOKE_OUTLINE", "#000000")  # Black (outline)
+KARAOKE_INACTIVE = os.getenv("KARAOKE_INACTIVE", "#FFFFFF")
+KARAOKE_ACTIVE = os.getenv("KARAOKE_ACTIVE", "#00FFFF")
+KARAOKE_OUTLINE = os.getenv("KARAOKE_OUTLINE", "#000000")
+
+# Bottom margin for landscape captions
+CAPTION_MARGIN_V = _env_int("CAPTION_MARGIN_V", 100)  # 100px from bottom
 
 # ============================================================
 # BGM SETTINGS
 # ============================================================
 
 BGM_ENABLE = _env_bool("BGM_ENABLE", True)
-BGM_VOLUME_DB = _env_float("BGM_DB", -26.0)
-BGM_DUCK_DB = _env_float("BGM_DUCK_DB", -12.0)
-BGM_FADE_DURATION = _env_float("BGM_FADE", 0.8)
+BGM_VOLUME_DB = _env_float("BGM_DB", -28.0)  # Slightly quieter for long-form
+BGM_DUCK_DB = _env_float("BGM_DUCK_DB", -14.0)
+BGM_FADE_DURATION = _env_float("BGM_FADE", 1.5)  # Longer fades
 BGM_DIR = os.getenv("BGM_DIR", "bgm")
 BGM_URLS = _parse_list(os.getenv("BGM_URLS", ""))
 
-# Detailed BGM mixing parameters
-BGM_GAIN_DB = _env_float("BGM_GAIN_DB", -26.0)
+# Detailed BGM mixing
+BGM_GAIN_DB = _env_float("BGM_GAIN_DB", -28.0)
 BGM_DUCK_THRESH = _env_float("BGM_DUCK_THRESH", 0.09)
 BGM_DUCK_RATIO = _env_float("BGM_DUCK_RATIO", 4.0)
 BGM_DUCK_ATTACK_MS = _env_float("BGM_DUCK_ATTACK_MS", 20.0)
-BGM_DUCK_RELEASE_MS = _env_float("BGM_DUCK_RELEASE_MS", 250.0)
-BGM_FADE = _env_float("BGM_FADE", 0.8)  # Fade duration in seconds
+BGM_DUCK_RELEASE_MS = _env_float("BGM_DUCK_RELEASE_MS", 300.0)
+BGM_FADE = _env_float("BGM_FADE", 1.5)
 
 # ============================================================
 # STATE MANAGEMENT
 # ============================================================
 
 STATE_DIR = os.getenv("STATE_DIR", "state")
-ENTITY_COOLDOWN_DAYS = _env_int("ENTITY_COOLDOWN_DAYS", 30)
+ENTITY_COOLDOWN_DAYS = _env_int("ENTITY_COOLDOWN_DAYS", 45)  # Longer cooldown
 
-# Novelty settings
+# Novelty settings (less strict for educational long-form)
 NOVELTY_ENFORCE = _env_bool("NOVELTY_ENFORCE", True)
-NOVELTY_WINDOW = _env_int("NOVELTY_WINDOW", 50)
-NOVELTY_JACCARD_MAX = _env_float("NOVELTY_JACCARD_MAX", 0.48)
-NOVELTY_RETRIES = _env_int("NOVELTY_RETRIES", 6)
+NOVELTY_WINDOW = _env_int("NOVELTY_WINDOW", 30)  # Last 30 videos
+NOVELTY_JACCARD_MAX = _env_float("NOVELTY_JACCARD_MAX", 0.60)  # More lenient
+NOVELTY_RETRIES = _env_int("NOVELTY_RETRIES", 5)
 
 # ============================================================
 # QUALITY SETTINGS
 # ============================================================
 
-# Note: Lower threshold for more content acceptance
-# Quality scores range from 0-10, where:
-# - 5.0+ = Good quality
-# - 6.5+ = High quality  
-# - 8.0+ = Excellent quality
-MIN_QUALITY_SCORE = _env_float("MIN_QUALITY_SCORE", 5.0)
-MAX_GENERATION_ATTEMPTS = _env_int("MAX_GENERATION_ATTEMPTS", 4)
+# Higher quality threshold for long-form content
+MIN_QUALITY_SCORE = _env_float("MIN_QUALITY_SCORE", 6.5)  # Shorts: 5.0
+MAX_GENERATION_ATTEMPTS = _env_int("MAX_GENERATION_ATTEMPTS", 5)
 
 # ============================================================
-# UPLOAD SETTINGS
+# UPLOAD SETTINGS - NORMAL VIDEO (NOT SHORTS)
 # ============================================================
 
 UPLOAD_TO_YT = _env_bool("UPLOAD_TO_YT", True)
-VISIBILITY = os.getenv("VISIBILITY", "public")  # public, unlisted, private
+VISIBILITY = os.getenv("VISIBILITY", "public")
+UPLOAD_AS_SHORTS = _env_bool("UPLOAD_AS_SHORTS", False)  # FALSE for long-form!
+
+# Chapter support
+ENABLE_CHAPTERS = _env_bool("ENABLE_CHAPTERS", True)  # Auto-generate chapters
+MIN_CHAPTER_DURATION = _env_int("MIN_CHAPTER_DURATION", 30)  # 30 seconds min
+
+# ============================================================
+# CONTENT STRUCTURE - LONG-FORM SPECIFIC
+# ============================================================
+
+# Sentence count: 20-35 sentences for 3-10 minutes
+MIN_SENTENCES = _env_int("MIN_SENTENCES", 20)
+MAX_SENTENCES = _env_int("MAX_SENTENCES", 35)
+TARGET_SENTENCES = _env_int("TARGET_SENTENCES", 25)
+
+# Chapter structure (auto-generated from content)
+CHAPTERS_ENABLED = _env_bool("CHAPTERS_ENABLED", True)
+MIN_CHAPTER_SENTENCES = _env_int("MIN_CHAPTER_SENTENCES", 4)  # 4+ sentences per chapter
 
 # ============================================================
 # LANGUAGE SETTINGS
@@ -246,9 +270,6 @@ if BGM_ENABLE and BGM_DIR:
 
 
 # ============================================================
-# VALIDATION - REMOVED! 
-# Validation now happens in orchestrator.py where it's actually used
-# This prevents circular import issues and gives better error messages
+# SYSTEM TYPE MARKER
 # ============================================================
-
-# No auto-validation on import - let orchestrator handle it
+VIDEO_SYSTEM_TYPE = "LONG_FORM"  # vs "SHORTS"
