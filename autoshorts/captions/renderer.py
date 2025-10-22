@@ -1,98 +1,33 @@
 # -*- coding: utf-8 -*-
 """
-Caption rendering - BULLETPROOF SYNC
-✅ FIXED: Audio stream preserved during caption rendering
+Caption rendering - ULTIMATE VERSION
+✅ GUARANTEED captions even without forced aligner
+✅ Audio stream preserved
 """
 import os
 import pathlib
 import logging
+import re
 from typing import List, Tuple, Optional, Dict, Any
 
 from autoshorts.config import settings
 from autoshorts.utils.ffmpeg_utils import run, has_subtitles, ffprobe_duration
-from autoshorts.captions.karaoke_ass import CAPTION_STYLES, get_random_style, EMPHASIS_KEYWORDS
 
 logger = logging.getLogger(__name__)
 
 
 class CaptionRenderer:
-    """Render captions with BULLETPROOF sync (no drift)."""
+    """Render captions with BULLETPROOF sync."""
     
-    # Caption parameters
     WORDS_PER_CHUNK = 3
     MIN_WORD_DURATION = 0.08
     TIMING_PRECISION = 0.001
-    FADE_DURATION = 0.0  # NO FADE - critical for sync!
+    FADE_DURATION = 0.0
     
     def __init__(self, caption_offset: Optional[float] = None):
         """Initialize caption renderer."""
-        # Get language from settings
         self.language = getattr(settings, 'LANG', 'en').lower()
-        logger.info(f"      🎯 Caption renderer: stable-ts ({self.language.upper()}) - WORD-LEVEL precision")
-    
-    def render_captions(
-        self,
-        video_segments: List[str],
-        audio_segments: List[Dict[str, Any]],
-        output_dir: str
-    ) -> List[str]:
-        """Render captions with BULLETPROOF sync."""
-        from autoshorts.captions.forced_aligner import align_text_to_audio
-        
-        captioned_segments = []
-        
-        for i, (video_path, audio_segment) in enumerate(zip(video_segments, audio_segments)):
-            try:
-                text = audio_segment["text"]
-                tts_word_timings = audio_segment.get("word_timings", [])
-                duration = audio_segment.get("duration", 0)
-                audio_path = audio_segment.get("audio_path")
-                sentence_type = audio_segment.get("type", "buildup")
-                is_hook = (i == 0 or sentence_type == "hook")
-                
-                logger.info(f"      Rendering caption {i+1}/{len(video_segments)}: {text[:50]}...")
-                
-                # Get word timings (with language!)
-                if audio_path and os.path.exists(audio_path):
-                    words = align_text_to_audio(
-                        text=text,
-                        audio_path=audio_path,
-                        tts_word_timings=tts_word_timings,
-                        total_duration=duration,
-                        language=self.language
-                    )
-                    logger.info(f"      ✅ Aligned: {len(words)} words with precise sync ({self.language.upper()})")
-                else:
-                    words = self._smart_fallback_timings(text, duration)
-                
-                # CRITICAL: AGGRESSIVE VALIDATION
-                words = self._aggressive_validate(words, duration)
-                
-                captioned_path = self.render(
-                    video_path=video_path,
-                    text=text,
-                    words=words,
-                    duration=duration,
-                    is_hook=is_hook,
-                    sentence_type=sentence_type,
-                    temp_dir=output_dir
-                )
-                
-                if captioned_path and os.path.exists(captioned_path):
-                    captioned_segments.append(captioned_path)
-                    logger.info(f"      ✅ Caption {i+1} rendered successfully")
-                else:
-                    logger.warning(f"      ⚠️ Using uncaptioned video for segment {i+1}")
-                    captioned_segments.append(video_path)
-                    
-            except Exception as e:
-                logger.error(f"      ❌ Error rendering caption {i+1}: {e}")
-                import traceback
-                logger.debug(traceback.format_exc())
-                captioned_segments.append(video_path)
-        
-        logger.info(f"      ✅ Rendered {len(captioned_segments)} segments")
-        return captioned_segments
+        logger.info(f"      🎯 Caption renderer initialized ({self.language.upper()})")
     
     def render(
         self,
@@ -104,146 +39,103 @@ class CaptionRenderer:
         sentence_type: str = "buildup",
         temp_dir: str = None
     ) -> str:
-        """Render captions with EXACT timing - AUDIO PRESERVED"""
+        """Render captions with GUARANTEED output"""
         try:
             if duration <= 0:
                 duration = ffprobe_duration(video_path)
             
+            # ✅ Generate word timings if missing
+            if not words:
+                logger.info(f"         No word timings, generating fallback...")
+                words = self._generate_fallback_timings(text, duration)
+            
+            # ✅ Validate and fix timings
+            words = self._aggressive_validate(words, duration)
+            
+            if not words:
+                logger.warning(f"         No valid words, skipping captions")
+                return video_path
+            
             frames = max(2, int(round(duration * settings.TARGET_FPS)))
             output = video_path.replace(".mp4", "_caption.mp4")
             
-            if settings.KARAOKE_CAPTIONS and has_subtitles():
-                ass_path = video_path.replace(".mp4", ".ass")
-                
-                try:
-                    self._write_exact_ass(words, duration, sentence_type, ass_path)
-                except Exception as e:
-                    logger.error(f"      ❌ ASS generation failed: {e}")
-                    return video_path
-                
-                if not os.path.exists(ass_path):
-                    logger.error(f"      ❌ ASS file not created")
-                    return video_path
-                
-                tmp_out = output.replace(".mp4", ".tmp.mp4")
-                
-                try:
-                    # ✅ CRITICAL FIX: Preserve audio with -c:a copy
-                    run([
-                        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                        "-i", video_path,
-                        "-vf", f"subtitles='{ass_path}':force_style='Kerning=1',setsar=1,fps={settings.TARGET_FPS}",
-                        "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
-                        "-c:a", "copy",  # ✅ FIX: Keep audio stream!
-                        "-c:v", "libx264", "-preset", "medium",
-                        "-crf", str(max(16, settings.CRF_VISUAL - 3)),
-                        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-                        tmp_out
-                    ])
-                    
-                    if not os.path.exists(tmp_out):
-                        logger.error(f"      ❌ FFmpeg subtitle burn failed")
-                        return video_path
-                    
-                    # ✅ CRITICAL FIX: Preserve audio in final output too
-                    run([
-                        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                        "-i", tmp_out,
-                        "-vf", f"setsar=1,fps={settings.TARGET_FPS},trim=start_frame=0:end_frame={frames}",
-                        "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
-                        "-c:a", "copy",  # ✅ FIX: Keep audio stream!
-                        "-c:v", "libx264", "-preset", "medium",
-                        "-crf", str(settings.CRF_VISUAL),
-                        "-pix_fmt", "yuv420p",
-                        output
-                    ])
-                    
-                    if not os.path.exists(output):
-                        logger.error(f"      ❌ FFmpeg final output failed")
-                        return video_path
-                    
-                finally:
-                    pathlib.Path(ass_path).unlink(missing_ok=True)
-                    pathlib.Path(tmp_out).unlink(missing_ok=True)
-                
-                return output
-            else:
+            # ✅ Check if captions are enabled
+            if not settings.KARAOKE_CAPTIONS:
+                logger.info(f"         Captions disabled in settings")
                 return video_path
+            
+            # ✅ Generate ASS file
+            ass_path = video_path.replace(".mp4", ".ass")
+            
+            try:
+                self._write_exact_ass(words, duration, sentence_type, ass_path)
+            except Exception as e:
+                logger.error(f"         ❌ ASS generation failed: {e}")
+                return video_path
+            
+            if not os.path.exists(ass_path):
+                logger.error(f"         ❌ ASS file not created")
+                return video_path
+            
+            logger.info(f"         ✅ ASS file created: {os.path.getsize(ass_path)} bytes")
+            
+            # ✅ Burn subtitles with audio preservation
+            tmp_out = output.replace(".mp4", ".tmp.mp4")
+            
+            try:
+                # First pass: burn subtitles
+                run([
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-i", video_path,
+                    "-vf", f"subtitles='{ass_path}':force_style='Kerning=1',setsar=1,fps={settings.TARGET_FPS}",
+                    "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
+                    "-c:a", "copy",  # ✅ PRESERVE AUDIO
+                    "-c:v", "libx264", "-preset", "medium",
+                    "-crf", str(max(16, settings.CRF_VISUAL - 3)),
+                    "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                    tmp_out
+                ])
+                
+                if not os.path.exists(tmp_out):
+                    logger.error(f"         ❌ Subtitle burn failed")
+                    return video_path
+                
+                # Second pass: trim to exact duration
+                run([
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-i", tmp_out,
+                    "-vf", f"setsar=1,fps={settings.TARGET_FPS},trim=start_frame=0:end_frame={frames}",
+                    "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
+                    "-c:a", "copy",  # ✅ PRESERVE AUDIO
+                    "-c:v", "libx264", "-preset", "medium",
+                    "-crf", str(settings.CRF_VISUAL),
+                    "-pix_fmt", "yuv420p",
+                    output
+                ])
+                
+                if not os.path.exists(output):
+                    logger.error(f"         ❌ Final output failed")
+                    return video_path
+                
+            finally:
+                pathlib.Path(ass_path).unlink(missing_ok=True)
+                pathlib.Path(tmp_out).unlink(missing_ok=True)
+            
+            logger.info(f"         ✅ Captions rendered successfully")
+            return output
                 
         except Exception as e:
-            logger.error(f"      ❌ Error in render(): {e}")
+            logger.error(f"         ❌ Caption error: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return video_path
     
-    # ========================================================================
-    # AGGRESSIVE VALIDATION - Prevents ALL drift
-    # ========================================================================
-    
-    def _aggressive_validate(
-        self,
-        word_timings: List[Tuple[str, float]],
-        total_duration: float
-    ) -> List[Tuple[str, float]]:
-        """
-        AGGRESSIVE validation to prevent segment-internal drift.
-        
-        This is the CRITICAL fix that prevents sync issues.
-        """
-        if not word_timings:
-            return []
-        
-        # Clean
-        word_timings = [(w.strip(), d) for w, d in word_timings if w.strip()]
-        if not word_timings:
-            return []
-        
-        # Enforce min/max bounds
-        fixed = []
-        for word, dur in word_timings:
-            # Clamp duration
-            dur = max(self.MIN_WORD_DURATION, min(dur, 5.0))
-            fixed.append((word, dur))
-        
-        if not fixed:
-            return []
-        
-        # Calculate total
-        current_total = sum(d for _, d in fixed)
-        
-        # AGGRESSIVE CORRECTION - Force EXACT match
-        if abs(current_total - total_duration) > 0.001:
-            # Scale all durations proportionally
-            scale_factor = total_duration / current_total if current_total > 0 else 1.0
-            
-            fixed = [
-                (w, max(self.MIN_WORD_DURATION, round(d * scale_factor, 3)))
-                for w, d in fixed
-            ]
-            
-            # Fine-tune last word for precision
-            new_total = sum(d for _, d in fixed)
-            diff = total_duration - new_total
-            
-            if abs(diff) > 0.001 and fixed:
-                last_word, last_dur = fixed[-1]
-                fixed[-1] = (last_word, max(self.MIN_WORD_DURATION, last_dur + diff))
-        
-        # Final validation
-        final_total = sum(d for _, d in fixed)
-        diff_ms = abs(final_total - total_duration) * 1000
-        
-        if diff_ms > 1.0:
-            logger.warning(f"      ⚠️ Word timing drift: {diff_ms:.1f}ms")
-        
-        return fixed
-    
-    def _smart_fallback_timings(
+    def _generate_fallback_timings(
         self,
         text: str,
         duration: float
     ) -> List[Tuple[str, float]]:
-        """Generate smart fallback timings."""
-        import re
-        
+        """Generate fallback word timings"""
         words = [w for w in re.split(r'\s+', text.strip()) if w]
         
         if not words:
@@ -251,10 +143,9 @@ class CaptionRenderer:
         
         # Equal distribution
         per_word = max(self.MIN_WORD_DURATION, duration / len(words))
-        
         timings = [(w, per_word) for w in words]
         
-        # Adjust last word for exact duration
+        # Adjust last word for exact match
         if timings:
             current_sum = sum(d for _, d in timings)
             diff = duration - current_sum
@@ -265,9 +156,50 @@ class CaptionRenderer:
         
         return timings
     
-    # ========================================================================
-    # ASS GENERATION - Frame-perfect timing
-    # ========================================================================
+    def _aggressive_validate(
+        self,
+        word_timings: List[Tuple[str, float]],
+        total_duration: float
+    ) -> List[Tuple[str, float]]:
+        """AGGRESSIVE validation"""
+        if not word_timings:
+            return []
+        
+        # Clean
+        word_timings = [(w.strip(), d) for w, d in word_timings if w.strip()]
+        if not word_timings:
+            return []
+        
+        # Enforce bounds
+        fixed = []
+        for word, dur in word_timings:
+            dur = max(self.MIN_WORD_DURATION, min(dur, 5.0))
+            fixed.append((word, dur))
+        
+        if not fixed:
+            return []
+        
+        # Calculate total
+        current_total = sum(d for _, d in fixed)
+        
+        # Force EXACT match
+        if abs(current_total - total_duration) > 0.001:
+            scale_factor = total_duration / current_total if current_total > 0 else 1.0
+            
+            fixed = [
+                (w, max(self.MIN_WORD_DURATION, round(d * scale_factor, 3)))
+                for w, d in fixed
+            ]
+            
+            # Fine-tune last word
+            new_total = sum(d for _, d in fixed)
+            diff = total_duration - new_total
+            
+            if abs(diff) > 0.001 and fixed:
+                last_word, last_dur = fixed[-1]
+                fixed[-1] = (last_word, max(self.MIN_WORD_DURATION, last_dur + diff))
+        
+        return fixed
     
     def _write_exact_ass(
         self,
@@ -276,27 +208,22 @@ class CaptionRenderer:
         sentence_type: str,
         output_path: str
     ):
-        """Write ASS file with EXACT frame-aligned timing."""
+        """Write ASS file with frame-perfect timing"""
         
-        # Determine styling
         is_hook = (sentence_type == "hook")
         
-        # Select style
-        import random
-        style = get_random_style(is_hook)
-        
-        # ASS header
+        # ASS header with simple styling
         ass = f"""[Script Info]
 Title: Caption
 ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
+PlayResX: 1920
+PlayResY: 1080
 WrapStyle: 0
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style['fontname']},{style['fontsize']},{style['primary_color']},{style['secondary_color']},{style['outline_color']},&H00000000,-1,0,0,0,100,100,1,0,1,{style['outline']},{style['shadow']},2,50,50,{style['margin_v']},1
+Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,50,50,80,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -304,65 +231,39 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         
         max_words = 2 if is_hook else self.WORDS_PER_CHUNK
         chunks = self._create_chunks(words, max_words)
-        
-        # CRITICAL: CHUNK-LEVEL VALIDATION (prevents intra-segment drift!)
         chunks = self._validate_chunks(chunks, total_duration)
         
-        # CRITICAL: Exact cumulative timing with CHUNK-LEVEL validation
         cumulative_time = 0.0
         
         for chunk_idx, chunk in enumerate(chunks):
             chunk_text = " ".join(w.upper() for w, _ in chunk)
-            
-            # Calculate exact chunk duration from word timings
             chunk_duration = sum(d for _, d in chunk)
             
-            # EXACT start/end
             start = cumulative_time
             end = start + chunk_duration
             
-            # Don't exceed total (safety check)
-            if end > total_duration + 0.001:  # Allow 1ms tolerance
+            if end > total_duration + 0.001:
                 end = total_duration
                 if start >= end:
                     break
             
-            # CRITICAL: Frame-align timing for PERFECT FFmpeg sync!
+            # Frame alignment
             frame_duration = 1.0 / settings.TARGET_FPS
             start_frame = round(start / frame_duration)
             end_frame = round(end / frame_duration)
             
-            # Convert back to seconds (frame-aligned)
             start_aligned = start_frame * frame_duration
             end_aligned = end_frame * frame_duration
             
-            # Convert to ASS time strings
             start_str = self._ass_time(start_aligned)
             end_str = self._ass_time(end_aligned)
             
-            # CRITICAL: Calculate ACTUAL ASS duration after centisecond + frame rounding
             ass_start = self._ass_to_seconds(start_str)
             ass_end = self._ass_to_seconds(end_str)
             
-            # Log frame alignment if significant
-            frame_shift_ms = abs(start - start_aligned) * 1000
-            if frame_shift_ms > 5.0:
-                logger.info(f"      🎬 Chunk {chunk_idx+1} frame-aligned: {frame_shift_ms:.1f}ms shift")
+            ass += f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{chunk_text}\n"
             
-            # NO EFFECTS for perfect sync!
-            effect_tags = ""
-            
-            ass += f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{effect_tags}{chunk_text}\n"
-            
-            # Update cumulative - use ACTUAL ASS end time (frame-aligned!)
             cumulative_time = ass_end
-        
-        # Validation - cumulative_time now reflects ACTUAL frame-aligned ASS timing
-        diff_ms = abs(cumulative_time - total_duration) * 1000
-        if diff_ms > 10:
-            logger.warning(f"      ⚠️ Final drift: {diff_ms:.1f}ms (frame-aligned)")
-        else:
-            logger.info(f"      ✅ Frame-perfect sync: {cumulative_time:.3f}s (drift: {diff_ms:.1f}ms)")
         
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(ass)
@@ -372,7 +273,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         words: List[Tuple[str, float]],
         max_words: int
     ) -> List[List[Tuple[str, float]]]:
-        """Create natural chunks."""
+        """Create natural chunks"""
         chunks = []
         current = []
         
@@ -402,44 +303,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         chunks: List[List[Tuple[str, float]]],
         total_duration: float
     ) -> List[List[Tuple[str, float]]]:
-        """
-        CRITICAL: Validate each chunk to prevent intra-segment drift.
-        
-        This ensures exact timing within each segment by adjusting
-        chunk durations to match the total duration exactly.
-        """
+        """Validate chunk durations"""
         if not chunks:
             return chunks
         
-        # Calculate current total
         current_total = sum(sum(d for _, d in chunk) for chunk in chunks)
-        
-        # ALWAYS validate chunks for logging, even if close
         validated_chunks = []
         remaining_duration = total_duration
         
         for i, chunk in enumerate(chunks):
             is_last = (i == len(chunks) - 1)
-            
             chunk_dur = sum(d for _, d in chunk)
             
             if is_last:
-                # Last chunk gets exactly remaining duration
                 target_dur = remaining_duration
             else:
-                # Scale proportionally based on current chunk weight
                 weight = chunk_dur / current_total if current_total > 0 else 1.0 / len(chunks)
                 target_dur = total_duration * weight
             
-            # Adjust chunk words to exact target duration
             if abs(chunk_dur - target_dur) > 0.001:
                 scale = target_dur / chunk_dur if chunk_dur > 0 else 1.0
                 chunk = [(w, max(self.MIN_WORD_DURATION, round(d * scale, 3))) for w, d in chunk]
-                actual_dur = sum(d for _, d in chunk)
-                
-                logger.info(f"      📏 Chunk {i+1}/{len(chunks)}: {actual_dur:.3f}s (target: {target_dur:.3f}s)")
-            else:
-                logger.info(f"      📏 Chunk {i+1}/{len(chunks)}: {chunk_dur:.3f}s (perfect)")
             
             validated_chunks.append(chunk)
             remaining_duration -= sum(d for _, d in chunk)
@@ -447,15 +331,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         return validated_chunks
     
     def _ass_time(self, seconds: float) -> str:
-        """
-        Format seconds to ASS time with MAXIMUM precision.
-        
-        Uses millisecond-level calculations to minimize rounding errors.
-        """
-        # Work in milliseconds for precision
+        """Format seconds to ASS time"""
         total_ms = int(round(seconds * 1000))
-        
-        # Convert to centiseconds (ASS format requirement)
         cs = total_ms // 10
         
         h = cs // 360000
@@ -468,13 +345,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
     
     def _ass_to_seconds(self, ass_time: str) -> float:
-        """
-        Convert ASS time string back to seconds.
-        
-        CRITICAL: This gives us the ACTUAL timing after centisecond rounding,
-        allowing us to track cumulative time without drift.
-        """
-        # Parse "h:mm:ss.cc" format
+        """Convert ASS time to seconds"""
         parts = ass_time.split(':')
         h = int(parts[0])
         m = int(parts[1])
@@ -482,7 +353,4 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         s = int(s_and_cs[0])
         cs = int(s_and_cs[1]) if len(s_and_cs) > 1 else 0
         
-        # Convert to seconds (centisecond precision)
-        total_seconds = h * 3600 + m * 60 + s + cs * 0.01
-        
-        return total_seconds
+        return h * 3600 + m * 60 + s + cs * 0.01
