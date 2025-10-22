@@ -1,7 +1,10 @@
 """
 Orchestrator - LONG-FORM VIDEO PIPELINE (4-7 minutes)
-Handles 40-70 sentence content with chapter support
-✅ FIXED: Video looping, captions enabled, proper duration
+✅ ULTIMATE FIX: All issues resolved in one file
+- Video looping with seamless transitions
+- Forced caption rendering
+- Proper segment duration matching
+- 40-70 sentence generation
 """
 
 import os
@@ -11,14 +14,14 @@ import logging
 import subprocess
 from typing import Optional, Dict, Any, List
 
-from .config import settings
-from .content.gemini_client import GeminiClient
-from .tts.edge_handler import TTSHandler
-from .video.pexels_client import PexelsClient
-from .captions.renderer import CaptionRenderer
-from .audio.bgm_manager import BGMManager
-from .upload.youtube_uploader import YouTubeUploader
-from .state.novelty_guard import NoveltyGuard
+from autoshorts.config import settings
+from autoshorts.content.gemini_client import GeminiClient
+from autoshorts.tts.edge_handler import TTSHandler
+from autoshorts.video.pexels_client import PexelsClient
+from autoshorts.captions.renderer import CaptionRenderer
+from autoshorts.audio.bgm_manager import BGMManager
+from autoshorts.upload.youtube_uploader import YouTubeUploader
+from autoshorts.state.novelty_guard import NoveltyGuard
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,9 @@ class LongFormOrchestrator:
     def __init__(self):
         """Initialize all components"""
         logger.info("🚀 Initializing Long-Form Orchestrator...")
+        
+        # ✅ FORCE OVERRIDE SETTINGS FOR LONG-FORM
+        self._apply_longform_overrides()
         
         self.gemini = GeminiClient(
             api_key=settings.GEMINI_API_KEY,
@@ -42,7 +48,31 @@ class LongFormOrchestrator:
         self.novelty_guard = NoveltyGuard()
         
         self.temp_dir = None
-        logger.info("✅ Long-Form Orchestrator ready")
+        
+        logger.info(f"✅ Long-Form Orchestrator ready")
+        logger.info(f"   Target: {settings.MIN_SENTENCES}-{settings.MAX_SENTENCES} sentences")
+        logger.info(f"   Duration: {settings.TARGET_MIN_SEC/60:.1f}-{settings.TARGET_MAX_SEC/60:.1f} minutes")
+    
+    def _apply_longform_overrides(self):
+        """Force correct settings for long-form videos"""
+        # ✅ CRITICAL: Override sentence counts
+        settings.MIN_SENTENCES = 40
+        settings.MAX_SENTENCES = 70
+        settings.TARGET_SENTENCES = 55
+        
+        # ✅ CRITICAL: Override duration targets
+        settings.TARGET_DURATION = 360  # 6 minutes
+        settings.TARGET_MIN_SEC = 240.0  # 4 minutes
+        settings.TARGET_MAX_SEC = 480.0  # 8 minutes
+        
+        # ✅ CRITICAL: Force captions enabled
+        settings.KARAOKE_CAPTIONS = True
+        
+        # ✅ Allow more video reuse
+        settings.PEXELS_MAX_USES_PER_CLIP = 3
+        settings.PEXELS_ALLOW_REUSE = True
+        
+        logger.info("   ⚙️ Long-form settings applied")
     
     def run(self) -> Optional[str]:
         """Execute full pipeline for long-form video"""
@@ -112,7 +142,7 @@ class LongFormOrchestrator:
                 # Validate sentence count
                 sentence_count = len(content_response.script)
                 if not (settings.MIN_SENTENCES <= sentence_count <= settings.MAX_SENTENCES):
-                    logger.warning(f"   ⚠️ Sentence count {sentence_count} out of range")
+                    logger.warning(f"   ⚠️ Sentence count {sentence_count} out of range ({settings.MIN_SENTENCES}-{settings.MAX_SENTENCES})")
                     continue
                 
                 # Build content dict
@@ -173,7 +203,7 @@ class LongFormOrchestrator:
         
         # Check duration constraints
         if not (settings.TARGET_MIN_SEC <= total_duration <= settings.TARGET_MAX_SEC):
-            logger.warning(f"   ⚠️ Duration {total_duration:.1f}s out of range")
+            logger.warning(f"   ⚠️ Duration {total_duration:.1f}s out of target range")
         
         return audio_segments
     
@@ -183,21 +213,18 @@ class LongFormOrchestrator:
         search_queries: List[str],
         chapters: List[Dict[str, Any]]
     ) -> Optional[str]:
-        """Produce video with 40-70 clips - FIXED VERSION WITH LOOPING"""
+        """Produce video with seamless looping and captions"""
         
-        # Calculate how many video clips we need
         clips_needed = len(audio_segments)
-        
         logger.info(f"   Need {clips_needed} video clips for {len(audio_segments)} sentences")
         
-        # Search and download videos using PexelsClient methods
+        # Search and download videos
         logger.info("   🔍 Searching for video clips...")
         all_videos = []
         
-        # Use more search terms for variety
-        for term in search_queries[:25]:
+        for term in search_queries[:30]:  # More search terms
             try:
-                results = self.pexels.search_simple(query=term, count=3)
+                results = self.pexels.search_simple(query=term, count=4)
                 all_videos.extend(results)
                 
                 if len(all_videos) >= clips_needed * 2:
@@ -213,7 +240,7 @@ class LongFormOrchestrator:
         
         logger.info(f"   ✅ Found {len(all_videos)} video clips")
         
-        # Download video clips
+        # Download clips
         logger.info("   📥 Downloading video clips...")
         downloaded_clips = []
         
@@ -222,133 +249,137 @@ class LongFormOrchestrator:
                 video_id, url = all_videos[i]
                 clip_path = self._download_video(url, video_id, i)
                 downloaded_clips.append(clip_path)
-                
             except Exception as e:
                 logger.error(f"   ❌ Failed to download clip {i+1}: {e}")
                 return None
         
-        if len(downloaded_clips) < clips_needed:
-            logger.error(f"   ❌ Not enough downloaded clips: {len(downloaded_clips)}/{clips_needed}")
-            return None
-        
         logger.info(f"   ✅ Downloaded {len(downloaded_clips)} clips")
         
-        # ✅ CRITICAL FIX: Process each segment properly with VIDEO LOOPING
-        logger.info("   🎬 Processing video segments with looping support...")
-        video_segments = []
+        # ✅ Process each segment with BULLETPROOF LOOPING + CAPTIONS
+        logger.info("   🎬 Processing segments (loop + audio + captions)...")
+        final_segments = []
         
         for i, (clip_path, audio_seg) in enumerate(zip(downloaded_clips, audio_segments)):
             try:
-                logger.info(f"      Processing segment {i+1}/{len(audio_segments)}")
+                logger.info(f"      [{i+1}/{len(audio_segments)}] Processing segment...")
                 
-                duration = audio_seg['duration']
+                target_duration = audio_seg['duration']
                 
-                # ✅ Step 1: Get clip duration and loop if needed
-                probe_result = subprocess.run([
+                # Get clip duration
+                probe = subprocess.run([
                     'ffprobe', '-v', 'error',
                     '-show_entries', 'format=duration',
                     '-of', 'default=noprint_wrappers=1:nokey=1',
                     clip_path
                 ], capture_output=True, text=True, check=True)
                 
-                clip_duration = float(probe_result.stdout.strip())
-                logger.info(f"         Clip: {clip_duration:.2f}s, Audio: {duration:.2f}s")
+                clip_duration = float(probe.stdout.strip())
                 
-                # Prepare video to match audio duration
-                prepared_path = os.path.join(self.temp_dir, f"prepared_{i:03d}.mp4")
+                # ✅ STEP 1: Create looped video matching audio duration EXACTLY
+                looped_video = os.path.join(self.temp_dir, f"looped_{i:03d}.mp4")
                 
-                if clip_duration < duration:
-                    # ✅ CRITICAL FIX: Loop video to match audio duration
-                    loops_needed = int(duration / clip_duration) + 1
-                    logger.info(f"         ⚡ Looping video {loops_needed}x to match audio")
+                if clip_duration < target_duration:
+                    # Calculate exact loops needed
+                    loops = int(target_duration / clip_duration) + 1
+                    logger.info(f"         🔄 Looping {loops}x ({clip_duration:.1f}s → {target_duration:.1f}s)")
                     
                     subprocess.run([
                         'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
-                        '-stream_loop', str(loops_needed),
+                        '-stream_loop', str(loops),
                         '-i', clip_path,
-                        '-t', str(duration),
+                        '-t', f'{target_duration:.3f}',
                         '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+                        '-r', '30', '-pix_fmt', 'yuv420p',
                         '-an',
-                        prepared_path
+                        looped_video
                     ], check=True, capture_output=True)
                 else:
-                    # Video is long enough, just trim
-                    logger.info(f"         ✂️ Trimming to {duration:.2f}s")
+                    # Just trim
+                    logger.info(f"         ✂️ Trimming ({clip_duration:.1f}s → {target_duration:.1f}s)")
                     subprocess.run([
                         'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
                         '-i', clip_path,
-                        '-t', str(duration),
+                        '-t', f'{target_duration:.3f}',
                         '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+                        '-r', '30', '-pix_fmt', 'yuv420p',
                         '-an',
-                        prepared_path
+                        looped_video
                     ], check=True, capture_output=True)
                 
-                if not os.path.exists(prepared_path):
-                    logger.error(f"         ❌ Video preparation failed")
+                if not os.path.exists(looped_video):
+                    logger.error(f"         ❌ Video prep failed")
                     return None
                 
-                # ✅ Step 2: Add TTS audio to video
-                audio_path = audio_seg['audio_path']
-                with_audio_path = os.path.join(self.temp_dir, f"with_audio_{i:03d}.mp4")
+                # ✅ STEP 2: Add audio
+                with_audio = os.path.join(self.temp_dir, f"with_audio_{i:03d}.mp4")
                 
                 logger.info(f"         🎵 Adding audio...")
                 subprocess.run([
                     'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
-                    '-i', prepared_path,
-                    '-i', audio_path,
+                    '-i', looped_video,
+                    '-i', audio_seg['audio_path'],
                     '-c:v', 'copy',
-                    '-c:a', 'aac', '-b:a', '192k',
+                    '-c:a', 'aac', '-b:a', '192k', '-ar', '48000',
                     '-shortest',
-                    with_audio_path
+                    with_audio
                 ], check=True, capture_output=True)
                 
-                if not os.path.exists(with_audio_path):
+                if not os.path.exists(with_audio):
                     logger.error(f"         ❌ Audio merge failed")
                     return None
                 
-                # ✅ Step 3: Add captions (FORCE ENABLED)
+                # ✅ STEP 3: Add captions (FORCED)
                 logger.info(f"         📝 Rendering captions...")
                 
-                # Force captions for debugging
-                original_karaoke = settings.KARAOKE_CAPTIONS
-                settings.KARAOKE_CAPTIONS = True
+                # Generate word timings if missing
+                words = audio_seg.get('word_timings', [])
+                if not words:
+                    # Fallback: equal distribution
+                    import re
+                    text_words = [w for w in re.split(r'\s+', audio_seg['text']) if w]
+                    if text_words:
+                        per_word = target_duration / len(text_words)
+                        words = [(w, per_word) for w in text_words]
                 
                 try:
-                    captioned_path = self.caption_renderer.render(
-                        video_path=with_audio_path,
+                    captioned = self.caption_renderer.render(
+                        video_path=with_audio,
                         text=audio_seg['text'],
-                        words=audio_seg.get('word_timings', []),
-                        duration=audio_seg['duration'],
+                        words=words,
+                        duration=target_duration,
                         is_hook=(i == 0),
                         sentence_type=audio_seg.get('type', 'body'),
                         temp_dir=self.temp_dir
                     )
-                finally:
-                    settings.KARAOKE_CAPTIONS = original_karaoke
-                
-                if not captioned_path or not os.path.exists(captioned_path):
-                    logger.warning(f"         ⚠️ Caption failed, using video with audio")
-                    captioned_path = with_audio_path
-                else:
-                    logger.info(f"         ✅ Captions added")
-                
-                video_segments.append(captioned_path)
-                logger.info(f"      ✅ Segment {i+1} complete: {duration:.2f}s")
+                    
+                    if captioned and os.path.exists(captioned):
+                        final_segments.append(captioned)
+                        logger.info(f"      ✅ Segment {i+1} complete with captions")
+                    else:
+                        logger.warning(f"         ⚠️ Caption failed, using audio version")
+                        final_segments.append(with_audio)
+                        logger.info(f"      ✅ Segment {i+1} complete (no captions)")
+                        
+                except Exception as cap_err:
+                    logger.warning(f"         ⚠️ Caption error: {cap_err}")
+                    final_segments.append(with_audio)
+                    logger.info(f"      ✅ Segment {i+1} complete (caption error)")
                 
             except Exception as e:
-                logger.error(f"   ❌ Segment {i+1} failed: {e}")
+                logger.error(f"      ❌ Segment {i+1} failed: {e}")
                 import traceback
                 logger.debug(traceback.format_exc())
                 return None
         
-        # ✅ CRITICAL: Verify all segments before concatenation
-        logger.info("   🔍 Verifying all segments...")
-        for i, seg_path in enumerate(video_segments):
+        # ✅ STEP 4: Concatenate with validation
+        logger.info("   🔗 Concatenating segments...")
+        
+        # Verify all segments exist and have correct duration
+        for i, seg_path in enumerate(final_segments):
             if not os.path.exists(seg_path):
-                logger.error(f"   ❌ Segment {i+1} missing: {seg_path}")
+                logger.error(f"   ❌ Segment {i+1} missing!")
                 return None
             
-            # Verify duration matches
             probe = subprocess.run([
                 'ffprobe', '-v', 'error',
                 '-show_entries', 'format=duration',
@@ -356,33 +387,30 @@ class LongFormOrchestrator:
                 seg_path
             ], capture_output=True, text=True)
             
-            seg_duration = float(probe.stdout.strip()) if probe.returncode == 0 else 0
-            expected = audio_segments[i]['duration']
-            
-            if abs(seg_duration - expected) > 0.5:
-                logger.warning(f"      ⚠️ Segment {i+1} duration mismatch: {seg_duration:.2f}s vs {expected:.2f}s")
+            if probe.returncode == 0:
+                seg_dur = float(probe.stdout.strip())
+                expected = audio_segments[i]['duration']
+                diff = abs(seg_dur - expected)
+                
+                if diff > 0.5:
+                    logger.warning(f"      ⚠️ Segment {i+1} duration mismatch: {seg_dur:.2f}s vs {expected:.2f}s")
         
-        logger.info("   ✅ All segments verified")
-        
-        # ✅ Concatenate with proper settings
-        logger.info("   🔗 Concatenating video segments...")
-        final_video = os.path.join(self.temp_dir, "final_longform.mp4")
-        
-        # Create concat file with absolute paths
+        # Create concat list
         concat_list = os.path.join(self.temp_dir, "concat.txt")
         with open(concat_list, 'w') as f:
-            for segment in video_segments:
-                abs_path = os.path.abspath(segment)
-                f.write(f"file '{abs_path}'\n")
+            for seg in final_segments:
+                f.write(f"file '{os.path.abspath(seg)}'\n")
         
-        # Concatenate with re-encode for compatibility
+        final_video = os.path.join(self.temp_dir, "final_longform.mp4")
+        
+        # Concatenate with re-encode
         try:
             subprocess.run([
                 'ffmpeg', '-y', '-hide_banner', '-loglevel', 'warning',
                 '-f', 'concat', '-safe', '0',
                 '-i', concat_list,
                 '-c:v', 'libx264', '-preset', 'medium', '-crf', '23',
-                '-c:a', 'aac', '-b:a', '192k',
+                '-c:a', 'aac', '-b:a', '192k', '-ar', '48000',
                 '-movflags', '+faststart',
                 final_video
             ], check=True, capture_output=True)
@@ -398,17 +426,18 @@ class LongFormOrchestrator:
         probe = subprocess.run([
             'ffprobe', '-v', 'error',
             '-show_entries', 'format=duration',
+            '-select_streams', 'v:0',
             '-of', 'default=noprint_wrappers=1:nokey=1',
             final_video
         ], capture_output=True, text=True)
         
-        final_duration = float(probe.stdout.strip()) if probe.returncode == 0 else 0
-        expected_duration = sum(seg['duration'] for seg in audio_segments)
-        
-        logger.info(f"   ✅ Final video: {final_duration:.1f}s (expected: {expected_duration:.1f}s)")
-        
-        if abs(final_duration - expected_duration) > 2.0:
-            logger.warning(f"   ⚠️ Duration mismatch: {final_duration:.1f}s vs {expected_duration:.1f}s")
+        if probe.returncode == 0:
+            final_dur = float(probe.stdout.strip())
+            expected_dur = sum(seg['duration'] for seg in audio_segments)
+            logger.info(f"   ✅ Final video: {final_dur:.1f}s (expected: {expected_dur:.1f}s)")
+            
+            if abs(final_dur - expected_dur) > 2.0:
+                logger.warning(f"   ⚠️ Duration mismatch: {final_dur:.1f}s vs {expected_dur:.1f}s")
         
         # Verify audio stream
         probe_audio = subprocess.run([
@@ -420,7 +449,7 @@ class LongFormOrchestrator:
         ], capture_output=True, text=True)
         
         if 'audio' not in probe_audio.stdout:
-            logger.error("   ❌ Final video has no audio stream!")
+            logger.error("   ❌ Final video has no audio!")
             return None
         
         logger.info("   ✅ Final video has audio stream")
@@ -454,9 +483,8 @@ class LongFormOrchestrator:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
             
-            # Verify download
             if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
-                raise ValueError("Downloaded file is empty or invalid")
+                raise ValueError("Downloaded file is invalid")
             
             return output_path
             
@@ -469,56 +497,43 @@ class LongFormOrchestrator:
         try:
             total_duration = sum(seg['duration'] for seg in audio_segments)
             
-            logger.info("      🔍 Checking for audio track...")
-            
-            probe_cmd = [
+            # Check audio track exists
+            probe = subprocess.run([
                 'ffprobe', '-v', 'error',
                 '-select_streams', 'a:0',
                 '-show_entries', 'stream=codec_type',
                 '-of', 'default=noprint_wrappers=1:nokey=1',
                 video_path
-            ]
+            ], capture_output=True, text=True)
             
-            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True)
-            
-            if probe_result.returncode != 0 or 'audio' not in probe_result.stdout:
-                logger.warning("      ⚠️ Video has no audio track - skipping BGM")
+            if 'audio' not in probe.stdout:
+                logger.warning("      ⚠️ No audio track for BGM")
                 return None
             
-            logger.info("      📤 Extracting audio from video...")
+            # Extract audio
             voice_audio = os.path.join(self.temp_dir, "voice_only.wav")
             
-            extract_result = subprocess.run([
+            subprocess.run([
                 'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
                 '-i', video_path,
                 '-vn', '-ar', '48000', '-ac', '1', '-c:a', 'pcm_s16le',
                 voice_audio
-            ], capture_output=True)
-            
-            if extract_result.returncode != 0:
-                logger.warning(f"      ⚠️ Audio extraction failed")
-                return None
+            ], capture_output=True, check=True)
             
             if not os.path.exists(voice_audio) or os.path.getsize(voice_audio) < 1000:
-                logger.warning("      ⚠️ Extracted audio is empty")
                 return None
             
-            logger.info("      🎵 Mixing background music...")
+            # Add BGM
             mixed_audio = self.bgm_manager.add_bgm(
                 voice_path=voice_audio,
                 duration=total_duration,
                 temp_dir=self.temp_dir
             )
             
-            if not mixed_audio or mixed_audio == voice_audio:
-                logger.warning("      ⚠️ BGM mixing failed or skipped")
+            if not mixed_audio or not os.path.exists(mixed_audio):
                 return None
             
-            if not os.path.exists(mixed_audio):
-                logger.warning("      ⚠️ Mixed audio file not found")
-                return None
-            
-            logger.info("      🎬 Combining video with BGM...")
+            # Combine video with BGM
             output_path = os.path.join(self.temp_dir, "final_with_bgm.mp4")
             
             subprocess.run([
@@ -532,17 +547,14 @@ class LongFormOrchestrator:
                 output_path
             ], check=True, capture_output=True)
             
-            if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
-                logger.warning("      ⚠️ Final video creation failed")
-                return None
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                logger.info(f"      ✅ BGM added")
+                return output_path
             
-            logger.info(f"      ✅ BGM added successfully")
-            return output_path
+            return None
             
         except Exception as e:
-            logger.error(f"      ❌ BGM addition failed: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
+            logger.error(f"      ❌ BGM failed: {e}")
             return None
     
     def _upload(
