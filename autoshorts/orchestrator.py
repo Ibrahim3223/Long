@@ -27,10 +27,6 @@ class LongFormOrchestrator:
     def __init__(self):
         """Initialize all components"""
         logger.info("🚀 Initializing Long-Form Orchestrator...")
-
-
-# Backward compatibility alias
-ShortsOrchestrator = LongFormOrchestrator
         
         self.gemini = GeminiClient(
             api_key=settings.GEMINI_API_KEY,
@@ -303,7 +299,8 @@ ShortsOrchestrator = LongFormOrchestrator
 
 
 # ============================================================================
-# BACKWARD COMPATIBILITY
+# BACKWARD COMPATIBILITY ALIAS
 # ============================================================================
-# main.py expects 'ShortsOrchestrator' - provide alias for long-form
+# main.py expects 'ShortsOrchestrator' class name
+# Provide alias so existing code works with long-form orchestrator
 ShortsOrchestrator = LongFormOrchestrator
