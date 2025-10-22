@@ -8,6 +8,8 @@ import re
 import asyncio
 import logging
 import time
+import tempfile
+import os
 from typing import List, Tuple, Dict, Any
 
 try:
@@ -62,6 +64,50 @@ class TTSHandler:
             time.sleep(wait_time)
         
         TTSHandler.LAST_REQUEST_TIME = time.time()
+    
+    def generate(self, text: str) -> Dict[str, Any]:
+        """
+        ✅ NEW: High-level generate method for orchestrator compatibility.
+        
+        Generates audio in a temporary file and returns the audio data with metadata.
+        
+        Args:
+            text: Text to convert to speech
+            
+        Returns:
+            Dict with keys:
+                - audio: bytes of audio data (MP3 or WAV)
+                - duration: float duration in seconds
+                - word_timings: list of (word, duration) tuples
+        """
+        if not text or not text.strip():
+            raise ValueError("Text cannot be empty")
+        
+        # Create temp WAV file
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+            wav_path = tmp.name
+        
+        try:
+            # Generate audio using synthesize method
+            duration, word_timings = self.synthesize(text.strip(), wav_path)
+            
+            # Read audio data
+            with open(wav_path, 'rb') as f:
+                audio_data = f.read()
+            
+            return {
+                'audio': audio_data,
+                'duration': duration,
+                'word_timings': word_timings
+            }
+            
+        finally:
+            # Cleanup temp file
+            if os.path.exists(wav_path):
+                try:
+                    os.unlink(wav_path)
+                except:
+                    pass
     
     def synthesize(
         self, 
