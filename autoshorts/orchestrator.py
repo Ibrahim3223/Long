@@ -1,12 +1,14 @@
 """
 Orchestrator - LONG-FORM VIDEO PIPELINE (3-10 minutes)
 Handles 20-35 sentence content with chapter support
+✅ FIXED: Proper video-audio sync, caption with audio, correct concatenation
 """
 
 import os
 import tempfile
 import shutil
 import logging
+import subprocess
 from typing import Optional, Dict, Any, List
 
 from .config import settings
@@ -33,7 +35,7 @@ class LongFormOrchestrator:
             model=settings.GEMINI_MODEL
         )
         self.tts = TTSHandler()  # Voice is read from settings internally
-        self.pexels = PexelsClient()  # ✅ FIXED: No api_key parameter needed
+        self.pexels = PexelsClient()
         self.caption_renderer = CaptionRenderer()
         self.bgm_manager = BGMManager()
         self.uploader = YouTubeUploader()
@@ -181,7 +183,7 @@ class LongFormOrchestrator:
         search_queries: List[str],
         chapters: List[Dict[str, Any]]
     ) -> Optional[str]:
-        """Produce video with 20-35 clips"""
+        """Produce video with 20-35 clips - FIXED VERSION"""
         
         # Calculate how many video clips we need
         clips_needed = len(audio_segments)
@@ -199,34 +201,91 @@ class LongFormOrchestrator:
                 results = self.pexels.search_simple(query=term, count=3)
                 all_videos.extend(results)
                 
-                if len(all_videos) >= clips_needed:
+                if len(all_videos) >= clips_needed * 2:  # Get 2x for variety
                     break
+                    
             except Exception as e:
-                logger.warning(f"   ⚠️ Search failed for '{term}': {e}")
+                logger.warning(f"      ⚠️ Search failed for '{term}': {e}")
                 continue
         
-        # If not enough, allow reuse
         if len(all_videos) < clips_needed:
-            logger.warning(f"   ⚠️ Only found {len(all_videos)} clips, need {clips_needed}")
-            logger.info("   🔄 Enabling video reuse...")
-            # Duplicate videos to reach target
-            while len(all_videos) < clips_needed:
-                all_videos.extend(all_videos[:clips_needed - len(all_videos)])
+            logger.error(f"   ❌ Not enough videos: {len(all_videos)}/{clips_needed}")
+            return None
         
-        logger.info(f"   ✅ Collected {len(all_videos)} video clips")
+        logger.info(f"   ✅ Found {len(all_videos)} video clips")
         
-        # Create video segments with captions
-        logger.info("   🎨 Creating video segments with captions...")
+        # Download video clips
+        logger.info("   📥 Downloading video clips...")
+        downloaded_clips = []
+        
+        for i in range(min(clips_needed, len(all_videos))):
+            try:
+                video_id, url = all_videos[i]
+                clip_path = self._download_video(url, video_id, i)
+                downloaded_clips.append(clip_path)
+                
+            except Exception as e:
+                logger.error(f"   ❌ Failed to download clip {i+1}: {e}")
+                return None
+        
+        if len(downloaded_clips) < clips_needed:
+            logger.error(f"   ❌ Not enough downloaded clips: {len(downloaded_clips)}/{clips_needed}")
+            return None
+        
+        logger.info(f"   ✅ Downloaded {len(downloaded_clips)} clips")
+        
+        # ✅ CRITICAL FIX: Process each segment properly
+        # 1. Trim video to audio duration
+        # 2. Add audio to video
+        # 3. Add captions (while preserving audio)
+        logger.info("   🎬 Processing video segments with audio and captions...")
         video_segments = []
         
-        for i, (audio_seg, (video_id, download_url)) in enumerate(zip(audio_segments, all_videos)):
+        for i, (clip_path, audio_seg) in enumerate(zip(downloaded_clips, audio_segments)):
             try:
-                # Download video
-                video_path = self._download_video(download_url, video_id, i)
+                logger.info(f"      Processing segment {i+1}/{len(audio_segments)}")
                 
-                # ✅ FIXED: Pass correct parameters to render()
+                # Step 1: Trim video to exact audio duration
+                duration = audio_seg['duration']
+                trimmed_path = os.path.join(self.temp_dir, f"trimmed_{i:03d}.mp4")
+                
+                logger.info(f"         Trimming to {duration:.2f}s...")
+                subprocess.run([
+                    'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                    '-i', clip_path,
+                    '-t', str(duration),
+                    '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+                    '-an',  # Remove original audio (we'll add our own)
+                    trimmed_path
+                ], check=True, capture_output=True)
+                
+                if not os.path.exists(trimmed_path):
+                    logger.error(f"         ❌ Trim failed")
+                    return None
+                
+                # Step 2: Add TTS audio to trimmed video
+                audio_path = audio_seg['audio_path']
+                with_audio_path = os.path.join(self.temp_dir, f"with_audio_{i:03d}.mp4")
+                
+                logger.info(f"         Adding audio...")
+                subprocess.run([
+                    'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                    '-i', trimmed_path,
+                    '-i', audio_path,
+                    '-c:v', 'copy',
+                    '-c:a', 'aac', '-b:a', '192k',
+                    '-shortest',
+                    with_audio_path
+                ], check=True, capture_output=True)
+                
+                if not os.path.exists(with_audio_path):
+                    logger.error(f"         ❌ Audio merge failed")
+                    return None
+                
+                # Step 3: Add captions (preserving audio!)
+                logger.info(f"         Rendering captions...")
                 captioned_path = self.caption_renderer.render(
-                    video_path=video_path,
+                    video_path=with_audio_path,
                     text=audio_seg['text'],
                     words=audio_seg.get('word_timings', []),
                     duration=audio_seg['duration'],
@@ -235,30 +294,64 @@ class LongFormOrchestrator:
                     temp_dir=self.temp_dir
                 )
                 
+                if not captioned_path or not os.path.exists(captioned_path):
+                    logger.warning(f"         ⚠️ Caption failed, using video with audio")
+                    captioned_path = with_audio_path
+                
                 video_segments.append(captioned_path)
+                logger.info(f"      ✅ Segment {i+1} complete: {duration:.2f}s")
                 
             except Exception as e:
-                logger.error(f"   ❌ Segment {i} failed: {e}")
+                logger.error(f"   ❌ Segment {i+1} failed: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
                 return None
         
-        # Concatenate all segments
+        # ✅ CRITICAL FIX: Concatenate with proper codec settings
         logger.info("   🔗 Concatenating video segments...")
         final_video = os.path.join(self.temp_dir, "final_longform.mp4")
         
-        # Use FFmpeg to concatenate
+        # Create concat file
         concat_list = os.path.join(self.temp_dir, "concat.txt")
         with open(concat_list, 'w') as f:
             for segment in video_segments:
-                f.write(f"file '{segment}'\n")
+                # Use absolute path for safety
+                abs_path = os.path.abspath(segment)
+                f.write(f"file '{abs_path}'\n")
         
-        import subprocess
-        cmd = [
-            'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
-            '-i', concat_list,
-            '-c', 'copy',
+        # ✅ FIX: Re-encode instead of copy to ensure compatibility
+        try:
+            subprocess.run([
+                'ffmpeg', '-y', '-hide_banner', '-loglevel', 'warning',
+                '-f', 'concat', '-safe', '0',
+                '-i', concat_list,
+                '-c:v', 'libx264', '-preset', 'medium', '-crf', '23',
+                '-c:a', 'aac', '-b:a', '192k',
+                '-movflags', '+faststart',
+                final_video
+            ], check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"   ❌ Concatenation failed: {e.stderr.decode()}")
+            return None
+        
+        if not os.path.exists(final_video):
+            logger.error("   ❌ Final video not created")
+            return None
+        
+        # Verify final video has audio
+        probe_result = subprocess.run([
+            'ffprobe', '-v', 'error',
+            '-select_streams', 'a:0',
+            '-show_entries', 'stream=codec_type',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
             final_video
-        ]
-        subprocess.run(cmd, check=True, capture_output=True)
+        ], capture_output=True, text=True)
+        
+        if 'audio' not in probe_result.stdout:
+            logger.error("   ❌ Final video has no audio stream!")
+            return None
+        
+        logger.info("   ✅ Final video has audio stream")
         
         # Add BGM if enabled
         if settings.BGM_ENABLE:
@@ -289,6 +382,10 @@ class LongFormOrchestrator:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
             
+            # Verify download
+            if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
+                raise ValueError("Downloaded file is empty or invalid")
+            
             return output_path
             
         except Exception as e:
@@ -312,7 +409,6 @@ class LongFormOrchestrator:
             
             # Check if video has audio track
             logger.info("      🔍 Checking for audio track...")
-            import subprocess
             
             probe_cmd = [
                 'ffprobe', '-v', 'error',
