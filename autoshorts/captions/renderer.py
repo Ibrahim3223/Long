@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Caption rendering - ULTIMATE VERSION
+Caption rendering - ULTIMATE VERSION with COLORFUL CAPTIONS
+✅ FIXED: Now uses the colorful karaoke caption system!
 ✅ GUARANTEED captions even without forced aligner
 ✅ Audio stream preserved
 """
@@ -12,12 +13,13 @@ from typing import List, Tuple, Optional, Dict, Any
 
 from autoshorts.config import settings
 from autoshorts.utils.ffmpeg_utils import run, has_subtitles, ffprobe_duration
+from autoshorts.captions.karaoke_ass import build_karaoke_ass, get_random_style
 
 logger = logging.getLogger(__name__)
 
 
 class CaptionRenderer:
-    """Render captions with BULLETPROOF sync."""
+    """Render captions with BULLETPROOF sync and COLORFUL styles."""
     
     WORDS_PER_CHUNK = 3
     MIN_WORD_DURATION = 0.08
@@ -39,7 +41,11 @@ class CaptionRenderer:
         sentence_type: str = "buildup",
         temp_dir: str = None
     ) -> str:
-        """Render captions with GUARANTEED output"""
+        """
+        Render captions with GUARANTEED output and COLORFUL styles!
+        
+        ✅ FIXED: Now uses the colorful karaoke caption system
+        """
         try:
             if duration <= 0:
                 duration = ffprobe_duration(video_path)
@@ -64,11 +70,26 @@ class CaptionRenderer:
                 logger.info(f"         Captions disabled in settings")
                 return video_path
             
-            # ✅ Generate ASS file
+            # ✅ Generate colorful ASS file using karaoke system
             ass_path = video_path.replace(".mp4", ".ass")
             
             try:
-                self._write_exact_ass(words, duration, sentence_type, ass_path)
+                # ✅ NEW: Use the colorful karaoke caption builder!
+                style_name = get_random_style()  # Random colorful style
+                logger.info(f"         🎨 Using caption style: {style_name}")
+                
+                ass_content = build_karaoke_ass(
+                    text=text,
+                    seg_dur=duration,
+                    words=words,
+                    is_hook=(sentence_type == "hook"),
+                    style_name=style_name
+                )
+                
+                # Write ASS file
+                with open(ass_path, 'w', encoding='utf-8') as f:
+                    f.write(ass_content)
+                    
             except Exception as e:
                 logger.error(f"         ❌ ASS generation failed: {e}")
                 return video_path
@@ -121,7 +142,7 @@ class CaptionRenderer:
                 pathlib.Path(ass_path).unlink(missing_ok=True)
                 pathlib.Path(tmp_out).unlink(missing_ok=True)
             
-            logger.info(f"         ✅ Captions rendered successfully")
+            logger.info(f"         ✅ Captions rendered successfully with colorful style!")
             return output
                 
         except Exception as e:
@@ -200,157 +221,3 @@ class CaptionRenderer:
                 fixed[-1] = (last_word, max(self.MIN_WORD_DURATION, last_dur + diff))
         
         return fixed
-    
-    def _write_exact_ass(
-        self,
-        words: List[Tuple[str, float]],
-        total_duration: float,
-        sentence_type: str,
-        output_path: str
-    ):
-        """Write ASS file with frame-perfect timing"""
-        
-        is_hook = (sentence_type == "hook")
-        
-        # ASS header with simple styling
-        ass = f"""[Script Info]
-Title: Caption
-ScriptType: v4.00+
-PlayResX: 1920
-PlayResY: 1080
-WrapStyle: 0
-ScaledBorderAndShadow: yes
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,50,50,80,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-        
-        max_words = 2 if is_hook else self.WORDS_PER_CHUNK
-        chunks = self._create_chunks(words, max_words)
-        chunks = self._validate_chunks(chunks, total_duration)
-        
-        cumulative_time = 0.0
-        
-        for chunk_idx, chunk in enumerate(chunks):
-            chunk_text = " ".join(w.upper() for w, _ in chunk)
-            chunk_duration = sum(d for _, d in chunk)
-            
-            start = cumulative_time
-            end = start + chunk_duration
-            
-            if end > total_duration + 0.001:
-                end = total_duration
-                if start >= end:
-                    break
-            
-            # Frame alignment
-            frame_duration = 1.0 / settings.TARGET_FPS
-            start_frame = round(start / frame_duration)
-            end_frame = round(end / frame_duration)
-            
-            start_aligned = start_frame * frame_duration
-            end_aligned = end_frame * frame_duration
-            
-            start_str = self._ass_time(start_aligned)
-            end_str = self._ass_time(end_aligned)
-            
-            ass_start = self._ass_to_seconds(start_str)
-            ass_end = self._ass_to_seconds(end_str)
-            
-            ass += f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{chunk_text}\n"
-            
-            cumulative_time = ass_end
-        
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(ass)
-    
-    def _create_chunks(
-        self,
-        words: List[Tuple[str, float]],
-        max_words: int
-    ) -> List[List[Tuple[str, float]]]:
-        """Create natural chunks"""
-        chunks = []
-        current = []
-        
-        for word, dur in words:
-            current.append((word, dur))
-            
-            should_finalize = False
-            
-            if word.rstrip().endswith(('.', '!', '?', '…', ':')):
-                should_finalize = True
-            elif len(current) >= max_words:
-                should_finalize = True
-            elif ',' in word and len(current) >= 2:
-                should_finalize = True
-            
-            if should_finalize and current:
-                chunks.append(current)
-                current = []
-        
-        if current:
-            chunks.append(current)
-        
-        return chunks
-    
-    def _validate_chunks(
-        self,
-        chunks: List[List[Tuple[str, float]]],
-        total_duration: float
-    ) -> List[List[Tuple[str, float]]]:
-        """Validate chunk durations"""
-        if not chunks:
-            return chunks
-        
-        current_total = sum(sum(d for _, d in chunk) for chunk in chunks)
-        validated_chunks = []
-        remaining_duration = total_duration
-        
-        for i, chunk in enumerate(chunks):
-            is_last = (i == len(chunks) - 1)
-            chunk_dur = sum(d for _, d in chunk)
-            
-            if is_last:
-                target_dur = remaining_duration
-            else:
-                weight = chunk_dur / current_total if current_total > 0 else 1.0 / len(chunks)
-                target_dur = total_duration * weight
-            
-            if abs(chunk_dur - target_dur) > 0.001:
-                scale = target_dur / chunk_dur if chunk_dur > 0 else 1.0
-                chunk = [(w, max(self.MIN_WORD_DURATION, round(d * scale, 3))) for w, d in chunk]
-            
-            validated_chunks.append(chunk)
-            remaining_duration -= sum(d for _, d in chunk)
-        
-        return validated_chunks
-    
-    def _ass_time(self, seconds: float) -> str:
-        """Format seconds to ASS time"""
-        total_ms = int(round(seconds * 1000))
-        cs = total_ms // 10
-        
-        h = cs // 360000
-        cs -= h * 360000
-        m = cs // 6000
-        cs -= m * 6000
-        s = cs // 100
-        cs %= 100
-        
-        return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
-    
-    def _ass_to_seconds(self, ass_time: str) -> float:
-        """Convert ASS time to seconds"""
-        parts = ass_time.split(':')
-        h = int(parts[0])
-        m = int(parts[1])
-        s_and_cs = parts[2].split('.')
-        s = int(s_and_cs[0])
-        cs = int(s_and_cs[1]) if len(s_and_cs) > 1 else 0
-        
-        return h * 3600 + m * 60 + s + cs * 0.01
