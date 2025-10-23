@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Karaoke ASS subtitle builder - LONG-FORM VERSION (16:9 LANDSCAPE)
+✅ FIXED: Now actually uses the colorful caption styles!
 Bottom-positioned captions with smaller fonts for landscape videos
 """
 import random
@@ -213,25 +214,124 @@ def list_all_styles() -> List[str]:
     return list(CAPTION_STYLES.keys())
 
 
-# Backward compatibility
 def build_karaoke_ass(
     text: str,
     seg_dur: float,
-    words: List[tuple],
+    words: List[Tuple[str, float]],
     is_hook: bool = False,
     style_name: Optional[str] = None
 ) -> str:
-    """Legacy function for backward compatibility."""
-    return """[Script Info]
+    """
+    ✅ FIXED: Build complete ASS file with COLORFUL karaoke captions!
+    
+    Args:
+        text: Full text to display
+        seg_dur: Total segment duration
+        words: List of (word, duration) tuples
+        is_hook: Whether this is a hook segment
+        style_name: Specific style to use (or None for random)
+    
+    Returns:
+        Complete ASS subtitle string with colorful animated captions
+    """
+    # Select style
+    if not style_name:
+        style_name = get_random_style()
+    
+    style = get_style_info(style_name)
+    
+    # Determine font size based on context
+    if is_hook:
+        fontsize = style["fontsize_hook"]
+    else:
+        fontsize = style["fontsize_normal"]
+    
+    # Build ASS header
+    ass_content = f"""[Script Info]
+Title: Karaoke Captions
 ScriptType: v4.00+
 PlayResX: 1920
 PlayResY: 1080
+WrapStyle: 0
+ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial Black,44,&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,1,0,1,5,3,2,50,50,90,1
+Style: Default,{style['fontname']},{fontsize},{style['color_inactive']},{style['color_active']},{style['color_outline']},&H80000000,-1,0,0,0,100,100,1,0,1,{style['outline']},{style['shadow']},2,50,50,{style['margin_v']},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-Dialogue: 0,0:00:00.00,0:00:10.00,Default,,0,0,0,,{text}
 """
+    
+    # Generate karaoke events
+    if not words:
+        # Fallback: show entire text without karaoke
+        end_time = _format_ass_time(seg_dur)
+        ass_content += f"Dialogue: 0,0:00:00.00,{end_time},Default,,0,0,0,,{text.upper()}\n"
+    else:
+        # Build karaoke with word-by-word highlighting
+        cumulative_time = 0.0
+        
+        # Group words into chunks (2-3 words per line for readability)
+        chunk_size = 2 if is_hook else 3
+        chunks = []
+        current_chunk = []
+        current_chunk_duration = 0.0
+        
+        for word, duration in words:
+            current_chunk.append((word, duration))
+            current_chunk_duration += duration
+            
+            if len(current_chunk) >= chunk_size:
+                chunks.append((current_chunk, current_chunk_duration))
+                current_chunk = []
+                current_chunk_duration = 0.0
+        
+        # Add remaining words
+        if current_chunk:
+            chunks.append((current_chunk, current_chunk_duration))
+        
+        # Generate events for each chunk
+        for chunk_words, chunk_duration in chunks:
+            start_time = _format_ass_time(cumulative_time)
+            end_time = _format_ass_time(cumulative_time + chunk_duration)
+            
+            # Build karaoke tags for each word in chunk
+            karaoke_text = ""
+            word_cumulative = 0
+            
+            for word, duration in chunk_words:
+                # Convert duration to centiseconds for \\k tag
+                duration_cs = int(duration * 100)
+                
+                # Check if word should be emphasized
+                word_upper = word.upper().strip('.,!?;:')
+                if word_upper in EMPHASIS_KEYWORDS:
+                    # Emphasis: bigger, different color
+                    karaoke_text += f"{{\\k{duration_cs}\\fs{style['fontsize_emphasis']}\\c{style['color_emphasis']}}}{word.upper()} "
+                else:
+                    # Normal karaoke
+                    karaoke_text += f"{{\\k{duration_cs}}}{word.upper()} "
+                
+                word_cumulative += duration
+            
+            # Add bounce effect if enabled
+            if style.get("bounce"):
+                # Subtle bounce animation
+                karaoke_text = f"{{\\move(960,1000,960,980,0,{int(chunk_duration*1000)})}}" + karaoke_text
+            
+            ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{karaoke_text.strip()}\n"
+            
+            cumulative_time += chunk_duration
+    
+    return ass_content
+
+
+def _format_ass_time(seconds: float) -> str:
+    """Format seconds to ASS timestamp (H:MM:SS.CS)."""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    centiseconds = int((seconds % 1) * 100)
+    
+    return f"{hours}:{minutes:02d}:{secs:02d}.{centiseconds:02d}"
