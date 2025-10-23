@@ -12,7 +12,6 @@ import re
 from typing import List, Dict, Optional, Tuple
 
 from autoshorts.config import settings
-from autoshorts.content.text_utils import split_into_sentences
 from autoshorts.tts.edge_handler import EdgeTTSHandler
 from autoshorts.captions.renderer import CaptionRenderer
 from autoshorts.audio.bgm_manager import BGMManager
