@@ -7,7 +7,7 @@
 # State: .state/novelty.sqlite3
 
 import os, re, json, math, time, sqlite3, hashlib, random, datetime
-from typing import List, Dict, Any, Optional, Tuple, Set
+from typing import List, Dict, Any, Optional, Tuple, Set, Union
 
 # ============================================================================
 # CONSTANTS - Import from constants.py if available
@@ -220,7 +220,11 @@ class NoveltyGuard:
         self.window_days = int(window_days)
         _ensure_dir(state_dir)
         self._init_db()
-        self._channel = channel
+        self._channel = channel  # default channel for backward-compat
+
+    def _resolve_channel(self, channel: Optional[str]) -> str:
+        """Return a non-empty channel string (fallback to self._channel or 'default')."""
+        return (channel or self._channel or "default")
 
     def _conn(self):
         conn = sqlite3.connect(self.db_path, timeout=30)
@@ -389,31 +393,53 @@ class NoveltyGuard:
         return best_subtopic
 
     # ========================================================================
-    # API: Novelty Check (Enhanced)
+    # API: Novelty Check (Enhanced) — BACKWARD-COMPAT
     # ========================================================================
-    
+    def _join_script(self, script: Union[str, List[str]]) -> str:
+        if isinstance(script, list):
+            return _norm_space(" ".join(s for s in script if s))
+        return _norm_space(script or "")
+
     def check_novelty(
         self, 
-        channel: str, 
-        title: str, 
-        script: str, 
-        search_term: Optional[str] = None,
-        category: Optional[str] = None, 
-        mode: Optional[str] = None, 
-        lang: Optional[str] = None,
-        sub_topic: Optional[str] = None  # NEW: Optional sub-topic hint
-    ) -> NoveltyDecision:
+        *args,
+        **kwargs
+    ) -> Tuple[bool, float]:
         """
-        Enhanced novelty check with sub-topic awareness.
+        Backward-compatible signature:
+        - Old style: check_novelty(channel, title, script, ...)
+        - New style (used by orchestrator): check_novelty(title=..., script=[...], channel=None, ...)
+        Returns: (ok: bool, similarity: float)
         """
-        title = _norm_space(title or "")
-        script = _norm_space(script or "")
-        base = (title + " || " + script).strip()
-        
-        if not base:
-            return NoveltyDecision(False, "EMPTY_CONTENT")
+        # ---- Parse arguments
+        channel_arg = None
+        title = None
+        script = None
 
-        ents = list(sorted(extract_entities(title + " " + script)))
+        if len(args) >= 3 and isinstance(args[0], str):
+            # Old positional form
+            channel_arg, title, script = args[0], args[1], args[2]
+        else:
+            # Keyword form
+            title = kwargs.pop("title", None)
+            script = kwargs.pop("script", None)
+            channel_arg = kwargs.pop("channel", None)
+
+        channel = self._resolve_channel(channel_arg)
+        title = _norm_space(title or "")
+        script_text = self._join_script(script or "")
+
+        search_term = kwargs.pop("search_term", None)
+        category = kwargs.pop("category", None)
+        mode = kwargs.pop("mode", None)
+        lang = kwargs.pop("lang", None)
+        sub_topic = kwargs.pop("sub_topic", None)
+
+        base = (title + " || " + script_text).strip()
+        if not base:
+            return (False, 1.0)  # empty content => treat as not novel
+
+        ents = list(sorted(extract_entities(title + " " + script_text)))
         sh = simhash64(base)
         chash = hashlib.md5(base.encode("utf-8")).hexdigest()
         emb = embed(base)
@@ -421,47 +447,44 @@ class NoveltyGuard:
         # Fetch recent items
         cand = self.recent_items(channel, self.window_days)
         nearest = None
-        worst_reason = None
+        best_sim = 0.0  # return the highest similarity we detect
 
         # Check 1: Same search term in window
         if search_term:
             for row in cand:
                 if row.get("search_term", "").strip().lower() == search_term.strip().lower():
                     nearest = row
-                    worst_reason = "SAME_SEARCH_TERM_WINDOW"
-                    return NoveltyDecision(False, worst_reason, nearest, 
-                                         suggestions=self._suggest(channel, search_term, mode))
+                    best_sim = max(best_sim, 1.0)
+                    return (False, best_sim)
 
         # Check 2: Same sub-topic recently (if provided)
         if sub_topic and mode:
             for row in cand:
                 if (row.get("sub_topic", "").strip().lower() == sub_topic.strip().lower() 
                     and row.get("mode", "") == mode):
-                    # Sub-topic used within last 14 days
                     age_days = (_now_ts() - row.get("ts", 0)) / 86400.0
                     if age_days < 14:
                         nearest = row
-                        worst_reason = f"SUB_TOPIC_TOO_RECENT (used {age_days:.1f} days ago)"
-                        return NoveltyDecision(False, worst_reason, nearest,
-                                             suggestions=self._suggest(channel, search_term, mode))
+                        best_sim = max(best_sim, 0.8)
+                        return (False, best_sim)
 
         # Check 3: Simhash
         for row in cand:
             dist = hamming64(sh, int(row.get("simhash") or 0))
             if dist < HAMMING_MAX:
+                # similarity from hamming distance
+                sim = 1.0 - (dist / 64.0)
+                best_sim = max(best_sim, sim)
                 nearest = row
-                worst_reason = f"SIMHASH_NEAR (hamming={dist})"
-                return NoveltyDecision(False, worst_reason, nearest,
-                                     suggestions=self._suggest(channel, search_term, mode))
+                return (False, best_sim)
 
         # Check 4: Entity overlap
         for row in cand:
             ja = jaccard(set(ents), set(row.get("entities") or []))
             if ja > ENT_JACCARD_MAX:
+                best_sim = max(best_sim, ja)
                 nearest = row
-                worst_reason = f"ENTITY_OVERLAP (jaccard={ja:.2f})"
-                return NoveltyDecision(False, worst_reason, nearest,
-                                     suggestions=self._suggest(channel, search_term, mode))
+                return (False, best_sim)
 
         # Check 5: Embeddings (optional)
         if emb:
@@ -469,13 +492,15 @@ class NoveltyGuard:
                 if row.get("embed"):
                     cs = cos_sim(emb, row["embed"])
                     if cs > EMBED_COS_MAX:
+                        best_sim = max(best_sim, cs)
                         nearest = row
-                        worst_reason = f"EMBED_SIM (cos={cs:.2f})"
-                        return NoveltyDecision(False, worst_reason, nearest,
-                                             suggestions=self._suggest(channel, search_term, mode))
+                        return (False, best_sim)
 
-        return NoveltyDecision(True, "OK")
+        return (True, 0.0)
 
+    # ========================================================================
+    # API: Suggestions
+    # ========================================================================
     def _suggest(self, channel: str, current_term: Optional[str], mode: Optional[str] = None) -> Dict[str,Any]:
         """Generate alternative suggestions."""
         rec = self.term_recency(channel)
@@ -542,6 +567,21 @@ class NoveltyGuard:
         ))
         conn.commit()
         conn.close()
+
+    # --- Backward-compat helper (used by orchestrator) ---
+    def add_used_script(
+        self,
+        title: str,
+        script: Union[str, List[str]],
+        channel: Optional[str] = None,
+        **kwargs
+    ) -> None:
+        """
+        Orchestrator compatibility wrapper.
+        """
+        ch = self._resolve_channel(channel)
+        script_text = self._join_script(script)
+        self.register_item(channel=ch, title=title, script=script_text, **kwargs)
 
     # ========================================================================
     # API: Pexels Deduplication
