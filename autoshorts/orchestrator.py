@@ -154,8 +154,9 @@ class ShortsOrchestrator:
                     continue
 
                 # 2. Check novelty
-                if not self.novelty_guard.is_novel(script):
-                    logger.warning("⚠️ Script too similar to recent ones, regenerating...")
+                is_novel, similarity = self.novelty_guard.check_novelty(script)
+                if not is_novel:
+                    logger.warning(f"⚠️ Script too similar to recent ones (similarity: {similarity:.2f}), regenerating...")
                     continue
 
                 # 3. Produce video
