@@ -19,7 +19,7 @@ from autoshorts.config import settings
 from autoshorts.content.gemini_client import GeminiClient
 from autoshorts.content.quality_scorer import QualityScorer
 from autoshorts.content.text_utils import normalize_sentence, extract_keywords, simplify_query
-from autoshorts.tts.edge_handler import EdgeHandler
+from autoshorts.tts.edge_handler import EdgeTTSHandler
 from autoshorts.captions.renderer import CaptionRenderer
 from autoshorts.captions.karaoke_ass import build_karaoke_ass, get_random_style
 from autoshorts.audio.bgm_manager import BGMManager
@@ -58,7 +58,7 @@ class ShortsOrchestrator:
 
         self.gemini = GeminiClient(api_key=api_key or settings.GEMINI_API_KEY)
         self.quality_scorer = QualityScorer()
-        self.tts = EdgeHandler()
+        self.tts = EdgeTTSHandler()
         self.caption_renderer = CaptionRenderer()
         self.bgm_manager = BGMManager()
 
