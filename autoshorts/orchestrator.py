@@ -27,12 +27,7 @@ from autoshorts.state.state_guard import StateGuard
 from autoshorts.state.novelty_guard import NoveltyGuard
 from autoshorts.utils.ffmpeg_utils import (
     run,
-    concat_videos,
-    overlay_audio,
-    has_audio,
-    has_video,
-    ffprobe_duration,
-    apply_zoom_pan
+    ffprobe_duration
 )
 
 logger = logging.getLogger(__name__)
@@ -71,6 +66,60 @@ class ShortsOrchestrator:
         self.novelty_guard = NoveltyGuard()
 
         logger.info(f"🎬 ShortsOrchestrator initialized for channel: {channel_id}")
+
+    # ============================================================================
+    # HELPER METHODS - FFmpeg utilities
+    # ============================================================================
+    
+    def _concat_videos(self, video_paths: List[str], output_path: str, fps: int = 25):
+        """Concatenate multiple videos."""
+        if not video_paths:
+            raise ValueError("No videos to concatenate")
+        
+        # Create concat file
+        concat_file = output_path.replace(".mp4", "_concat.txt")
+        
+        with open(concat_file, 'w') as f:
+            for vp in video_paths:
+                f.write(f"file '{vp}'\n")
+        
+        try:
+            run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "concat", "-safe", "0", "-i", concat_file,
+                "-c:v", "libx264", "-preset", "medium",
+                "-crf", str(settings.CRF_VISUAL),
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "128k",
+                "-r", str(fps), "-vsync", "cfr",
+                output_path
+            ])
+        finally:
+            pathlib.Path(concat_file).unlink(missing_ok=True)
+    
+    def _overlay_audio(
+        self, 
+        video_path: str, 
+        audio_path: str, 
+        output_path: str,
+        video_duration: float
+    ):
+        """Overlay audio on video."""
+        run([
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", video_path,
+            "-i", audio_path,
+            "-t", str(video_duration),
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "128k",
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-shortest",
+            output_path
+        ])
+    
+    # ============================================================================
+    # END HELPER METHODS
+    # ============================================================================
 
     def produce_video(
         self,
@@ -221,7 +270,7 @@ class ShortsOrchestrator:
         output_path = str(self.temp_dir / output_name)
 
         try:
-            concat_videos(scene_videos, output_path, fps=settings.TARGET_FPS)
+            self._concat_videos(scene_videos, output_path, fps=settings.TARGET_FPS)
 
             if not os.path.exists(output_path):
                 logger.error("   ❌ Concatenation failed")
@@ -702,7 +751,7 @@ class ShortsOrchestrator:
         output_path = str(self.temp_dir / output_name)
 
         try:
-            overlay_audio(
+            self._overlay_audio(
                 video_path=video_path,
                 audio_path=audio_path,
                 output_path=output_path,
