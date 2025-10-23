@@ -154,7 +154,11 @@ class ShortsOrchestrator:
                     continue
 
                 # 2. Check novelty
-                is_novel, similarity = self.novelty_guard.check_novelty(script)
+                sentences_text = [s.get("text", "") for s in script.get("sentences", [])]
+                is_novel, similarity = self.novelty_guard.check_novelty(
+                    title=script.get("title", ""),
+                    script=sentences_text
+                )
                 if not is_novel:
                     logger.warning(f"⚠️ Script too similar to recent ones (similarity: {similarity:.2f}), regenerating...")
                     continue
@@ -176,7 +180,13 @@ class ShortsOrchestrator:
 
                 # 5. Update state
                 self.state_guard.save_successful_script(script)
-                self.novelty_guard.add_used_script(script)
+                
+                # Update novelty guard with title and sentences
+                sentences_text = [s.get("text", "") for s in script.get("sentences", [])]
+                self.novelty_guard.add_used_script(
+                    title=script.get("title", ""),
+                    script=sentences_text
+                )
 
                 logger.info(f"\n✅ VIDEO PRODUCTION COMPLETE")
                 logger.info(f"📁 Output: {video_path}")
