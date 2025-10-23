@@ -19,7 +19,7 @@ from autoshorts.config import settings
 from autoshorts.content.gemini_client import GeminiClient
 from autoshorts.content.quality_scorer import QualityScorer
 from autoshorts.content.text_utils import normalize_sentence, extract_keywords, simplify_query
-from autoshorts.tts.edge_handler import EdgeTTSHandler
+from autoshorts.tts.edge_handler import TTSHandler
 from autoshorts.captions.renderer import CaptionRenderer
 from autoshorts.captions.karaoke_ass import build_karaoke_ass, get_random_style
 from autoshorts.audio.bgm_manager import BGMManager
@@ -58,7 +58,7 @@ class ShortsOrchestrator:
 
         self.gemini = GeminiClient(api_key=api_key or settings.GEMINI_API_KEY)
         self.quality_scorer = QualityScorer()
-        self.tts = EdgeTTSHandler()
+        self.tts = TTSHandler()
         self.caption_renderer = CaptionRenderer()
         self.bgm_manager = BGMManager()
 
@@ -300,21 +300,20 @@ class ShortsOrchestrator:
         """Generate TTS audio."""
         logger.info(f"   🎤 Generating audio...")
 
-        audio_filename = f"scene_{scene_idx:03d}_audio.mp3"
+        audio_filename = f"scene_{scene_idx:03d}_audio.wav"
         audio_path = str(self.temp_dir / audio_filename)
 
         try:
-            success, words = self.tts.generate_with_timings(
+            # Use synthesize method which returns (duration, words)
+            duration, words = self.tts.synthesize(
                 text=text,
-                output_path=audio_path,
-                voice=settings.VOICE_NAME
+                wav_out=audio_path
             )
 
-            if not success or not os.path.exists(audio_path):
-                logger.error(f"      ❌ TTS failed")
+            if not os.path.exists(audio_path):
+                logger.error(f"      ❌ TTS failed - file not created")
                 return None, [], 0.0
 
-            duration = ffprobe_duration(audio_path)
             logger.info(f"      ✅ Audio: {duration:.2f}s, {len(words)} words")
 
             return audio_path, words, duration
