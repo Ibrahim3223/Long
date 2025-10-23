@@ -141,6 +141,12 @@ class ShortsOrchestrator:
             try:
                 logger.info(f"\n🔄 Attempt {attempt}/{max_retries}")
 
+                # ✅ Add delay between retries (avoid API rate limits)
+                if attempt > 1:
+                    delay = 2 * attempt  # Progressive delay: 2s, 4s, 6s
+                    logger.info(f"   ⏳ Waiting {delay}s before retry...")
+                    time.sleep(delay)
+
                 # 1. Generate script
                 script = self._generate_script(topic_prompt)
                 if not script:
@@ -254,7 +260,8 @@ class ShortsOrchestrator:
             scores = self.quality_scorer.score(sentences, title)
             overall_score = scores.get("overall", 0.0)
             
-            if overall_score < 5.0:
+            # ✅ LOWERED: Long-form content has different quality criteria than shorts
+            if overall_score < 4.0:
                 logger.warning(f"   ⚠️ Low quality script (score: {overall_score:.1f}), skipping")
                 return None
 
@@ -267,6 +274,14 @@ class ShortsOrchestrator:
 
         except Exception as e:
             logger.error(f"   ❌ Script generation error: {e}")
+            
+            # Check if it's a temporary API error
+            error_str = str(e)
+            if "503" in error_str or "UNAVAILABLE" in error_str or "overloaded" in error_str.lower():
+                logger.warning(f"   ⚠️ Gemini API temporarily unavailable, will retry...")
+            elif "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                logger.warning(f"   ⚠️ Rate limit hit, will retry after delay...")
+            
             import traceback
             logger.debug(traceback.format_exc())
             return None
