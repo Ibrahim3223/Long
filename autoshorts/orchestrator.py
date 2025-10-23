@@ -189,17 +189,66 @@ class ShortsOrchestrator:
         logger.info("\n📝 Generating script...")
 
         try:
-            script = self.gemini.generate_script(
-                prompt=topic_prompt,
-                language=settings.LANG
+            # ✅ Use GeminiClient.generate() with correct parameters
+            # Long-form videos: 4-7 minutes = 240-420 seconds
+            target_duration = 300  # 5 minutes default
+            style = "educational, informative, engaging"
+            
+            response = self.gemini.generate(
+                topic=topic_prompt,
+                style=style,
+                duration=target_duration,
+                additional_context=None
             )
-
-            if not script:
-                logger.error("   ❌ No script returned")
+            
+            # ✅ Convert ContentResponse to dict format for orchestrator
+            script = {
+                "title": response.metadata.get("title", ""),
+                "description": response.metadata.get("description", ""),
+                "tags": response.metadata.get("tags", []),
+                "hook": response.hook,
+                "sentences": [],
+                "chapters": response.chapters
+            }
+            
+            # ✅ Convert script list to sentence format
+            # First sentence is hook
+            script["sentences"].append({
+                "text": response.hook,
+                "type": "hook",
+                "visual_keywords": [response.main_visual_focus] if response.main_visual_focus else []
+            })
+            
+            # Main script sentences with visual keywords
+            for idx, sentence_text in enumerate(response.script):
+                # Distribute visual keywords across sentences
+                keywords = []
+                if idx < len(response.search_queries):
+                    # Use corresponding search query as keyword
+                    keywords = [response.search_queries[idx]]
+                elif response.search_queries:
+                    # Cycle through available keywords
+                    keywords = [response.search_queries[idx % len(response.search_queries)]]
+                
+                script["sentences"].append({
+                    "text": sentence_text,
+                    "type": "buildup",
+                    "visual_keywords": keywords
+                })
+            
+            # Last sentence is CTA
+            script["sentences"].append({
+                "text": response.cta,
+                "type": "conclusion",
+                "visual_keywords": []
+            })
+            
+            if not script["sentences"]:
+                logger.error("   ❌ No sentences generated")
                 return None
 
             # Quality check
-            sentences = [s.get("text", "") for s in script.get("sentences", [])]
+            sentences = [s.get("text", "") for s in script["sentences"]]
             title = script.get("title", "")
             
             scores = self.quality_scorer.score(sentences, title)
@@ -218,6 +267,8 @@ class ShortsOrchestrator:
 
         except Exception as e:
             logger.error(f"   ❌ Script generation error: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return None
 
     def _produce_video_from_script(self, script: Dict) -> Optional[str]:
