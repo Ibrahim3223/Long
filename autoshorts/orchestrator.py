@@ -17,7 +17,7 @@ import requests
 
 from autoshorts.config import settings
 from autoshorts.content.gemini_client import GeminiClient
-from autoshorts.content.quality_scorer import is_high_quality
+from autoshorts.content.quality_scorer import QualityScorer
 from autoshorts.content.text_utils import normalize_sentence, extract_keywords, simplify_query
 from autoshorts.tts.edge_handler import EdgeHandler
 from autoshorts.captions.renderer import CaptionRenderer
@@ -57,6 +57,7 @@ class ShortsOrchestrator:
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
         self.gemini = GeminiClient(api_key=api_key or settings.GEMINI_API_KEY)
+        self.quality_scorer = QualityScorer()
         self.tts = EdgeHandler()
         self.caption_renderer = CaptionRenderer()
         self.bgm_manager = BGMManager()
@@ -149,11 +150,18 @@ class ShortsOrchestrator:
                 return None
 
             # Quality check
-            if not is_high_quality(script):
-                logger.warning("   ⚠️ Low quality script, skipping")
+            sentences = [s.get("text", "") for s in script.get("sentences", [])]
+            title = script.get("title", "")
+            
+            scores = self.quality_scorer.score(sentences, title)
+            overall_score = scores.get("overall", 0.0)
+            
+            if overall_score < 5.0:
+                logger.warning(f"   ⚠️ Low quality script (score: {overall_score:.1f}), skipping")
                 return None
 
             logger.info(f"   ✅ Script generated")
+            logger.info(f"      Quality score: {overall_score:.1f}/10")
             logger.info(f"      Title: {script.get('title', 'N/A')[:60]}...")
             logger.info(f"      Scenes: {len(script.get('sentences', []))}")
 
