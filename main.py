@@ -8,6 +8,7 @@ import sys
 import os
 import shutil
 import logging
+import tempfile
 
 # CRITICAL: Clear Python cache before starting
 def clear_cache():
@@ -65,6 +66,8 @@ print(f"✅ autoshorts module found at {autoshorts_path}")
 # Now safe to import
 try:
     from autoshorts.orchestrator import ShortsOrchestrator
+    from autoshorts.config.channel_loader import apply_channel_settings
+    from autoshorts.config import settings
     print("✅ Successfully imported ShortsOrchestrator")
 except ImportError as e:
     print(f"❌ Import error: {e}")
@@ -92,17 +95,47 @@ def main():
     )
     
     try:
+        # ✅ Get channel name from environment
+        channel_name = os.environ.get("CHANNEL_NAME") or os.environ.get("ENV")
+        
+        if not channel_name:
+            print("⚠️ No CHANNEL_NAME or ENV variable found, using 'default'")
+            channel_name = "default"
+        
+        print(f"\n📺 Channel: {channel_name}")
+        
+        # ✅ Load channel-specific settings
+        channel_settings = apply_channel_settings(channel_name)
+        
+        # ✅ Create temp directory
+        temp_dir = os.path.join(tempfile.gettempdir(), f"autoshorts_{channel_name}")
+        os.makedirs(temp_dir, exist_ok=True)
+        print(f"📁 Temp dir: {temp_dir}")
+        
         print("\n🔧 Creating orchestrator...")
-        orchestrator = ShortsOrchestrator()
+        
+        # ✅ Initialize orchestrator with proper parameters
+        orchestrator = ShortsOrchestrator(
+            channel_id=channel_name,
+            temp_dir=temp_dir,
+            api_key=settings.GEMINI_API_KEY,
+            pexels_key=settings.PEXELS_API_KEY
+        )
         
         print("\n🎬 Starting video generation...\n")
-        video_id = orchestrator.run()
         
-        if video_id:
+        # ✅ Generate video using channel topic
+        topic_prompt = channel_settings.get("CHANNEL_TOPIC", "Create an interesting video")
+        video_path, metadata = orchestrator.produce_video(topic_prompt)
+        
+        if video_path and metadata:
             print("\n" + "=" * 60)
-            print(f"✅ SUCCESS! Video ID: {video_id}")
-            print(f"   Watch: https://youtube.com/watch?v={video_id}")
+            print(f"✅ SUCCESS! Video created: {video_path}")
+            print(f"   Title: {metadata.get('title', 'N/A')[:60]}...")
             print("=" * 60)
+            
+            # TODO: Upload to YouTube using metadata
+            # For now, just report success
             return 0
         else:
             print("\n" + "=" * 60)
