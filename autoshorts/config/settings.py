@@ -119,14 +119,23 @@ SCENE_MIN_DURATION = 8.0
 SCENE_MAX_DURATION = 15.0
 
 # ============================================================
-# TTS SETTINGS
+# TTS SETTINGS (+ compatibility aliases)
 # ============================================================
 
-TTS_VOICE = os.getenv("TTS_VOICE", "en-US-GuyNeural")
+# Provider hint for TTS stack (some handlers read this)
+TTS_PROVIDER = os.getenv("TTS_PROVIDER", "edge")  # edge | google
+
+# Canonical names in this config
+TTS_VOICE = os.getenv("TTS_VOICE", "en-US-AriaNeural")  # safe default Edge voice
 VOICE = TTS_VOICE
 TTS_RATE = os.getenv("TTS_RATE", "+5%")
 TTS_PITCH = os.getenv("TTS_PITCH", "+0Hz")
 TTS_STYLE = os.getenv("TTS_STYLE", "narration-professional")
+
+# Some TTS handlers expect these Edge-specific names:
+EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", TTS_VOICE)
+EDGE_TTS_RATE = os.getenv("EDGE_TTS_RATE", TTS_RATE)
+GOOGLE_TTS_LANG = os.getenv("GOOGLE_TTS_LANG", "en-US")
 
 # ============================================================
 # PEXELS SETTINGS - OPTIMIZED FOR LONG-FORM
@@ -170,22 +179,32 @@ KARAOKE_OUTLINE = "#000000"
 CAPTION_MARGIN_V = 100
 
 # ============================================================
-# BGM SETTINGS
+# BGM SETTINGS (+ compatibility aliases)
 # ============================================================
 
+# Your original flag
 BGM_ENABLE = _env_bool("BGM_ENABLE", True)
-BGM_VOLUME_DB = -28.0
-BGM_DUCK_DB = -14.0
-BGM_FADE_DURATION = 1.5
+
+# Orchestrator expects this exact name:
+BGM_ENABLED = _env_bool("BGM_ENABLED", BGM_ENABLE)
+
+BGM_VOLUME_DB = _env_float("BGM_VOLUME_DB", -28.0)
+BGM_DUCK_DB = _env_float("BGM_DUCK_DB", -14.0)
+BGM_FADE_DURATION = _env_float("BGM_FADE_DURATION", 1.5)  # seconds
 BGM_DIR = os.getenv("BGM_DIR", "bgm")
 BGM_URLS = _parse_list(os.getenv("BGM_URLS", ""))
 
-BGM_GAIN_DB = -28.0
-BGM_DUCK_THRESH = 0.09
-BGM_DUCK_RATIO = 4.0
-BGM_DUCK_ATTACK_MS = 20.0
-BGM_DUCK_RELEASE_MS = 300.0
-BGM_FADE = 1.5
+# Extra params some mixers/managers may read
+BGM_GAIN_DB = _env_float("BGM_GAIN_DB", -28.0)
+BGM_DUCK_THRESH = _env_float("BGM_DUCK_THRESH", 0.09)
+BGM_DUCK_RATIO = _env_float("BGM_DUCK_RATIO", 4.0)
+BGM_DUCK_ATTACK_MS = _env_float("BGM_DUCK_ATTACK_MS", 20.0)
+BGM_DUCK_RELEASE_MS = _env_float("BGM_DUCK_RELEASE_MS", 300.0)
+BGM_FADE = _env_float("BGM_FADE", 1.5)
+
+# Aliases for other components (if they exist)
+BGM_DUCKING_DB = BGM_DUCK_DB
+BGM_FADE_MS = int(BGM_FADE_DURATION * 1000)
 
 # ============================================================
 # STATE MANAGEMENT
@@ -198,6 +217,9 @@ NOVELTY_ENFORCE = True
 NOVELTY_WINDOW = 30
 NOVELTY_JACCARD_MAX = 0.60
 NOVELTY_RETRIES = 5
+
+# Optional: some modules check this ENV directly, we mirror a bool here
+NOVELTY_EMBEDDINGS = _env_bool("NOVELTY_EMBEDDINGS", False)
 
 # ============================================================
 # QUALITY SETTINGS
@@ -236,6 +258,12 @@ MIN_CHAPTER_SENTENCES = 5
 LANG = os.getenv("LANG", "en")
 
 # ============================================================
+# RUNTIME / DEVICE
+# ============================================================
+
+TORCH_DEVICE = os.getenv("TORCH_DEVICE", "cpu")
+
+# ============================================================
 # OUTPUT
 # ============================================================
 
@@ -245,7 +273,7 @@ OUTPUT_DIR = os.getenv("OUTPUT_DIR", "out")
 import pathlib
 pathlib.Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 pathlib.Path(STATE_DIR).mkdir(parents=True, exist_ok=True)
-if BGM_ENABLE and BGM_DIR:
+if BGM_ENABLED and BGM_DIR:
     pathlib.Path(BGM_DIR).mkdir(parents=True, exist_ok=True)
 
 # ============================================================
@@ -263,4 +291,6 @@ _logger.info("LONG-FORM SETTINGS LOADED")
 _logger.info(f"Sentences: {MIN_SENTENCES}-{MAX_SENTENCES}")
 _logger.info(f"Duration: {TARGET_MIN_SEC/60:.1f}-{TARGET_MAX_SEC/60:.1f} min")
 _logger.info(f"Captions: {'ENABLED' if KARAOKE_CAPTIONS else 'DISABLED'}")
+_logger.info(f"BGM: {'ENABLED' if BGM_ENABLED else 'DISABLED'} | Dir: {BGM_DIR}")
+_logger.info(f"TTS: provider={TTS_PROVIDER}, voice={EDGE_TTS_VOICE}, rate={EDGE_TTS_RATE}")
 _logger.info("=" * 60)
