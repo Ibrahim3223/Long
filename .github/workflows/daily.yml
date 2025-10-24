@@ -71,6 +71,13 @@ jobs:
           VIS_VAL="${VARS_VISIBILITY:-}"
           SEED_VAL="${VARS_ROTATION_SEED:-}"
 
+          # TTS voice boşsa hızlı ve stabil default atıyoruz (Edge-TTS default)
+          if [ -z "${VARS_TTS_VOICE:-}" ]; then
+            DEF_VOICE="en-US-GuyNeural"
+          else
+            DEF_VOICE="${VARS_TTS_VOICE}"
+          fi
+
           wenv () {
             local __name="$1"; shift
             local __val="$*"
@@ -91,7 +98,7 @@ jobs:
           wenv SEARCH_TERMS        "${VARS_SEARCH_TERMS}"
           wenv GEMINI_PROMPT       "${VARS_GEMINI_PROMPT}"
           wenv TTS_RATE            "${VARS_TTS_RATE:-+5%}"
-          wenv TTS_VOICE           "${VARS_TTS_VOICE}"
+          wenv TTS_VOICE           "${DEF_VOICE}"
           wenv BGM_URLS            "${VARS_BGM_URLS}"
           wenv UPLOAD_TO_YT        "1"
 
@@ -104,7 +111,23 @@ jobs:
             state-long-${{ inputs.environment }}-
             state-long-
 
+      # 🔥 Model ağırlıklarını cache'le — SentenceTransformer, torch, HF vb.
+      - name: Cache model weights (HF/torch/ST)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/torch
+            ~/.cache/huggingface
+            ~/.cache/sentence_transformers
+          key: models-${{ inputs.environment }}-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            models-${{ inputs.environment }}-${{ runner.os }}-
+            models-
+
       - name: Install Python dependencies
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: "1"
+          PIP_NO_WARN_SCRIPT_LOCATION: "1"
         run: |
           echo "📦 Installing Python packages..."
           python -m pip install -U pip setuptools wheel
@@ -112,14 +135,14 @@ jobs:
           echo "✅ Python dependencies installed"
 
       # ============================================================
-      # CRITICAL: stable-ts for MILISECOND-PERFECT caption sync
+      # stable-ts (phoneme-level align) — Edge-TTS marker varsa çoğunlukla gerekmez,
+      # ama yüklü dursun (fallback olduğunda kırılmasın).
       # ============================================================
       - name: Install stable-ts (milisecond-perfect captions)
         run: |
           echo "🎯 Installing stable-ts for phoneme-level caption alignment..."
-          pip install stable-ts>=2.14.0
-          echo "✅ stable-ts installed - milisecond caption sync enabled!"
-          echo "   Caption precision: ~10-20ms (phoneme-level)"
+          pip install "stable-ts>=2.14.0"
+          echo "✅ stable-ts installed"
 
       - name: Build long-form video
         env:
@@ -143,7 +166,7 @@ jobs:
 
           # ===== TTS (Natural Pacing) =====
           TTS_SSML: "0"
-          TTS_RATE: "+5%"
+          # TTS_RATE export adımından geliyor, burada override etmiyoruz
 
           # ===== CAPTIONS (Bottom Positioned) =====
           REQUIRE_CAPTIONS: "1"
@@ -186,21 +209,22 @@ jobs:
           SIM_TH_ENTITY: "0.92"
           STATE_DIR: ".state"
 
-          # ===== PEXELS (Reuse Allowed) =====
+          # ===== PEXELS (Faster Search) =====
           SCENE_STRATEGY: "topic_only"
           PEXELS_DEEP_SEARCH: "1"
           PEXELS_STRICT_VERTICAL: "0"
           PEXELS_ALLOW_LANDSCAPE: "1"
           PEXELS_MIN_HEIGHT: "720"
-          PEXELS_PER_PAGE: "80"
+          PEXELS_PER_PAGE: "60"          # 80 -> 60 (daha hızlı)
           PEXELS_ALLOW_REUSE: "1"
-          PEXELS_MAX_USES_PER_CLIP: "2"
-          PEXELS_MAX_PAGES: "15"
+          PEXELS_MAX_USES_PER_CLIP: "3"  # 2 -> 3 (daha az indirme)
+          PEXELS_MAX_PAGES: "8"          # 15 -> 8 (arama derinliği kısaldı)
           ALLOW_PIXABAY_FALLBACK: "1"
           STRICT_ENTITY_FILTER: "0"
 
           # ===== BGM =====
-          BGM_ENABLE: "1"
+          # Geçici olarak kapalı (BGMManager alias fix gelene kadar)
+          BGM_ENABLE: "0"
           BGM_DIR: "bgm"
           BGM_FADE: "1.5"
           BGM_GAIN_DB: "-28"
@@ -218,8 +242,7 @@ jobs:
           echo "== ${CHANNEL_NAME} (LONG-FORM) =="
           echo "TOPIC=${TOPIC}"
           echo "LANG=${LANG}"
-          echo "TARGET: 3-10 minutes (20-35 sentences)"
-          echo "FORMAT: 16:9 landscape"
+          echo "TARGET: 3-10 minutes (20-35 sentences) | 16:9"
           python main.py 2>&1 | tee "build_${CHANNEL_NAME}.log"
 
       - name: Upload artifact (mp4)
