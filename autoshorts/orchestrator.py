@@ -56,10 +56,13 @@ class ShortsOrchestrator:
         self.tts = TTSHandler()
         self.caption_renderer = CaptionRenderer()
         self.bgm_manager = BGMManager()
-
         self.pexels_key = pexels_key or settings.PEXELS_API_KEY
         if not self.pexels_key:
             raise ValueError("PEXELS_API_KEY required")
+
+        self._http = requests.Session()
+        self._http.headers.update({"Authorization": self.pexels_key})
+        self._video_url_cache: Dict[str, List[str]] = {}
 
         # State guards
         self.state_guard = StateGuard(channel_id)
@@ -551,6 +554,14 @@ class ShortsOrchestrator:
             try:
                 logger.debug(f"         Attempt {attempt}: '{current_query}'")
 
+                cached = self._video_url_cache.get(current_query)
+                if cached:
+                    url = cached.pop(0)
+                    if not cached:
+                        self._video_url_cache.pop(current_query, None)
+                    logger.info(f"      ✅ Video found from cache (attempt {attempt})")
+                    return url
+
                 # ✅ CRITICAL: Request landscape orientation
                 params = {
                     "query": current_query,
@@ -558,12 +569,9 @@ class ShortsOrchestrator:
                     "orientation": "landscape"  # ✅ LANDSCAPE ONLY
                 }
 
-                headers = {"Authorization": self.pexels_key}
-                
-                response = requests.get(
+                response = self._http.get(
                     "https://api.pexels.com/videos/search",
                     params=params,
-                    headers=headers,
                     timeout=10
                 )
                 response.raise_for_status()
@@ -589,27 +597,37 @@ class ShortsOrchestrator:
                     logger.debug(f"         No landscape videos found")
                     continue
 
-                # Pick random video
-                video = random.choice(landscape_videos)
-                video_files = video.get("video_files", [])
+                hd_urls: List[str] = []
+                fallback_urls: List[str] = []
 
-                # Get best quality landscape video
-                for vf in video_files:
-                    if vf.get("quality") == "hd":
+                for video in landscape_videos:
+                    for vf in video.get("video_files", []):
                         vf_width = vf.get("width", 0)
                         vf_height = vf.get("height", 0)
-                        
-                        if vf_width > vf_height:  # Double check
-                            logger.info(f"      ✅ Video found (attempt {attempt})")
-                            return vf.get("link")
+                        link = vf.get("link")
 
-                # Fallback to any landscape file
-                for vf in video_files:
-                    vf_width = vf.get("width", 0)
-                    vf_height = vf.get("height", 0)
-                    
-                    if vf_width > vf_height:
-                        return vf.get("link")
+                        if not link or vf_width <= vf_height:
+                            continue
+
+                        if vf.get("quality") == "hd":
+                            hd_urls.append(link)
+                        else:
+                            fallback_urls.append(link)
+
+                candidates = hd_urls or fallback_urls
+                if not candidates:
+                    logger.debug("         No usable files in landscape videos")
+                    continue
+
+                random.shuffle(candidates)
+                chosen = candidates[0]
+                remaining = candidates[1:5]  # Keep a few cached options
+
+                if remaining:
+                    self._video_url_cache[current_query] = remaining
+
+                logger.info(f"      ✅ Video found (attempt {attempt})")
+                return chosen
 
             except Exception as e:
                 logger.debug(f"         Query {attempt} error: {e}")
@@ -764,54 +782,41 @@ class ShortsOrchestrator:
                 logger.error(f"      ❌ ASS file creation failed")
                 return video_path
 
-            # Burn captions
+            # Burn captions in a single pass (removes previous double-encode)
             output = video_path.replace(".mp4", "_caption.mp4")
-            tmp_out = output.replace(".mp4", ".tmp.mp4")
+            frames = int(duration * settings.TARGET_FPS)
+            ass_arg = pathlib.Path(ass_path).as_posix().replace("'", r"\'")
+            subtitle_filter = (
+                f"subtitles='{ass_arg}':force_style='Kerning=1',"
+                f"setsar=1,fps={settings.TARGET_FPS},trim=start_frame=0:end_frame={frames},setpts=PTS-STARTPTS"
+            )
 
-            try:
-                # Burn subtitles
-                run([
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", video_path,
-                    "-vf", f"subtitles='{ass_path}':force_style='Kerning=1',setsar=1,fps={settings.TARGET_FPS}",
-                    "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
-                    "-c:v", "libx264", "-preset", "medium",
-                    "-crf", str(settings.CRF_VISUAL),
-                    "-pix_fmt", "yuv420p",
-                    "-an",  # No audio yet
-                    tmp_out
-                ])
+            run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", video_path,
+                "-vf", subtitle_filter,
+                "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
+                "-c:v", "libx264", "-preset", "medium",
+                "-crf", str(settings.CRF_VISUAL),
+                "-pix_fmt", "yuv420p",
+                "-an",  # No audio yet
+                output
+            ])
 
-                if not os.path.exists(tmp_out):
-                    logger.error(f"      ❌ Caption burn failed")
-                    return video_path
+            exists = os.path.exists(output)
+            pathlib.Path(ass_path).unlink(missing_ok=True)
 
-                # Trim to exact duration
-                frames = int(duration * settings.TARGET_FPS)
-                
-                run([
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", tmp_out,
-                    "-vf", f"setsar=1,fps={settings.TARGET_FPS},trim=start_frame=0:end_frame={frames}",
-                    "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
-                    "-c:v", "libx264", "-preset", "medium",
-                    "-crf", str(settings.CRF_VISUAL),
-                    "-pix_fmt", "yuv420p",
-                    output
-                ])
+            if exists:
+                logger.info(f"      ✅ Captions added with colorful style!")
+                return output
 
-                if os.path.exists(output):
-                    logger.info(f"      ✅ Captions added with colorful style!")
-                    return output
-
-            finally:
-                pathlib.Path(ass_path).unlink(missing_ok=True)
-                pathlib.Path(tmp_out).unlink(missing_ok=True)
+            pathlib.Path(output).unlink(missing_ok=True)
 
             return video_path
 
         except Exception as e:
             logger.error(f"      ❌ Caption error: {e}")
+            pathlib.Path(ass_path).unlink(missing_ok=True)
             return video_path
 
     def _overlay_audio_on_video(
