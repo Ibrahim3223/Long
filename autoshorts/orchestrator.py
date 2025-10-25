@@ -359,6 +359,38 @@ class ShortsOrchestrator:
         return final_path
 
 
+            rendered.append(scene_path)
+            scene_duration = ffprobe_duration(scene_path)
+            total_duration += scene_duration
+            logger.info("Scene %s duration %.2fs", index, scene_duration)
+
+        if not rendered:
+            logger.error("No scenes rendered")
+            return None
+
+        final_path = str(self.temp_dir / f"final_{int(time.time())}.mp4")
+        try:
+            self._concat_segments(rendered, final_path)
+        except Exception as exc:
+            logger.error("Concatenation failed: %s", exc)
+            return None
+
+        if not os.path.exists(final_path):
+            logger.error("Final video missing after concat")
+            return None
+
+        if settings.BGM_ENABLED:
+            logger.info("Adding BGM to final video")
+            with_bgm = self.bgm_manager.add_bgm_to_video(
+                final_path, total_duration, str(self.temp_dir)
+            )
+            if with_bgm and os.path.exists(with_bgm):
+                final_path = with_bgm
+
+        logger.info("Final video assembled: %s", final_path)
+        return final_path
+
+
         if not os.path.exists(final_path):
             logger.error("Final video missing after concat")
             return None
@@ -440,6 +472,13 @@ class ShortsOrchestrator:
             logger.error("Download failed for %s", candidate.url)
             return None
 
+            return None
+
+        local_raw = self.temp_dir / f"scene_{index:03d}_raw.mp4"
+        if not self._download_clip(candidate.url, local_raw):
+            logger.error("Download failed for %s", candidate.url)
+            return None
+
         processed = self.temp_dir / f"scene_{index:03d}_proc.mp4"
         try:
             self._process_clip(local_raw, processed, duration, sentence_type)
@@ -503,6 +542,194 @@ class ShortsOrchestrator:
         fallbacks: Sequence[str],
         text: str,
     ) -> Optional[ClipCandidate]:
+        """Return the next viable clip candidate for a scene."""
+
+        queries = [primary]
+        queries.extend([kw for kw in fallbacks if kw and kw != primary])
+
+        simplified = simplify_query(text)
+        if simplified and simplified not in queries:
+            queries.append(simplified)
+
+        queries.append(settings.CHANNEL_TOPIC)
+        queries.append("dynamic landscape video")
+
+        for query in queries:
+            pool = self._get_candidates(query)
+            if not pool:
+                continue
+
+            candidate = next(
+                (
+                    clip
+                    for clip in pool
+                    if clip.duration >= settings.PEXELS_MIN_DURATION
+                ),
+                None,
+            )
+            if not candidate:
+                continue
+
+            pool.remove(candidate)
+            logger.info("Using clip %s for query '%s'", candidate.url, query)
+            return candidate
+
+        logger.warning("No clip candidate located for primary keyword '%s'", primary)
+        return None
+
+    def _get_candidates(self, query: str) -> List[ClipCandidate]:
+        cache = self._video_candidates.get(query)
+        if cache is not None:
+            return cache
+
+        results: List[ClipCandidate] = []
+        try:
+            params = {
+                "query": query,
+                "per_page": min(settings.PEXELS_PER_PAGE, 80),
+                "orientation": "landscape",
+            }
+            response = self._http.get(PEXELS_SEARCH_ENDPOINT, params=params, timeout=12)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            logger.error("Pexels lookup failed for '%s': %s", query, exc)
+            logger.debug("", exc_info=True)
+            payload = {}
+
+        for video in payload.get("videos", []) or []:
+            video_id = str(video.get("id", ""))
+            duration = float(video.get("duration", 0.0))
+            url = self._select_video_file(video)
+            if not url:
+                continue
+            results.append(
+                ClipCandidate(url=url, duration=duration, video_id=video_id)
+            )
+
+        random.shuffle(results)
+        self._video_candidates[query] = results
+        return results
+
+    def _select_video_file(self, video: Dict) -> Optional[str]:
+        files = video.get("video_files", []) or []
+        landscape: List[str] = []
+        fallback: List[str] = []
+
+        for file_data in files:
+            link = file_data.get("link")
+            width = int(file_data.get("width", 0))
+            height = int(file_data.get("height", 0))
+            if not link or width <= height:
+                continue
+
+            quality = file_data.get("quality")
+            if quality == "hd":
+                landscape.append(link)
+            else:
+                fallback.append(link)
+
+        pool = landscape or fallback
+        if not pool:
+            return None
+
+        if len(pool) > 1:
+            random.shuffle(pool)
+
+        return pool[0]
+
+    def _download_clip(self, url: str, destination: pathlib.Path) -> bool:
+        if self._clip_cache.try_copy(url, destination):
+            logger.info("Reused cached clip for %s", url)
+            return True
+
+        try:
+            with self._http.get(url, stream=True, timeout=45) as response:
+                response.raise_for_status()
+                with open(destination, "wb") as handle:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            handle.write(chunk)
+        except Exception as exc:
+            logger.error("Clip download failed: %s", exc)
+            logger.debug("", exc_info=True)
+            return False
+
+        if destination.exists():
+            self._clip_cache.store(url, destination)
+            return True
+        return False
+
+    def _process_clip(
+        self,
+        source: pathlib.Path,
+        output: pathlib.Path,
+        target_duration: float,
+        sentence_type: str,
+    ) -> None:
+        duration = ffprobe_duration(str(source))
+        if duration <= 0:
+            raise RuntimeError("invalid clip duration")
+
+        loops = max(1, int(target_duration // duration) + 1)
+        filters: List[str] = []
+        if loops > 1:
+            filters.append(f"loop={loops}:size=1:start=0")
+
+        filters.extend(
+            [
+                "scale=1920:1080:force_original_aspect_ratio=increase",
+                "crop=1920:1080",
+            ]
+        )
+
+        if sentence_type == "hook":
+            filters.append(
+                "zoompan=z='min(zoom+0.0006,1.12)':d=1:s=1920x1080:fps=%d"
+                % settings.TARGET_FPS
+            )
+        else:
+            filters.append(
+                "zoompan=z='1.06':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                "d=1:s=1920x1080:fps=%d" % settings.TARGET_FPS
+            )
+
+        total_frames = max(2, int(round(target_duration * settings.TARGET_FPS)))
+        filters.extend(
+            [
+                f"trim=start_frame=0:end_frame={total_frames}",
+                "setpts=PTS-STARTPTS",
+            ]
+        )
+
+        run(
+            [
+                "ffmpeg",
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(source),
+                "-vf",
+                ",".join(filters),
+                "-r",
+                str(settings.TARGET_FPS),
+                "-vsync",
+                "cfr",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                str(settings.CRF_VISUAL),
+                "-pix_fmt",
+                "yuv420p",
+                "-an",
+                str(output),
+            ]
+        )
+
     ) -> Optional[Dict[str, str]]:
         queries = [primary]
         queries.extend([kw for kw in fallbacks if kw and kw != primary])
