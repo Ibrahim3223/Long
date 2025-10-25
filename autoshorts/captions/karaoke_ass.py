@@ -1,20 +1,31 @@
+# FILE: autoshorts/captions/karaoke_ass.py
 # -*- coding: utf-8 -*-
 """
-Karaoke ASS subtitle builder - LONG-FORM VERSION (16:9 LANDSCAPE)
-✅ FIXED: Now actually uses the colorful caption styles!
-Bottom-positioned captions with smaller fonts for landscape videos
+Karaoke ASS subtitle builder – long-form, 16:9 landscape.
+- Weighted colorful styles
+- Bottom-centered alignment
+- Safe text escaping for ASS
 """
 import random
 from typing import List, Dict, Optional, Any, Tuple
 
+# ------------------------- Helpers ------------------------- #
 
-# ============================================================================
-# LANDSCAPE CAPTION STYLES - Bottom positioned for 16:9
-# Font sizes reduced, margin_v adjusted for bottom positioning
-# ============================================================================
+def _ass_escape(text: str) -> str:
+    """Escape special chars for ASS override blocks and text."""
+    # Order matters: escape backslashes first
+    t = (text or "").replace("\\", r"\\")
+    t = t.replace("{", r"\{").replace("}", r"\}")
+    # Newlines -> ASS hard line breaks
+    t = t.replace("\n", r"\N")
+    return t
+
+
+# ------------------------- Styles -------------------------- #
+# NOTE: ASS colors are in &H AABBGGRR format (BBGGRR with alpha).
 
 CAPTION_STYLES = {
-    # Style 1: CLASSIC YELLOW - Safe and proven
+    # 1) Classic Yellow
     "classic_yellow": {
         "name": "Classic Yellow",
         "fontname": "Arial Black",
@@ -22,18 +33,18 @@ CAPTION_STYLES = {
         "fontsize_hook": 50,
         "fontsize_emphasis": 48,
         "outline": 5,
-        "shadow": "3",
+        "shadow": 3,
         "glow": True,
         "bounce": True,
         "color_inactive": "&H00FFFFFF",  # White
         "color_active": "&H0000FFFF",    # Yellow
         "color_outline": "&H00000000",   # Black
         "color_emphasis": "&H0000FFFF",  # Yellow
-        "color_secondary": "&H0000DDFF", # Light yellow
-        "margin_v": 90  # Bottom positioning
+        "color_secondary": "&H0000DDFF",
+        "margin_v": 90
     },
-    
-    # Style 2: NEON CYAN - Electric energy
+
+    # 2) Neon Cyan
     "neon_cyan": {
         "name": "Neon Cyan",
         "fontname": "Arial Black",
@@ -41,18 +52,18 @@ CAPTION_STYLES = {
         "fontsize_hook": 48,
         "fontsize_emphasis": 46,
         "outline": 4,
-        "shadow": "3",
+        "shadow": 3,
         "glow": True,
         "bounce": True,
         "color_inactive": "&H00FFFFFF",
         "color_active": "&H00FFFF00",    # Cyan
         "color_outline": "&H00000000",
-        "color_emphasis": "&H0000FFFF",
-        "color_secondary": "&H00FFAA00",
+        "color_emphasis": "&H00FFFF00",
+        "color_secondary": "&H00AAFF00",
         "margin_v": 90
     },
-    
-    # Style 3: HOT PINK - Bold and attention-grabbing
+
+    # 3) Hot Pink (fixed BBGGRR ordering)
     "hot_pink": {
         "name": "Hot Pink",
         "fontname": "Impact",
@@ -60,18 +71,20 @@ CAPTION_STYLES = {
         "fontsize_hook": 48,
         "fontsize_emphasis": 46,
         "outline": 4,
-        "shadow": "3",
+        "shadow": 3,
         "glow": True,
         "bounce": True,
+        # DeepPink (#FF1493) => &H009314FF
         "color_inactive": "&H00FFFFFF",
-        "color_active": "&H00FF1493",    # Deep pink
+        "color_active": "&H009314FF",
         "color_outline": "&H00000000",
-        "color_emphasis": "&H0000FFFF",
-        "color_secondary": "&H00FF69B4",
+        # HotPink (#FF69B4) => &H00B469FF
+        "color_emphasis": "&H00B469FF",
+        "color_secondary": "&H00B469FF",
         "margin_v": 90
     },
-    
-    # Style 4: LIME GREEN - Fresh and vibrant
+
+    # 4) Lime Green
     "lime_green": {
         "name": "Lime Green",
         "fontname": "Arial Black",
@@ -79,18 +92,18 @@ CAPTION_STYLES = {
         "fontsize_hook": 50,
         "fontsize_emphasis": 48,
         "outline": 5,
-        "shadow": "3",
+        "shadow": 3,
         "glow": True,
         "bounce": True,
         "color_inactive": "&H00FFFFFF",
-        "color_active": "&H0000FF00",    # Lime
+        "color_active": "&H0000FF00",
         "color_outline": "&H00000000",
-        "color_emphasis": "&H0000FFFF",
+        "color_emphasis": "&H0000FF00",
         "color_secondary": "&H0000DD00",
         "margin_v": 95
     },
-    
-    # Style 5: ORANGE FIRE - Warm and energetic
+
+    # 5) Orange Fire
     "orange_fire": {
         "name": "Orange Fire",
         "fontname": "Impact",
@@ -98,37 +111,38 @@ CAPTION_STYLES = {
         "fontsize_hook": 50,
         "fontsize_emphasis": 48,
         "outline": 5,
-        "shadow": "3",
+        "shadow": 3,
         "glow": True,
         "bounce": True,
         "color_inactive": "&H00FFFFFF",
-        "color_active": "&H000099FF",    # Orange
+        # Orange (#FF9900) => &H000099FF
+        "color_active": "&H000099FF",
         "color_outline": "&H00000000",
-        "color_emphasis": "&H0000FFFF",
+        "color_emphasis": "&H0000BBFF",
         "color_secondary": "&H0000BBFF",
         "margin_v": 95
     },
-    
-    # Style 6: PURPLE VIBES - Trendy and modern
+
+    # 6) Purple Vibes
     "purple_vibes": {
         "name": "Purple Vibes",
-        "fontname": "Montserrat Black",
+        "fontname": "Arial Black",
         "fontsize_normal": 42,
         "fontsize_hook": 48,
         "fontsize_emphasis": 46,
         "outline": 4,
-        "shadow": "3",
+        "shadow": 3,
         "glow": True,
         "bounce": True,
         "color_inactive": "&H00FFFFFF",
-        "color_active": "&H00FF00FF",    # Magenta
+        "color_active": "&H00FF00FF",  # Magenta
         "color_outline": "&H00000000",
         "color_emphasis": "&H00FF00FF",
         "color_secondary": "&H00CC00FF",
         "margin_v": 90
     },
-    
-    # Style 7: TURQUOISE WAVE - Cool and calming
+
+    # 7) Turquoise Wave
     "turquoise_wave": {
         "name": "Turquoise Wave",
         "fontname": "Arial Black",
@@ -136,18 +150,20 @@ CAPTION_STYLES = {
         "fontsize_hook": 48,
         "fontsize_emphasis": 46,
         "outline": 4,
-        "shadow": "3",
+        "shadow": 3,
         "glow": True,
         "bounce": True,
         "color_inactive": "&H00FFFFFF",
-        "color_active": "&H00FFCC00",    # Turquoise
+        # Turquoise (#00CCFF) => &H00FFCC00
+        "color_active": "&H00FFCC00",
         "color_outline": "&H00000000",
+        # Emphasis as bright yellow for pop
         "color_emphasis": "&H00FFFF00",
         "color_secondary": "&H00FFDD00",
         "margin_v": 90
     },
-    
-    # Style 8: RED HOT - Intense and dramatic
+
+    # 8) Red Hot
     "red_hot": {
         "name": "Red Hot",
         "fontname": "Impact",
@@ -155,19 +171,18 @@ CAPTION_STYLES = {
         "fontsize_hook": 50,
         "fontsize_emphasis": 48,
         "outline": 5,
-        "shadow": "3",
+        "shadow": 3,
         "glow": True,
         "bounce": True,
         "color_inactive": "&H00FFFFFF",
-        "color_active": "&H000000FF",    # Red
+        "color_active": "&H000000FF",  # Red
         "color_outline": "&H00000000",
-        "color_emphasis": "&H0000FFFF",
+        "color_emphasis": "&H000033FF",
         "color_secondary": "&H000033FF",
         "margin_v": 95
-    }
+    },
 }
 
-# Same weights as shorts
 STYLE_WEIGHTS = {
     "classic_yellow": 0.25,
     "neon_cyan": 0.15,
@@ -176,10 +191,9 @@ STYLE_WEIGHTS = {
     "orange_fire": 0.12,
     "purple_vibes": 0.10,
     "turquoise_wave": 0.08,
-    "red_hot": 0.06
+    "red_hot": 0.06,
 }
 
-# Same emphasis keywords
 EMPHASIS_KEYWORDS = {
     "NEVER", "ALWAYS", "IMPOSSIBLE", "INSANE", "CRAZY", "SHOCKING",
     "UNBELIEVABLE", "INCREDIBLE", "AMAZING", "STUNNING", "MIND-BLOWING",
@@ -190,141 +204,24 @@ EMPHASIS_KEYWORDS = {
     "BEST", "WORST", "BIGGEST", "SMALLEST", "FASTEST", "SLOWEST",
     "MOST", "LEAST", "ULTIMATE", "SUPREME", "MAXIMUM",
     "VIRAL", "TRENDING", "POPULAR", "FAMOUS", "EVERYONE", "NOBODY",
-    "MILLIONS", "THOUSANDS", "BILLION"
+    "MILLIONS", "THOUSANDS", "BILLION",
 }
 
 
 def get_random_style() -> str:
-    """Get a random caption style based on weights."""
     return random.choices(
         list(STYLE_WEIGHTS.keys()),
-        weights=list(STYLE_WEIGHTS.values())
+        weights=list(STYLE_WEIGHTS.values()),
+        k=1,
     )[0]
 
 
 def get_style_info(style_name: str) -> Dict[str, Any]:
-    """Get information about a specific style."""
-    if style_name in CAPTION_STYLES:
-        return CAPTION_STYLES[style_name]
-    return CAPTION_STYLES["classic_yellow"]
+    return CAPTION_STYLES.get(style_name, CAPTION_STYLES["classic_yellow"])
 
 
 def list_all_styles() -> List[str]:
-    """List all available caption styles."""
     return list(CAPTION_STYLES.keys())
-
-
-def build_karaoke_ass(
-    text: str,
-    seg_dur: float,
-    words: List[Tuple[str, float]],
-    is_hook: bool = False,
-    style_name: Optional[str] = None
-) -> str:
-    """
-    ✅ FIXED: Build complete ASS file with COLORFUL karaoke captions!
-    
-    Args:
-        text: Full text to display
-        seg_dur: Total segment duration
-        words: List of (word, duration) tuples
-        is_hook: Whether this is a hook segment
-        style_name: Specific style to use (or None for random)
-    
-    Returns:
-        Complete ASS subtitle string with colorful animated captions
-    """
-    # Select style
-    if not style_name:
-        style_name = get_random_style()
-    
-    style = get_style_info(style_name)
-    
-    # Determine font size based on context
-    if is_hook:
-        fontsize = style["fontsize_hook"]
-    else:
-        fontsize = style["fontsize_normal"]
-    
-    # Build ASS header
-    ass_content = f"""[Script Info]
-Title: Karaoke Captions
-ScriptType: v4.00+
-PlayResX: 1920
-PlayResY: 1080
-WrapStyle: 0
-ScaledBorderAndShadow: yes
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style['fontname']},{fontsize},{style['color_inactive']},{style['color_active']},{style['color_outline']},&H80000000,-1,0,0,0,100,100,1,0,1,{style['outline']},{style['shadow']},2,50,50,{style['margin_v']},1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-    
-    # Generate karaoke events
-    if not words:
-        # Fallback: show entire text without karaoke
-        end_time = _format_ass_time(seg_dur)
-        ass_content += f"Dialogue: 0,0:00:00.00,{end_time},Default,,0,0,0,,{text.upper()}\n"
-    else:
-        # Build karaoke with word-by-word highlighting
-        cumulative_time = 0.0
-        
-        # Group words into chunks (2-3 words per line for readability)
-        chunk_size = 2 if is_hook else 3
-        chunks = []
-        current_chunk = []
-        current_chunk_duration = 0.0
-        
-        for word, duration in words:
-            current_chunk.append((word, duration))
-            current_chunk_duration += duration
-            
-            if len(current_chunk) >= chunk_size:
-                chunks.append((current_chunk, current_chunk_duration))
-                current_chunk = []
-                current_chunk_duration = 0.0
-        
-        # Add remaining words
-        if current_chunk:
-            chunks.append((current_chunk, current_chunk_duration))
-        
-        # Generate events for each chunk
-        for chunk_words, chunk_duration in chunks:
-            start_time = _format_ass_time(cumulative_time)
-            end_time = _format_ass_time(cumulative_time + chunk_duration)
-            
-            # Build karaoke tags for each word in chunk
-            karaoke_text = ""
-            word_cumulative = 0
-            
-            for word, duration in chunk_words:
-                # Convert duration to centiseconds for \\k tag
-                duration_cs = int(duration * 100)
-                
-                # Check if word should be emphasized
-                word_upper = word.upper().strip('.,!?;:')
-                if word_upper in EMPHASIS_KEYWORDS:
-                    # Emphasis: bigger, different color
-                    karaoke_text += f"{{\\k{duration_cs}\\fs{style['fontsize_emphasis']}\\c{style['color_emphasis']}}}{word.upper()} "
-                else:
-                    # Normal karaoke
-                    karaoke_text += f"{{\\k{duration_cs}}}{word.upper()} "
-                
-                word_cumulative += duration
-            
-            # Add bounce effect if enabled
-            if style.get("bounce"):
-                # Subtle bounce animation
-                karaoke_text = f"{{\\move(960,1000,960,980,0,{int(chunk_duration*1000)})}}" + karaoke_text
-            
-            ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{karaoke_text.strip()}\n"
-            
-            cumulative_time += chunk_duration
-    
-    return ass_content
 
 
 def _format_ass_time(seconds: float) -> str:
@@ -332,6 +229,88 @@ def _format_ass_time(seconds: float) -> str:
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
-    centiseconds = int((seconds % 1) * 100)
-    
+    centiseconds = int(round((seconds % 1) * 100))
     return f"{hours}:{minutes:02d}:{secs:02d}.{centiseconds:02d}"
+
+
+def build_karaoke_ass(
+    text: str,
+    seg_dur: float,
+    words: List[Tuple[str, float]],
+    is_hook: bool = False,
+    style_name: Optional[str] = None,
+) -> str:
+    """Build a complete ASS file with colorful karaoke captions."""
+    if not style_name:
+        style_name = get_random_style()
+    style = get_style_info(style_name)
+
+    fontsize = style["fontsize_hook"] if is_hook else style["fontsize_normal"]
+
+    # Header
+    ass = [
+        "[Script Info]",
+        "Title: Karaoke Captions",
+        "ScriptType: v4.00+",
+        "PlayResX: 1920",
+        "PlayResY: 1080",
+        "WrapStyle: 0",
+        "ScaledBorderAndShadow: yes",
+        "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+        "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding",
+        f"Style: Default,{style['fontname']},{fontsize},{style['color_inactive']},{style['color_active']},"
+        f"{style['color_outline']},&H80000000,-1,0,0,0,100,100,1,0,1,{style['outline']},{style['shadow']},2,50,50,{style['margin_v']},1",
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+
+    if not words:
+        end_time = _format_ass_time(max(0.01, float(seg_dur)))
+        ass.append(f"Dialogue: 0,0:00:00.00,{end_time},Default,,0,0,0,,{_ass_escape(text).upper()}")
+        return "\n".join(ass) + "\n"
+
+    # Group words into small chunks for readability
+    chunk_size = 2 if is_hook else 3
+    chunks: List[Tuple[List[Tuple[str, float]], float]] = []
+    buf: List[Tuple[str, float]] = []
+    buf_dur = 0.0
+    for w, d in words:
+        buf.append((w, d))
+        buf_dur += float(d)
+        if len(buf) >= chunk_size:
+            chunks.append((buf, buf_dur))
+            buf, buf_dur = [], 0.0
+    if buf:
+        chunks.append((buf, buf_dur))
+
+    t = 0.0
+    for chunk_words, chunk_duration in chunks:
+        start_time = _format_ass_time(t)
+        end_time = _format_ass_time(min(seg_dur, t + chunk_duration))
+
+        # Build karaoke tagged text
+        parts = []
+        for w, d in chunk_words:
+            wtxt = _ass_escape(w).upper()
+            dur_cs = max(1, int(round(float(d) * 100)))  # \k in centiseconds
+            if wtxt.strip(".,!?;:") in EMPHASIS_KEYWORDS:
+                parts.append(f"{{\\k{dur_cs}\\fs{style['fontsize_emphasis']}\\c{style['color_emphasis']}}}{wtxt} ")
+            else:
+                parts.append(f"{{\\k{dur_cs}}}{wtxt} ")
+
+        line_text = "".join(parts).strip()
+
+        # Subtle bounce effect
+        if style.get("bounce", False):
+            line_text = f"{{\\move(960,1000,960,980,0,{int(chunk_duration*1000)})}}{line_text}"
+
+        ass.append(f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{line_text}")
+        t += chunk_duration
+        if t >= seg_dur:
+            break
+
+    return "\n".join(ass) + "\n"
