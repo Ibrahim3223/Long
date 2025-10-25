@@ -34,13 +34,26 @@ jobs:
       - name: Install PyYAML
         run: pip install pyyaml
 
-      - name: Build matrix from channels_long.yml
+      - name: Build matrix from channels config
         id: mk
         shell: bash
         run: |
           python - <<'PY'
-          import yaml, json
-          data = yaml.safe_load(open("channels_long.yml","r",encoding="utf-8")) or {}
+          import json
+          from pathlib import Path
+
+          import yaml
+
+          candidates = [Path("channels_long.yml"), Path("channels.yml")]
+          for path in candidates:
+              if path.exists():
+                  cfg_path = path
+                  break
+          else:
+              raise SystemExit("No channels configuration file found (tried channels_long.yml, channels.yml)")
+
+          print(f"Using channels config: {cfg_path}")
+          data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
           chs = []
           for ch in data.get("channels", []):
               chs.append({
