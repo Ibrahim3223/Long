@@ -169,9 +169,6 @@ def main():
                 json.dump(meta_payload, fh, ensure_ascii=False, indent=2)
 
             print(f"🗒️ Metadata saved to {metadata_path}")
-
-            # TODO: Upload to YouTube using metadata
-            # For now, just report success
             return 0
         else:
             print("\n" + "=" * 60)
