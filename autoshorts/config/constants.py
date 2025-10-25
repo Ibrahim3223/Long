@@ -65,14 +65,14 @@ VIDEO_SCORE_WEIGHTS = {
     "duration_match": 15        # Right length = less cutting
 }
 
-# Quality thresholds
+# Quality thresholds (Sıkılaştırıldı: 1080p / 30fps / 4.5Mbps / düşük karanlık oranı)
 VIDEO_QUALITY = {
-    "min_resolution": (1280, 720),      # Minimum HD
+    "min_resolution": (1920, 1080),      # ✅ Minimum artık 1080p
     "optimal_resolution": (1920, 1080),  # Full HD
-    "min_bitrate": 2000,                # Minimum bitrate (kbps)
-    "min_fps": 24,                      # Minimum frame rate
-    "optimal_fps": 30,                  # Optimal frame rate
-    "max_dark_ratio": 0.25              # Max 25% dark pixels
+    "min_bitrate": 4500,                 # ✅ Minimum bitrate (kbps) ~4.5 Mbps
+    "min_fps": 30,                       # ✅ Minimum frame rate
+    "optimal_fps": 30,                   # Optimal frame rate
+    "max_dark_ratio": 0.18               # ✅ En fazla %18 karanlık piksel
 }
 
 # ============================================================================
