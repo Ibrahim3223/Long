@@ -91,11 +91,7 @@ def main():
     print("  YouTube Shorts Generator v2.0")
     print("=" * 60)
     
-    # ✅ Set up logging properly
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(message)s'
-    )
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
     
     def _safe_slug(value: str) -> str:
         value = value.strip().lower()
@@ -104,36 +100,36 @@ def main():
         return value.strip("-") or "channel"
 
     try:
-        # ✅ Get channel name from environment
         channel_name = os.environ.get("CHANNEL_NAME") or os.environ.get("ENV")
-
         if not channel_name:
             print("⚠️ No CHANNEL_NAME or ENV variable found, using 'default'")
             channel_name = "default"
 
         print(f"\n📺 Channel: {channel_name}")
         
-        # ✅ Load channel-specific settings
+        # Load channel-specific settings
         channel_settings = apply_channel_settings(channel_name)
         
-        # ✅ Create temp directory
+        # Create temp directory
         temp_dir = os.path.join(tempfile.gettempdir(), f"autoshorts_{channel_name}")
         os.makedirs(temp_dir, exist_ok=True)
         print(f"📁 Temp dir: {temp_dir}")
         
+        # Optional faster mode note
+        if os.getenv("FAST_MODE", "0") == "1":
+            print("⚡ FAST_MODE is ON (faster ffmpeg preset & smaller Pexels page size)")
+
         print("\n🔧 Creating orchestrator...")
         
-        # ✅ Initialize orchestrator with proper parameters
         orchestrator = ShortsOrchestrator(
             channel_id=channel_name,
             temp_dir=temp_dir,
-            api_key=settings.GEMINI_API_KEY,
-            pexels_key=settings.PEXELS_API_KEY
+            api_key=getattr(settings, "GEMINI_API_KEY", None),
+            pexels_key=getattr(settings, "PEXELS_API_KEY", None),
         )
         
         print("\n🎬 Starting video generation...\n")
         
-        # ✅ Generate video using channel topic
         topic_prompt = channel_settings.get("CHANNEL_TOPIC", "Create an interesting video")
         video_path, metadata = orchestrator.produce_video(topic_prompt)
         
@@ -184,12 +180,9 @@ def main():
         print("\n" + "=" * 60)
         print(f"❌ ERROR: {e}")
         print("=" * 60)
-        
-        # Always print full traceback for debugging
         import traceback
         print("\n[DEBUG] Full traceback:")
         traceback.print_exc()
-        
         return 1
 
 
