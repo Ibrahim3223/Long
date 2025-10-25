@@ -1,6 +1,9 @@
+# FILE: autoshorts/generation/gemini_long.py
+# -*- coding: utf-8 -*-
 """
 Gemini Client - LONG-FORM EDUCATIONAL CONTENT (4-7 min)
-✅ ULTIMATE: Generates 40-70 sentence content with chapters
+✅ SEO güçlendirme: başlık/açıklama/tags talimatları
+✅ 40–70 cümle garantisi + bölümleme
 """
 
 import json
@@ -110,6 +113,7 @@ class GeminiClient:
         Generate long-form educational content (40-70 sentences)
 
         ✅ ULTIMATE FIX: Correct sentence calculation for 4-7 minute videos
+        ✅ SEO: Başlık/açıklama/tags talimatları dahildir
         """
 
         # ✅ CRITICAL FIX: New formula for 40-70 sentences
@@ -134,6 +138,8 @@ class GeminiClient:
             raw_response = self._call_api_with_fallback(prompt, max_output_tokens=16000, temperature=0.8)
             content = self._parse_response(raw_response, topic)
 
+            # Son dokunuş: model çıktısındaki metadata'yı SEO açısından güçlendir
+            content.metadata = self._enhance_metadata(content.metadata, topic, content.chapters)
             logger.info(f"[Gemini] ✅ Generated {len(content.script)} sentences with {len(content.chapters)} chapters")
             return content
 
@@ -150,7 +156,7 @@ class GeminiClient:
         cta: str,
         additional_context: Optional[str] = None
     ) -> str:
-        """Build comprehensive long-form prompt"""
+        """Build comprehensive long-form prompt with SEO constraints"""
 
         return f"""Create an educational long-form YouTube video script about: {topic}
 
@@ -169,6 +175,14 @@ STRUCTURE:
 
 CHAPTER STRUCTURE:
 Divide content into 5-7 logical chapters for YouTube timestamps
+
+SEO REQUIREMENTS:
+- metadata.title: 60–70 characters, PRIMARY keyword at the beginning, human-readable, no clickbait
+- metadata.description: 300–500 words, first 160 characters summarize value using the PRIMARY keyword,
+  include a compact outline of the chapters, no links, no emojis, no hashtags inside description body
+- metadata.tags: 20–30 comma-free tags, lower-case, specific keywords and phrases (no generic words like "video", "watch")
+- chapters[].title: informative and keyword-bearing (no numbers-only titles)
+- Provide "search_queries" (20–30) for visual search variety
 
 Style: {style}
 Additional context: {additional_context or "None"}
@@ -189,8 +203,8 @@ Return this EXACT JSON structure (no markdown, no code blocks):
     ... 5-7 chapters total covering all {target_sentences} sentences
   ],
   "metadata": {{
-    "title": "Title (60-70 chars)",
-    "description": "Description (300-500 words)",
+    "title": "Title (60-70 chars, primary keyword first)",
+    "description": "Description (300-500 words; first 160 chars summarize with the primary keyword)",
     "tags": ["tag1", "tag2", ... 20-30 tags]
   }}
 }}
@@ -229,7 +243,6 @@ CRITICAL:
                         temperature=temperature,
                         max_output_tokens=max_output_tokens,
                     )
-                    # timeout paramı: transport seviyesinde ayarlıdır; SDK'da global olabilir.
                     resp = self.client.models.generate_content(
                         model=model,
                         contents=prompt,
@@ -307,7 +320,7 @@ CRITICAL:
             return "UnknownError"
 
     # -------------------------------------------------------------------------
-    # Existing parsing utilities (unchanged)
+    # Parsing + SEO enhancement
     # -------------------------------------------------------------------------
     def _parse_response(self, raw_response: str, topic: str) -> ContentResponse:
         """Parse JSON response with robust error handling"""
@@ -483,3 +496,58 @@ CRITICAL:
         })
 
         return chapters
+
+    # ------------------------ SEO post-processing ------------------------ #
+    def _enhance_metadata(
+        self,
+        metadata: Dict[str, Any],
+        topic: str,
+        chapters: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """Make sure title/description/tags meet SEO constraints."""
+        md = dict(metadata or {})
+        title = (md.get("title") or str(topic or "Educational Deep Dive")).strip()
+
+        # Title: 60–70 chars, primary keyword up-front if missing
+        primary_kw = (str(topic).split(":")[0] if topic else title).strip()
+        if not title.lower().startswith(primary_kw.lower()[:20]):
+            title = f"{primary_kw} — {title}"
+        title = title[:70] if len(title) > 70 else title
+        if len(title) < 60 and len(title) >= 55:
+            title = title  # already acceptable
+        elif len(title) < 55:
+            # try to pad with a succinct promise
+            tail = " | complete guide"
+            title = (title + tail)[:70]
+
+        # Description: ensure first ~160 chars contain primary keyword
+        desc = (md.get("description") or "").strip()
+        if primary_kw and primary_kw.lower() not in desc.lower()[:200]:
+            lead = f"{primary_kw}: "
+            desc = (lead + desc) if lead.lower() not in desc.lower()[:len(lead)+5] else desc
+
+        # Add a compact chapters outline if missing
+        if chapters and "Chapters:" not in desc and "chapters:" not in desc.lower():
+            outline_items = []
+            for ch in chapters[:8]:
+                outline_items.append(f"- {ch.get('title','Chapter')}")
+            if outline_items:
+                desc += "\n\nChapters:\n" + "\n".join(outline_items)
+
+        md["title"] = title.strip()
+        md["description"] = desc.strip()
+
+        # Tags: normalize to 20–30
+        tags = md.get("tags") or []
+        tags = [t.strip().lower() for t in tags if t and isinstance(t, str)]
+        # Inject topic keyword variants if list too short
+        if len(tags) < 20 and primary_kw:
+            pieces = re.split(r"[^\w]+", primary_kw.lower())
+            for i in range(len(pieces), 0, -1):
+                candidate = " ".join(pieces[:i]).strip()
+                if candidate and candidate not in tags:
+                    tags.append(candidate)
+                if len(tags) >= 22:
+                    break
+        md["tags"] = list(dict.fromkeys(tags))[:30]
+        return md
