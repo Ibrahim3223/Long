@@ -1,7 +1,9 @@
+# FILE: autoshorts/upload/youtube_uploader.py
 # -*- coding: utf-8 -*-
 """
 YouTube Uploader - LONG-FORM with CHAPTER SUPPORT
 Uploads normal videos (not shorts) with automatic chapter timestamps
++ SEO güçlendirme: açıklama giriş cümlesi, chapter outline, hashtag
 """
 
 import logging
@@ -9,6 +11,7 @@ import re
 import unicodedata
 from typing import Dict, Any, List, Optional
 from autoshorts.config import settings
+from autoshorts.utils.text_utils import hashtags_from_tags
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +72,7 @@ class YouTubeUploader:
             # Optimize metadata
             optimized_title = self._optimize_title(title)
             optimized_description = self._build_description_with_chapters(
-                description, chapters, audio_durations
+                description, chapters, audio_durations, title=optimized_title, tags=tags, topic=topic
             )
             optimized_tags = self._optimize_tags(tags)
             smart_category = self._detect_category(topic, title, description) if topic else category_id
@@ -122,22 +125,7 @@ class YouTubeUploader:
             if hasattr(settings, "LANG") and settings.LANG:
                 lang_code = str(settings.LANG)[:2].lower()
                 valid_langs = [
-                    "en",
-                    "tr",
-                    "es",
-                    "fr",
-                    "de",
-                    "it",
-                    "pt",
-                    "ru",
-                    "ja",
-                    "ko",
-                    "zh",
-                    "ar",
-                    "hi",
-                    "nl",
-                    "pl",
-                    "sv",
+                    "en","tr","es","fr","de","it","pt","ru","ja","ko","zh","ar","hi","nl","pl","sv",
                 ]
                 if lang_code in valid_langs:
                     body["snippet"]["defaultLanguage"] = lang_code
@@ -176,51 +164,80 @@ class YouTubeUploader:
         except Exception as e:
             logger.error(f"[YouTube] ❌ Upload failed: {e}")
             import traceback
-
             logger.debug(traceback.format_exc())
             raise
 
+    # --------------------------- SEO description --------------------------- #
     def _build_description_with_chapters(
         self,
         description: str,
         chapters: Optional[List[Dict[str, Any]]],
         audio_durations: Optional[List[float]],
+        *,
+        title: str,
+        tags: Optional[List[str]],
+        topic: Optional[str],
     ) -> str:
-        """Add chapter timestamps to description"""
+        """
+        Add an SEO-friendly lead, chapter timestamps, and hashtags to description.
+        - İlk 160 karakter: konu + değer önerisi (keyword içerir)
+        - Chapters: zaman damgalı başlıklar
+        - Hashtags: 3–5 adet, en sonda
+        """
+        base = (description or "").strip()
+        primary_kw = (topic or title or "").strip()
 
-        # Start with original description
-        full_description = description if description else ""
+        # 1) SEO lead (ilk 160 karakter içinde anahtar kelime)
+        if primary_kw and primary_kw.lower() not in base.lower()[:200]:
+            lead = f"{primary_kw}: "
+        else:
+            lead = ""
+        lead_line = (lead + base).strip()
+        # Gereksiz boşlukları bastır
+        lead_line = re.sub(r"\s+", " ", lead_line)
 
-        # Add chapters if available
+        full_description = lead_line
+
+        # 2) Chapters (zaman damgalı)
         if chapters and audio_durations:
             chapter_text = "\n\n📑 CHAPTERS:\n"
-
-            # Calculate timestamps
             current_time = 0.0
             for chapter in chapters:
                 timestamp = self._format_timestamp(current_time)
                 chapter_title = chapter.get("title", "Chapter")
                 chapter_text += f"{timestamp} {chapter_title}\n"
 
-                # Add duration of sentences in this chapter
+                # Bu bölümün süre toplamı
                 start_idx = chapter.get("start_sentence", 0)
                 end_idx = chapter.get("end_sentence", 0)
-
                 for i in range(start_idx, min(end_idx + 1, len(audio_durations))):
                     if i < len(audio_durations):
                         current_time += audio_durations[i]
 
             full_description += chapter_text
 
-        # Add call to action
-        full_description += "\n\n🔔 Subscribe for more in-depth educational content!"
-        full_description += "\n💬 Drop your thoughts in the comments below."
+        # 3) Kısa “what you'll learn” outline (chapter başlıklarından)
+        if chapters:
+            names = [c.get("title", "").strip() for c in chapters if c.get("title")]
+            if names:
+                bullet = "\n\nWhat you’ll learn:\n" + "\n".join(f"• {n}" for n in names[:8])
+                full_description += bullet
 
-        return full_description
+        # 4) CTA (link yok; sade)
+        full_description += "\n\n🔔 Subscribe for more in-depth educational content!"
+        full_description += "\n💬 Share your thoughts below."
+
+        # 5) Hashtags (en sonda; 3–5 adet)
+        safe_tags = self._optimize_tags(tags) if tags else []
+        hashtags = hashtags_from_tags(safe_tags, title, limit=5)
+        if hashtags:
+            full_description += "\n\n" + " ".join(hashtags)
+
+        return full_description.strip()
 
     def _format_timestamp(self, seconds: float) -> str:
         """Format seconds to MM:SS or HH:MM:SS"""
-        total_seconds = int(seconds)
+        total_seconds = int(max(0, seconds))
         hours = total_seconds // 3600
         minutes = (total_seconds % 3600) // 60
         secs = total_seconds % 60
@@ -231,14 +248,17 @@ class YouTubeUploader:
             return f"{minutes}:{secs:02d}"
 
     def _optimize_title(self, title: str) -> str:
-        """Optimize title for YouTube"""
+        """Optimize title for YouTube (60–70 chars hedeflenir)."""
         if not title:
             return "Untitled Video"
-
-        title = title.strip()
-        if len(title) > 100:
-            title = title[:97] + "..."
-        return title
+        t = title.strip()
+        # Fazla uzun ise kırp
+        if len(t) > 100:
+            t = t[:97] + "..."
+        # 60–70 bandına yumuşak yaklaşım (zorunlu değil; SEO için iyi pratik)
+        if len(t) < 55:
+            t = (t + " | complete guide")[:70]
+        return t
 
     # --- Tag helpers ---
     def _sanitize_tag(self, tag: str) -> str:
