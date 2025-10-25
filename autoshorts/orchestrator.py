@@ -1,5 +1,6 @@
+# FILE: autoshorts/orchestrator.py
 # -*- coding: utf-8 -*-
-"""High level orchestration for generating complete videos."""
+"""High level orchestration for generating complete videos (optimized)."""
 from __future__ import annotations
 
 import hashlib
@@ -148,17 +149,20 @@ class ShortsOrchestrator:
         self._http = requests.Session()
         self._http.headers.update({"Authorization": self.pexels_key})
         try:
-            adapter = HTTPAdapter(pool_connections=6, pool_maxsize=12)
+            adapter = HTTPAdapter(pool_connections=8, pool_maxsize=16)
             self._http.mount("https://", adapter)
             self._http.mount("http://", adapter)
         except Exception as exc:
             logger.debug("Unable to enable HTTP pooling: %s", exc)
 
         # Performance toggles
-        self.fast_mode = (os.getenv("FAST_MODE", "0") == "1")
-        self.ffmpeg_preset = os.getenv("FFMPEG_PRESET", "fast" if self.fast_mode else "medium")
+        self.fast_mode = bool(getattr(settings, "FAST_MODE", False) or (os.getenv("FAST_MODE", "0") == "1"))
+        self.ffmpeg_preset = os.getenv(
+            "FFMPEG_PRESET",
+            "veryfast" if self.fast_mode else "medium"
+        )
 
-        logger.info("🎬 ShortsOrchestrator ready for channel %s", channel_id)
+        logger.info("🎬 ShortsOrchestrator ready for channel %s (FAST_MODE=%s)", channel_id, self.fast_mode)
 
     # ------------------------------------------------------------------
     # Public API
@@ -208,7 +212,6 @@ class ShortsOrchestrator:
                     "script": script,
                 }
 
-                # Be tolerant to StateGuard API differences
                 self._save_script_state_safe(script)
                 self._novelty_add_used_safe(
                     title=script.get("title", ""), script=sentences_txt
@@ -311,6 +314,7 @@ class ShortsOrchestrator:
                 continue
 
             rendered.append(scene_path)
+            # We already know target duration from TTS, but probe in case of trims
             scene_duration = ffprobe_duration(scene_path)
             total_duration += scene_duration
             logger.info("Scene %s duration %.2fs", index, scene_duration)
@@ -418,7 +422,6 @@ class ShortsOrchestrator:
         try:
             return [kw for kw in extract_keywords(text, lang) if kw]
         except TypeError:
-            # Backward compatibility with older signature
             try:
                 return [kw for kw in extract_keywords(text) if kw]
             except Exception:
@@ -497,7 +500,7 @@ class ShortsOrchestrator:
         results: List[ClipCandidate] = []
         try:
             per_page_default = getattr(settings, "PEXELS_PER_PAGE", 80)
-            per_page = min(per_page_default, (60 if self.fast_mode else 80))
+            per_page = min(per_page_default, (50 if self.fast_mode else 80))
             params = {
                 "query": query,
                 "per_page": per_page,
@@ -525,27 +528,24 @@ class ShortsOrchestrator:
 
     def _select_video_file(self, video: Dict) -> Optional[str]:
         files = video.get("video_files", []) or []
-        landscape: List[str] = []
-        fallback: List[str] = []
-
-        for file_data in files:
-            link = file_data.get("link")
-            width = int(file_data.get("width", 0))
-            height = int(file_data.get("height", 0))
-            if not link or width <= height:
-                continue
-            quality = file_data.get("quality")
-            if quality == "hd":
-                landscape.append(link)
-            else:
-                fallback.append(link)
-
-        pool = landscape or fallback
-        if not pool:
+        landscape = [fd for fd in files if fd.get("link") and int(fd.get("width", 0)) > int(fd.get("height", 0))]
+        if not landscape:
             return None
-        if len(pool) > 1:
-            random.shuffle(pool)
-        return pool[0]
+
+        # Prefer 'sd' in FAST_MODE to download smaller files; otherwise prefer 'hd'
+        preferred_quality = "sd" if self.fast_mode else "hd"
+        preferred = [f for f in landscape if (f.get("quality") or "").lower() == preferred_quality]
+        pool = preferred or landscape
+
+        # Sort by width ascending (smaller first) to speed downloads
+        try:
+            pool.sort(key=lambda f: int(f.get("width", 0)))
+        except Exception:
+            pass
+
+        # Shuffle lightly to avoid overusing the same file
+        random.shuffle(pool)
+        return pool[0].get("link")
 
     def _download_clip(self, url: str, destination: pathlib.Path) -> bool:
         if self._clip_cache.try_copy(url, destination):
@@ -556,7 +556,7 @@ class ShortsOrchestrator:
             with self._http.get(url, stream=True, timeout=45) as response:
                 response.raise_for_status()
                 with open(destination, "wb") as handle:
-                    for chunk in response.iter_content(chunk_size=8192):
+                    for chunk in response.iter_content(chunk_size=64 * 1024):
                         if chunk:
                             handle.write(chunk)
         except Exception as exc:
@@ -581,37 +581,27 @@ class ShortsOrchestrator:
             raise RuntimeError("invalid clip duration")
 
         loops = max(1, int(target_duration // duration) + 1)
-        filters: List[str] = []
-        if loops > 1:
-            filters.append(f"loop={loops}:size=1:start=0")
 
-        filters.extend(
-            [
-                "scale=1920:1080:force_original_aspect_ratio=increase",
-                "crop=1920:1080",
-            ]
-        )
+        # Build filter chain (lighter zoompan), no 'loop' filter (use -stream_loop instead)
+        filters: List[str] = [
+            "scale=1920:1080:force_original_aspect_ratio=increase",
+            "crop=1920:1080",
+        ]
 
         fps = int(getattr(settings, "TARGET_FPS", 30))
         if sentence_type == "hook":
-            filters.append(
-                "zoompan=z='min(zoom+0.0006,1.12)':d=1:s=1920x1080:fps=%d" % fps
-            )
+            filters.append(f"zoompan=z='min(zoom+0.0005,1.10)':d=1:s=1920x1080:fps={fps}")
         else:
-            filters.append(
-                "zoompan=z='1.06':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-                "d=1:s=1920x1080:fps=%d" % fps
-            )
+            filters.append(f"fps={fps}")
 
         total_frames = max(2, int(round(target_duration * fps)))
-        filters.extend(
-            [
-                f"trim=start_frame=0:end_frame={total_frames}",
-                "setpts=PTS-STARTPTS",
-            ]
-        )
+        filters.extend([f"trim=start_frame=0:end_frame={total_frames}", "setpts=PTS-STARTPTS"])
 
         crf = str(getattr(settings, "CRF_VISUAL", 22))
+        input_opts: List[str] = []
+        if loops > 1:
+            input_opts = ["-stream_loop", str(loops - 1)]
+
         run(
             [
                 "ffmpeg",
@@ -619,6 +609,7 @@ class ShortsOrchestrator:
                 "-hide_banner",
                 "-loglevel",
                 "error",
+                *input_opts,
                 "-i",
                 str(source),
                 "-vf",
@@ -636,6 +627,8 @@ class ShortsOrchestrator:
                 "-pix_fmt",
                 "yuv420p",
                 "-an",
+                "-movflags",
+                "+faststart",
                 str(output),
             ]
         )
@@ -662,7 +655,6 @@ class ShortsOrchestrator:
         except Exception as exc:
             logger.error("Caption render failed: %s", exc)
             logger.debug("", exc_info=True)
-            # Fallback: return original video without captions
             return video_path
 
     def _mux_audio(
@@ -698,6 +690,8 @@ class ShortsOrchestrator:
                     "-map",
                     "1:a:0",
                     "-shortest",
+                    "-movflags",
+                    "+faststart",
                     str(output),
                 ]
             )
@@ -715,6 +709,34 @@ class ShortsOrchestrator:
                 for segment in segments:
                     handle.write(f"file '{segment}'\n")
 
+            # First try stream-copy concat (very fast)
+            try:
+                run(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-f",
+                        "concat",
+                        "-safe",
+                        "0",
+                        "-i",
+                        str(concat_file),
+                        "-c",
+                        "copy",
+                        "-movflags",
+                        "+faststart",
+                        output,
+                    ]
+                )
+                if os.path.exists(output):
+                    return
+            except Exception:
+                logger.debug("Concat copy failed, falling back to re-encode")
+
+            # Fallback: re-encode concat
             crf = str(getattr(settings, "CRF_VISUAL", 22))
             fps = int(getattr(settings, "TARGET_FPS", 30))
             run(
@@ -746,6 +768,8 @@ class ShortsOrchestrator:
                     str(fps),
                     "-vsync",
                     "cfr",
+                    "-movflags",
+                    "+faststart",
                     output,
                 ]
             )
@@ -755,9 +779,6 @@ class ShortsOrchestrator:
     # ----------------------- Helpers (robustness) -----------------------
 
     def _maybe_add_bgm(self, final_path: str, total_duration: float) -> Optional[str]:
-        """
-        Some repos have different method names on BGMManager. Try a few safely.
-        """
         candidates = [
             ("add_bgm_to_video", (final_path, total_duration, str(self.temp_dir))),
             ("add_to_video", (final_path, total_duration)),
@@ -792,7 +813,6 @@ class ShortsOrchestrator:
             return self.novelty_guard.check_novelty(title=title, script=script)
         except Exception as exc:
             logger.debug("novelty_guard.check_novelty failed: %s", exc)
-            # Fail open: treat as fresh to proceed
             return True, 0.0
 
     def _novelty_add_used_safe(self, title: str, script: List[str]) -> None:
