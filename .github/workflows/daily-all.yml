@@ -271,13 +271,36 @@ jobs:
           ENABLE_CHAPTERS: "1"
           MIN_CHAPTER_DURATION: "30"
         run: |
-          set -e
+          set -euo pipefail
+
+          safe_slug() {
+            printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g'
+          }
+
+          CHANNEL_SLUG=$(safe_slug "${CHANNEL_NAME}")
+          LOG_FILE="build_${CHANNEL_SLUG:-${CHANNEL_NAME}}.log"
+
           echo "== ${CHANNEL_NAME} (LONG-FORM) =="
           echo "TOPIC=${TOPIC}"
           echo "LANG=${LANG}"
           echo "TARGET: 3-10 minutes (20-35 sentences)"
           echo "FORMAT: 16:9 landscape"
-          python main.py 2>&1 | tee "build_${CHANNEL_NAME}.log"
+
+          python main.py 2>&1 | tee "${LOG_FILE}"
+          status=${PIPESTATUS[0]}
+          if [ "${status}" -ne 0 ]; then
+            echo "python main.py failed with exit code ${status}" >&2
+            exit "${status}"
+          fi
+
+          mp4_sample=$(find out -type f -name '*.mp4' -print -quit || true)
+          if [ -z "${mp4_sample}" ]; then
+            echo "❌ main.py completed but produced no MP4 files under ./out" >&2
+            exit 1
+          fi
+
+          echo "✅ Video artifacts located:"
+          find out -type f -name '*.mp4'
 
       - name: Upload artifact (mp4)
         if: always()
@@ -296,7 +319,7 @@ jobs:
         with:
           name: ${{ env.CHANNEL_NAME }}-logs
           path: |
-            build_${{ env.CHANNEL_NAME }}.log
+            build_*.log
             out/**/*.json
             out/*.json
           if-no-files-found: warn
