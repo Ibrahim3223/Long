@@ -100,55 +100,41 @@ class CaptionRenderer:
             
             logger.info(f"         ✅ ASS file created: {os.path.getsize(ass_path)} bytes")
             
-            # ✅ Burn subtitles with audio preservation
-            tmp_out = output.replace(".mp4", ".tmp.mp4")
+            frames = max(1, int(round(duration * settings.TARGET_FPS)))
+            ass_arg = pathlib.Path(ass_path).as_posix().replace("'", r"\'")
+            subtitle_filter = (
+                f"subtitles='{ass_arg}':force_style='Kerning=1',"
+                f"setsar=1,fps={settings.TARGET_FPS},"
+                f"trim=start_frame=0:end_frame={frames},setpts=PTS-STARTPTS"
+            )
             
-            try:
-                # First pass: burn subtitles
-                run([
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", video_path,
-                    "-vf", f"subtitles='{ass_path}':force_style='Kerning=1',setsar=1,fps={settings.TARGET_FPS}",
-                    "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
-                    "-c:a", "copy",  # ✅ PRESERVE AUDIO
-                    "-c:v", "libx264", "-preset", "medium",
-                    "-crf", str(max(16, settings.CRF_VISUAL - 3)),
-                    "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-                    tmp_out
-                ])
-                
-                if not os.path.exists(tmp_out):
-                    logger.error(f"         ❌ Subtitle burn failed")
-                    return video_path
-                
-                # Second pass: trim to exact duration
-                run([
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", tmp_out,
-                    "-vf", f"setsar=1,fps={settings.TARGET_FPS},trim=start_frame=0:end_frame={frames}",
-                    "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
-                    "-c:a", "copy",  # ✅ PRESERVE AUDIO
-                    "-c:v", "libx264", "-preset", "medium",
-                    "-crf", str(settings.CRF_VISUAL),
-                    "-pix_fmt", "yuv420p",
-                    output
-                ])
-                
-                if not os.path.exists(output):
-                    logger.error(f"         ❌ Final output failed")
-                    return video_path
-                
-            finally:
-                pathlib.Path(ass_path).unlink(missing_ok=True)
-                pathlib.Path(tmp_out).unlink(missing_ok=True)
+            run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", video_path,
+                "-vf", subtitle_filter,
+                "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
+                "-c:v", "libx264", "-preset", "medium",
+                "-crf", str(settings.CRF_VISUAL),
+                "-pix_fmt", "yuv420p",
+                "-an",
+                output
+            ])
             
-            logger.info(f"         ✅ Captions rendered successfully with colorful style!")
-            return output
+            exists = os.path.exists(output)
+            pathlib.Path(ass_path).unlink(missing_ok=True)
+            
+            if exists:
+                logger.info(f"         ✅ Captions rendered successfully with colorful style!")
+                return output
+            
+            pathlib.Path(output).unlink(missing_ok=True)
+            return video_path
                 
         except Exception as e:
             logger.error(f"         ❌ Caption error: {e}")
             import traceback
             logger.debug(traceback.format_exc())
+            pathlib.Path(ass_path).unlink(missing_ok=True)
             return video_path
     
     def _generate_fallback_timings(

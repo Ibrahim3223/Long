@@ -60,7 +60,7 @@ class BGMManager:
         Returns:
             Path to BGM file or empty string if BGM disabled
         """
-        if not settings.BGM_ENABLE:
+        if not settings.BGM_ENABLED:
             logger.info("      BGM disabled in settings")
             return ""
         
@@ -98,7 +98,7 @@ class BGMManager:
         bgm_src = self._pick_source(temp_dir)
         if not bgm_src:
             return voice_path
-        
+
         # Loop and process BGM
         bgm_processed = os.path.join(temp_dir, "bgm_processed.wav")
         self._loop_and_process_bgm(bgm_src, duration, bgm_processed)
@@ -110,8 +110,77 @@ class BGMManager:
         # Mix with professional sidechain ducking
         output = os.path.join(temp_dir, "audio_with_bgm.wav")
         self._pro_mix(voice_processed, bgm_processed, output)
-        
+
         return output
+
+    def add_bgm_to_video(self, video_path: str, duration: float, temp_dir: str) -> str:
+        """Overlay BGM onto the final video while keeping the original on failure."""
+
+        if not settings.BGM_ENABLED:
+            logger.debug("      BGM disabled – keeping original video")
+            return video_path
+
+        work_dir = pathlib.Path(temp_dir)
+        work_dir.mkdir(parents=True, exist_ok=True)
+
+        voice_track = work_dir / "final_voice.wav"
+        mixed_audio = work_dir / "audio_with_bgm.wav"
+        final_video = work_dir / "video_with_bgm.mp4"
+        processed_voice = work_dir / "voice_processed.wav"
+        processed_bgm = work_dir / "bgm_processed.wav"
+
+        try:
+            # Extract voice track from the rendered video
+            run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", video_path,
+                "-vn", "-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le",
+                str(voice_track)
+            ])
+
+            if not voice_track.exists():
+                logger.warning("      ⚠️ Could not extract voice track; skipping BGM")
+                return video_path
+
+            # Reuse existing audio pipeline for high quality processing
+            mixed = self.add_bgm(str(voice_track), duration, str(work_dir))
+            if (
+                not mixed
+                or not pathlib.Path(mixed).exists()
+                or pathlib.Path(mixed).resolve() == voice_track.resolve()
+            ):
+                logger.warning("      ⚠️ BGM mix failed; keeping original video")
+                return video_path
+
+            # Swap audio on the final video
+            run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", video_path,
+                "-i", mixed,
+                "-map", "0:v:0", "-map", "1:a:0",
+                "-c:v", "copy",
+                "-c:a", "aac", "-b:a", "192k",
+                "-shortest",
+                str(final_video)
+            ])
+
+            if final_video.exists():
+                logger.info("   ✅ Added BGM to final video")
+                return str(final_video)
+
+            logger.warning("      ⚠️ Unable to create BGM-enhanced video; keeping original")
+            return video_path
+
+        except Exception as exc:
+            logger.error(f"      ❌ Failed to add BGM to video: {exc}")
+            return video_path
+
+        finally:
+            for path in (voice_track, processed_voice, processed_bgm, mixed_audio):
+                try:
+                    pathlib.Path(path).unlink(missing_ok=True)
+                except Exception:
+                    pass
     
     def _pick_source(self, temp_dir: str) -> str:
         """Pick BGM source from directory or URLs."""

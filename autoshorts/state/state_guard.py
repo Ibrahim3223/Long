@@ -9,6 +9,7 @@ STATE_DIR = os.getenv("STATE_DIR", ".state")
 USED_ENTITIES_FILE = os.path.join(STATE_DIR, "used_entities.json")   # {channel: {entity: iso}}
 EMBEDDINGS_FILE   = os.path.join(STATE_DIR, "embeddings.json")       # {channel: {"vectors":[...]} }
 UPLOADS_FILE      = os.path.join(STATE_DIR, "uploads.json")          # [{"channel":..,"content_hash":..,"title":..,"ts":..}]
+SCRIPTS_FILE      = os.path.join(STATE_DIR, "successful_scripts.json")
 COOLDOWN_DAYS     = int(os.getenv("ENTITY_COOLDOWN_DAYS", "30"))
 SIMILARITY_THRESHOLD_SCRIPT  = float(os.getenv("SIM_TH_SCRIPT", "0.90"))
 SIMILARITY_THRESHOLD_ENTITY  = float(os.getenv("SIM_TH_ENTITY", "0.92"))  # isim bazlı benzerlik için biraz daha sıkı
@@ -46,13 +47,50 @@ class StateGuard:
         self.used_entities: Dict[str, Dict[str, str]] = _load_json(USED_ENTITIES_FILE, {})
         self.embeddings: Dict[str, Dict[str, List[List[float]]]] = _load_json(EMBEDDINGS_FILE, {})
         self.uploads: List[Dict[str, Any]] = _load_json(UPLOADS_FILE, [])
+        self.scripts: Dict[str, List[Dict[str, Any]]] = _load_json(SCRIPTS_FILE, {})
 
         # kanal anahtarlarını hazırla
         self.used_entities.setdefault(channel, {})
         self.embeddings.setdefault(channel, {})
         self.embeddings[channel].setdefault("vectors", [])
+        self.scripts.setdefault(channel, [])
 
         self.model = _get_model()
+
+    # ---------- Script persistence ----------
+    def save_successful_script(self, script: Dict[str, Any]) -> None:
+        """Persist the latest successful script for observability and dedupe."""
+        try:
+            sentences = script.get("sentences", []) or []
+            sentence_text = [s.get("text", "") for s in sentences]
+            script_text = " ".join(filter(None, sentence_text))
+            content_hash = self.make_content_hash(
+                script_text=script_text,
+                video_paths=[],
+                audio_path=None
+            ) if script_text else ""
+
+            entry = {
+                "title": script.get("title", ""),
+                "description": script.get("description", ""),
+                "tags": script.get("tags", []),
+                "hook": script.get("hook", ""),
+                "sentences": sentence_text,
+                "chapters": script.get("chapters", []),
+                "content_hash": content_hash,
+                "saved_at": datetime.now().isoformat()
+            }
+
+            channel_scripts = self.scripts.setdefault(self.channel, [])
+            channel_scripts.append(entry)
+
+            max_entries = int(os.getenv("STATE_GUARD_MAX_SCRIPTS", "50"))
+            if max_entries > 0 and len(channel_scripts) > max_entries:
+                del channel_scripts[:-max_entries]
+
+            _save_json(SCRIPTS_FILE, self.scripts)
+        except Exception as e:
+            logging.warning(f"[state_guard] save_successful_script hata: {e}")
 
     # ---------- Cooldown ----------
     def is_on_cooldown(self, entity: str) -> bool:
