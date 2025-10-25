@@ -134,6 +134,13 @@ class ShortsOrchestrator:
         self.pexels = PexelsClient(api_key=self.pexels_key)
         self._clip_cache = _ClipCache(self.temp_dir)
         self._video_candidates: Dict[str, List[Dict[str, str]]] = {}
+        self._http = requests.Session()
+        self._http.headers.update({"Authorization": self.pexels_key})
+        self._video_url_cache: Dict[str, List[str]] = {}
+
+        # State guards
+        self.state_guard = StateGuard(channel_id)
+        self.novelty_guard = NoveltyGuard()
 
         self._http = requests.Session()
         self._http.headers.update({"Authorization": self.pexels_key})
@@ -447,11 +454,97 @@ class ShortsOrchestrator:
                 candidate = pool.pop(0)
                 url = candidate.get("url")
                 if not url:
+        query: str,
+        per_page: int = 15,
+        fallback_keywords: Optional[List[str]] = None
+    ) -> Optional[str]:
+        """
+        ✅ FIXED: Fetch video from Pexels with LANDSCAPE-ONLY filtering.
+        """
+        # Try main query first
+        all_queries = [query]
+        
+        # Add fallback keywords if provided
+        if fallback_keywords:
+            all_queries.extend([kw for kw in fallback_keywords if kw and kw != query][:2])
+        
+        # Generic fallbacks
+        all_queries.extend(["nature landscape", "abstract motion"])
+
+        for attempt, current_query in enumerate(all_queries, 1):
+            try:
+                logger.debug(f"         Attempt {attempt}: '{current_query}'")
+
+                cached = self._video_url_cache.get(current_query)
+                if cached:
+                    url = cached.pop(0)
+                    if not cached:
+                        self._video_url_cache.pop(current_query, None)
+                    logger.info(f"      ✅ Video found from cache (attempt {attempt})")
+                    return url
+
+                # ✅ CRITICAL: Request landscape orientation
+                params = {
+                    "query": current_query,
+                    "per_page": per_page,
+                    "orientation": "landscape"  # ✅ LANDSCAPE ONLY
+                }
+
+                response = self._http.get(
+                    "https://api.pexels.com/videos/search",
+                    params=params,
+                    timeout=10
+                )
+                response.raise_for_status()
+
+                data = response.json()
+                videos = data.get("videos", [])
+
+                if not videos:
+                    logger.debug(f"         No videos for '{current_query}'")
                     continue
                 if candidate.get("duration", 0) < settings.PEXELS_MIN_DURATION:
                     continue
                 logger.info("Using clip %s for query '%s'", url, query)
                 return candidate
+
+                hd_urls: List[str] = []
+                fallback_urls: List[str] = []
+
+                for video in landscape_videos:
+                    for vf in video.get("video_files", []):
+                        vf_width = vf.get("width", 0)
+                        vf_height = vf.get("height", 0)
+                        link = vf.get("link")
+
+                        if not link or vf_width <= vf_height:
+                            continue
+
+                        if vf.get("quality") == "hd":
+                            hd_urls.append(link)
+                        else:
+                            fallback_urls.append(link)
+
+                candidates = hd_urls or fallback_urls
+                if not candidates:
+                    logger.debug("         No usable files in landscape videos")
+                    continue
+
+                random.shuffle(candidates)
+                chosen = candidates[0]
+                remaining = candidates[1:5]  # Keep a few cached options
+
+                if remaining:
+                    self._video_url_cache[current_query] = remaining
+
+                logger.info(f"      ✅ Video found (attempt {attempt})")
+                return chosen
+
+            except Exception as e:
+                logger.debug(f"         Query {attempt} error: {e}")
+                continue
+
+        logger.warning(f"      ⚠️ No landscape video found after {len(all_queries)} attempts")
         return None
 
     def _get_candidates(self, query: str) -> List[Dict[str, str]]:
@@ -591,6 +684,50 @@ class ShortsOrchestrator:
         except Exception as exc:
             logger.error("Caption render failed: %s", exc)
             logger.debug("", exc_info=True)
+
+            # Write ASS file
+            with open(ass_path, 'w', encoding='utf-8') as f:
+                f.write(ass_content)
+
+            if not os.path.exists(ass_path):
+                logger.error(f"      ❌ ASS file creation failed")
+                return video_path
+
+            # Burn captions in a single pass (removes previous double-encode)
+            output = video_path.replace(".mp4", "_caption.mp4")
+            frames = int(duration * settings.TARGET_FPS)
+            ass_arg = pathlib.Path(ass_path).as_posix().replace("'", r"\'")
+            subtitle_filter = (
+                f"subtitles='{ass_arg}':force_style='Kerning=1',"
+                f"setsar=1,fps={settings.TARGET_FPS},trim=start_frame=0:end_frame={frames},setpts=PTS-STARTPTS"
+            )
+
+            run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", video_path,
+                "-vf", subtitle_filter,
+                "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
+                "-c:v", "libx264", "-preset", "medium",
+                "-crf", str(settings.CRF_VISUAL),
+                "-pix_fmt", "yuv420p",
+                "-an",  # No audio yet
+                output
+            ])
+
+            exists = os.path.exists(output)
+            pathlib.Path(ass_path).unlink(missing_ok=True)
+
+            if exists:
+                logger.info(f"      ✅ Captions added with colorful style!")
+                return output
+
+            pathlib.Path(output).unlink(missing_ok=True)
+
+            return video_path
+
+        except Exception as e:
+            logger.error(f"      ❌ Caption error: {e}")
+            pathlib.Path(ass_path).unlink(missing_ok=True)
             return video_path
 
     def _mux_audio(
