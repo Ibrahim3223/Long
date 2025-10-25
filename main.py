@@ -6,9 +6,12 @@ Run this file to generate a YouTube Short.
 """
 import sys
 import os
+import re
+import json
 import shutil
 import logging
 import tempfile
+from datetime import datetime
 
 # CRITICAL: Clear Python cache before starting
 def clear_cache():
@@ -94,14 +97,20 @@ def main():
         format='%(message)s'
     )
     
+    def _safe_slug(value: str) -> str:
+        value = value.strip().lower()
+        value = re.sub(r"[^a-z0-9]+", "-", value)
+        value = re.sub(r"-+", "-", value)
+        return value.strip("-") or "channel"
+
     try:
         # ✅ Get channel name from environment
         channel_name = os.environ.get("CHANNEL_NAME") or os.environ.get("ENV")
-        
+
         if not channel_name:
             print("⚠️ No CHANNEL_NAME or ENV variable found, using 'default'")
             channel_name = "default"
-        
+
         print(f"\n📺 Channel: {channel_name}")
         
         # ✅ Load channel-specific settings
@@ -133,7 +142,34 @@ def main():
             print(f"✅ SUCCESS! Video created: {video_path}")
             print(f"   Title: {metadata.get('title', 'N/A')[:60]}...")
             print("=" * 60)
-            
+
+            safe_channel = _safe_slug(channel_name)
+            out_root = os.path.join(project_root, "out", safe_channel)
+            os.makedirs(out_root, exist_ok=True)
+
+            timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+            destination_name = f"{safe_channel}_{timestamp}.mp4"
+            destination_path = os.path.join(out_root, destination_name)
+
+            print(f"\n📦 Copying final video to {destination_path}")
+            shutil.copy2(video_path, destination_path)
+
+            meta_payload = {
+                "channel": channel_name,
+                "channel_slug": safe_channel,
+                "generated_at": timestamp,
+                "source_video": video_path,
+                "output_video": destination_path,
+                "topic_prompt": topic_prompt,
+                "metadata": metadata,
+            }
+
+            metadata_path = destination_path.replace(".mp4", ".json")
+            with open(metadata_path, "w", encoding="utf-8") as fh:
+                json.dump(meta_payload, fh, ensure_ascii=False, indent=2)
+
+            print(f"🗒️ Metadata saved to {metadata_path}")
+
             # TODO: Upload to YouTube using metadata
             # For now, just report success
             return 0
