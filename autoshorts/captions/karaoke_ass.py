@@ -1,30 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-Karaoke ASS subtitle builder - LONG-FORM (16:9)
-- Varsayılan: vurgu KAPALI, hareket/animasyon KAPALI
-- Alt yazılar altta, okunaklı ve sabit konumda
+Karaoke ASS subtitle builder - LANDSCAPE (16:9)
+Sade mod: vurgu YOK, animasyon YOK, yalnızca kelime bazlı \k highlight.
 """
-import random
+
 from typing import List, Dict, Optional, Any, Tuple
 
-# =========================
-# LANDSCAPE CAPTION STYLES
-# =========================
-CAPTION_STYLES = {
+# 16:9 alt yazı stilleri (alt hizalı)
+CAPTION_STYLES: Dict[str, Dict[str, Any]] = {
     "classic_yellow": {
         "name": "Classic Yellow",
         "fontname": "Arial Black",
         "fontsize_normal": 44,
         "fontsize_hook": 50,
-        "fontsize_emphasis": 48,
         "outline": 5,
         "shadow": "3",
-        "glow": True,
-        "color_inactive": "&H00FFFFFF",
-        "color_active": "&H0000FFFF",
-        "color_outline": "&H00000000",
-        "color_emphasis": "&H0000FFFF",
-        "color_secondary": "&H0000DDFF",
+        "color_inactive": "&H00FFFFFF",  # White
+        "color_active": "&H0000FFFF",    # Yellow
+        "color_outline": "&H00000000",   # Black
         "margin_v": 90
     },
     "neon_cyan": {
@@ -32,15 +25,11 @@ CAPTION_STYLES = {
         "fontname": "Arial Black",
         "fontsize_normal": 42,
         "fontsize_hook": 48,
-        "fontsize_emphasis": 46,
         "outline": 4,
         "shadow": "3",
-        "glow": True,
         "color_inactive": "&H00FFFFFF",
-        "color_active": "&H00FFFF00",
+        "color_active": "&H00FFFF00",    # Cyan
         "color_outline": "&H00000000",
-        "color_emphasis": "&H0000FFFF",
-        "color_secondary": "&H00FFAA00",
         "margin_v": 90
     },
     "hot_pink": {
@@ -48,15 +37,11 @@ CAPTION_STYLES = {
         "fontname": "Impact",
         "fontsize_normal": 42,
         "fontsize_hook": 48,
-        "fontsize_emphasis": 46,
         "outline": 4,
         "shadow": "3",
-        "glow": True,
         "color_inactive": "&H00FFFFFF",
         "color_active": "&H00FF1493",
         "color_outline": "&H00000000",
-        "color_emphasis": "&H0000FFFF",
-        "color_secondary": "&H00FF69B4",
         "margin_v": 90
     },
     "lime_green": {
@@ -64,106 +49,24 @@ CAPTION_STYLES = {
         "fontname": "Arial Black",
         "fontsize_normal": 44,
         "fontsize_hook": 50,
-        "fontsize_emphasis": 48,
         "outline": 5,
         "shadow": "3",
-        "glow": True,
         "color_inactive": "&H00FFFFFF",
         "color_active": "&H0000FF00",
         "color_outline": "&H00000000",
-        "color_emphasis": "&H0000FFFF",
-        "color_secondary": "&H0000DD00",
-        "margin_v": 95
-    },
-    "orange_fire": {
-        "name": "Orange Fire",
-        "fontname": "Impact",
-        "fontsize_normal": 44,
-        "fontsize_hook": 50,
-        "fontsize_emphasis": 48,
-        "outline": 5,
-        "shadow": "3",
-        "glow": True,
-        "color_inactive": "&H00FFFFFF",
-        "color_active": "&H000099FF",
-        "color_outline": "&H00000000",
-        "color_emphasis": "&H0000FFFF",
-        "color_secondary": "&H0000BBFF",
-        "margin_v": 95
-    },
-    "purple_vibes": {
-        "name": "Purple Vibes",
-        "fontname": "Montserrat Black",
-        "fontsize_normal": 42,
-        "fontsize_hook": 48,
-        "fontsize_emphasis": 46,
-        "outline": 4,
-        "shadow": "3",
-        "glow": True,
-        "color_inactive": "&H00FFFFFF",
-        "color_active": "&H00FF00FF",
-        "color_outline": "&H00000000",
-        "color_emphasis": "&H00FF00FF",
-        "color_secondary": "&H00CC00FF",
-        "margin_v": 90
-    },
-    "turquoise_wave": {
-        "name": "Turquoise Wave",
-        "fontname": "Arial Black",
-        "fontsize_normal": 42,
-        "fontsize_hook": 48,
-        "fontsize_emphasis": 46,
-        "outline": 4,
-        "shadow": "3",
-        "glow": True,
-        "color_inactive": "&H00FFFFFF",
-        "color_active": "&H00FFCC00",
-        "color_outline": "&H00000000",
-        "color_emphasis": "&H00FFFF00",
-        "color_secondary": "&H00FFDD00",
-        "margin_v": 90
-    },
-    "red_hot": {
-        "name": "Red Hot",
-        "fontname": "Impact",
-        "fontsize_normal": 44,
-        "fontsize_hook": 50,
-        "fontsize_emphasis": 48,
-        "outline": 5,
-        "shadow": "3",
-        "glow": True,
-        "color_inactive": "&H00FFFFFF",
-        "color_active": "&H000000FF",
-        "color_outline": "&H00000000",
-        "color_emphasis": "&H0000FFFF",
-        "color_secondary": "&H000033FF",
         "margin_v": 95
     }
 }
 
 STYLE_WEIGHTS = {
-    "classic_yellow": 0.25,
-    "neon_cyan": 0.15,
-    "hot_pink": 0.12,
-    "lime_green": 0.12,
-    "orange_fire": 0.12,
-    "purple_vibes": 0.10,
-    "turquoise_wave": 0.08,
-    "red_hot": 0.06
-}
-
-# Emphasis list mevcut ama varsayılan davranış vurguyu KULLANMAMAK.
-EMPHASIS_KEYWORDS = {
-    "NEVER","ALWAYS","IMPOSSIBLE","INSANE","CRAZY","SHOCKING","UNBELIEVABLE",
-    "INCREDIBLE","AMAZING","STUNNING","MIND-BLOWING","NOW","IMMEDIATELY",
-    "INSTANTLY","URGENT","BREAKING","ALERT","STOP","WAIT","ATTENTION","WARNING",
-    "DANGER","SECRET","HIDDEN","BANNED","ILLEGAL","FORBIDDEN","RARE","EXCLUSIVE",
-    "LIMITED","FIRST","LAST","ONLY","UNIQUE","BEST","WORST","BIGGEST","SMALLEST",
-    "FASTEST","SLOWEST","MOST","LEAST","ULTIMATE","SUPREME","MAXIMUM","VIRAL",
-    "TRENDING","POPULAR","FAMOUS","EVERYONE","NOBODY","MILLIONS","THOUSANDS","BILLION"
+    "classic_yellow": 0.4,
+    "neon_cyan": 0.25,
+    "hot_pink": 0.2,
+    "lime_green": 0.15,
 }
 
 def get_random_style() -> str:
+    import random
     return random.choices(list(STYLE_WEIGHTS.keys()), weights=list(STYLE_WEIGHTS.values()))[0]
 
 def get_style_info(style_name: str) -> Dict[str, Any]:
@@ -172,6 +75,7 @@ def get_style_info(style_name: str) -> Dict[str, Any]:
 def list_all_styles() -> List[str]:
     return list(CAPTION_STYLES.keys())
 
+
 def build_karaoke_ass(
     text: str,
     seg_dur: float,
@@ -179,19 +83,17 @@ def build_karaoke_ass(
     is_hook: bool = False,
     style_name: Optional[str] = None,
     *,
-    emphasize: bool = False,        # ❗ Varsayılan KAPALI
-    fancy_motion: bool = False      # ❗ Varsayılan KAPALI (yukarı kayma yok)
+    emphasize: bool = False,     # tutuluyor ama kullanılmıyor (vurgu kapalı)
+    fancy_motion: bool = False,  # tutuluyor ama kullanılmıyor (animasyon kapalı)
 ) -> str:
     """
-    ASS çıktısı üretir. Varsayılan olarak vurgu ve hareket animasyonu devre dışıdır.
+    DÜZ karaoke: vurgu/animasyon yok, kelime kelime \k akışı.
     """
-    if not style_name:
-        style_name = get_random_style()
-    style = get_style_info(style_name)
+    style = get_style_info(style_name or "classic_yellow")
     fontsize = style["fontsize_hook"] if is_hook else style["fontsize_normal"]
 
-    ass_content = f"""[Script Info]
-Title: Karaoke Captions
+    header = f"""[Script Info]
+Title: Karaoke Captions (Plain)
 ScriptType: v4.00+
 PlayResX: 1920
 PlayResY: 1080
@@ -207,48 +109,42 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     if not words:
-        end_time = _format_ass_time(seg_dur)
-        ass_content += f"Dialogue: 0,0:00:00.00,{end_time},Default,,0,0,0,,{(text or '').upper()}\n"
-        return ass_content
+        end_time = _ass_time(seg_dur)
+        body = f"Dialogue: 0,0:00:00.00,{end_time},Default,,0,0,0,,{(text or '').strip()}\n"
+        return header + body
 
-    cumulative_time = 0.0
+    # 2-3 kelimelik bloklar
     chunk_size = 2 if is_hook else 3
     chunks: List[Tuple[List[Tuple[str, float]], float]] = []
-    cur, cur_dur = [], 0.0
+    cur, cur_d = [], 0.0
     for w, d in words:
-        cur.append((w, d))
-        cur_dur += d
+        cur.append((w, float(d)))
+        cur_d += float(d)
         if len(cur) >= chunk_size:
-            chunks.append((cur, cur_dur))
-            cur, cur_dur = [], 0.0
+            chunks.append((cur, cur_d))
+            cur, cur_d = [], 0.0
     if cur:
-        chunks.append((cur, cur_dur))
+        chunks.append((cur, cur_d))
 
-    for chunk_words, chunk_duration in chunks:
-        start_time = _format_ass_time(cumulative_time)
-        end_time = _format_ass_time(cumulative_time + chunk_duration)
-
+    body_lines = []
+    t = 0.0
+    for chunk_words, dur in chunks:
+        start = _ass_time(t)
+        end = _ass_time(t + dur)
+        # yalın \k akışı — vurgu ve hareket yok
         karaoke_text = ""
         for w, d in chunk_words:
-            cs = max(1, int(d * 100))  # centiseconds
-            wu = w.upper().strip('.,!?;:')
-            if emphasize and wu in EMPHASIS_KEYWORDS:
-                karaoke_text += f"{{\\k{cs}\\fs{style['fontsize_emphasis']}\\c{style['color_emphasis']}}}{wu} "
-            else:
-                karaoke_text += f"{{\\k{cs}}}{wu} "
+            cs = max(1, int(round(float(d) * 100)))
+            karaoke_text += f"{{\\k{cs}}}{w} "
+        body_lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{karaoke_text.strip()}\n")
+        t += dur
 
-        # ❌ Yukarı kayma animasyonu KALDIRILDI (yalnızca fancy_motion True ise eklenir)
-        if fancy_motion:
-            karaoke_text = f"{{\\move(960,1000,960,980,0,{int(chunk_duration*1000)})}}" + karaoke_text
+    return header + "".join(body_lines)
 
-        ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{karaoke_text.strip()}\n"
-        cumulative_time += chunk_duration
 
-    return ass_content
-
-def _format_ass_time(seconds: float) -> str:
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    centiseconds = int((seconds % 1) * 100)
-    return f"{hours}:{minutes:02d}:{secs:02d}.{centiseconds:02d}"
+def _ass_time(seconds: float) -> str:
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    cs = int((seconds % 1) * 100)
+    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
