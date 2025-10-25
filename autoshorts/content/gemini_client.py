@@ -1,4 +1,3 @@
-# FILE: autoshorts/generation/gemini_long.py
 # -*- coding: utf-8 -*-
 """
 Gemini Client - LONG-FORM EDUCATIONAL CONTENT (4-7 min)
@@ -12,6 +11,7 @@ import random
 import re
 import os
 import time
+import difflib
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 
@@ -370,7 +370,7 @@ CRITICAL:
             logger.error(f"[Gemini] Preview: {json_str[:500]}...")
             raise ValueError(f"Invalid JSON: {e}")
 
-        # Validate
+        # Validate presence
         required = ["hook", "script", "cta", "search_queries", "main_visual_focus", "metadata"]
         missing = [key for key in required if key not in data]
         if missing:
@@ -379,7 +379,14 @@ CRITICAL:
         if not isinstance(data["script"], list):
             raise ValueError("Script must be a list")
 
-        # ✅ UPDATED: Check for 40-70 range
+        # ---- ÇİFT OKUMA ÖNLEME: hook ≈ first sentence ise düş, ama 40 altına inme! ----
+        hook_text = (data.get("hook") or "").strip()
+        script_list = [s.strip() for s in data["script"] if isinstance(s, str) and s.strip()]
+        if script_list and self._is_near_duplicate(hook_text, script_list[0]) and len(script_list) > 40:
+            script_list.pop(0)
+        data["script"] = script_list
+
+        # ✅ 40–70 kontrolü
         sentence_count = len(data["script"])
         if sentence_count < 40:
             raise ValueError(f"Script too short: {sentence_count} sentences (minimum 40)")
@@ -396,7 +403,7 @@ CRITICAL:
         logger.info(f"[Gemini] Parsed: {len(data['script'])} sentences, {len(data['chapters'])} chapters")
 
         return ContentResponse(
-            hook=data["hook"],
+            hook=hook_text,
             script=data["script"],
             cta=data["cta"],
             search_queries=data["search_queries"],
@@ -404,6 +411,13 @@ CRITICAL:
             metadata=data["metadata"],
             chapters=data["chapters"]
         )
+
+    def _is_near_duplicate(self, a: str, b: str, thresh: float = 0.85) -> bool:
+        na = re.sub(r"[^a-z0-9]+", " ", (a or "").lower()).strip()
+        nb = re.sub(r"[^a-z0-9]+", " ", (b or "").lower()).strip()
+        if not na or not nb:
+            return False
+        return difflib.SequenceMatcher(None, na, nb).ratio() >= thresh
 
     def _extract_complete_json(self, text: str) -> Optional[str]:
         """Extract complete JSON object with balanced braces"""
