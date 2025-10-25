@@ -1,6 +1,8 @@
+# FILE: autoshorts/config/settings.py
+# -*- coding: utf-8 -*-
 """
 Settings module - LONG-FORM VIDEO CONFIGURATION
-✅ ULTIMATE VERSION: 4-7 minutes, 40-70 sentences, GUARANTEED
+Optimized defaults for faster renders; preserves current behavior.
 """
 
 import os
@@ -116,12 +118,10 @@ ADDITIONAL_PROMPT_CONTEXT = _env_str("ADDITIONAL_PROMPT_CONTEXT", "")
 # ✅ ULTIMATE VIDEO SETTINGS - 4-7 MINUTE LONG-FORM
 # ============================================================
 
-# Duration: 4-7 minutes (FORCED)
 TARGET_DURATION = 360  # 6 minutes
-TARGET_MIN_SEC = 240.0  # 4 minutes minimum
-TARGET_MAX_SEC = 480.0  # 8 minutes maximum
+TARGET_MIN_SEC = 240.0
+TARGET_MAX_SEC = 480.0
 
-# Resolution: 16:9 LANDSCAPE
 VIDEO_WIDTH = 1920
 VIDEO_HEIGHT = 1080
 ASPECT_RATIO = "16:9"
@@ -136,13 +136,10 @@ SCENE_MIN_DURATION = 8.0
 SCENE_MAX_DURATION = 15.0
 
 # ============================================================
-# TTS SETTINGS (+ robust defaults & aliases)
+# TTS SETTINGS
 # ============================================================
 
-# Provider hint (some handlers read this)
-TTS_PROVIDER = _env_str("TTS_PROVIDER", "edge")  # edge | google
-
-# Language & voice fallbacks
+TTS_PROVIDER = _env_str("TTS_PROVIDER", "edge")
 LANG = _env_str("LANG", "en")
 _base_lang = (CHANNEL_LANG_OVERRIDE or LANG).split("-")[0].lower()
 
@@ -157,7 +154,6 @@ _DEFAULT_TTS_BY_LANG = {
     "it": "it-IT-DiegoNeural",
 }
 
-# Canonical names in this config
 _raw_voice = _env_str("TTS_VOICE", _DEFAULT_TTS_BY_LANG.get(_base_lang, "en-US-GuyNeural"))
 TTS_VOICE = _raw_voice
 EFFECTIVE_TTS_VOICE = _raw_voice or _DEFAULT_TTS_BY_LANG.get(_base_lang, "en-US-GuyNeural")
@@ -167,7 +163,6 @@ TTS_RATE = _env_str("TTS_RATE", "+5%")
 TTS_PITCH = _env_str("TTS_PITCH", "+0Hz")
 TTS_STYLE = _env_str("TTS_STYLE", "narration-professional")
 
-# Some TTS handlers expect these Edge-specific names:
 EDGE_TTS_VOICE = _env_str("EDGE_TTS_VOICE", EFFECTIVE_TTS_VOICE)
 EDGE_TTS_RATE = _env_str("EDGE_TTS_RATE", TTS_RATE)
 GOOGLE_TTS_LANG = _env_str("GOOGLE_TTS_LANG", f"{_base_lang}-{_base_lang.upper()}")
@@ -177,23 +172,25 @@ GOOGLE_TTS_LANG = _env_str("GOOGLE_TTS_LANG", f"{_base_lang}-{_base_lang.upper()
 # ============================================================
 
 PEXELS_PER_PAGE = _env_int("PEXELS_PER_PAGE", 80)
-PEXELS_MAX_USES_PER_CLIP = _env_int("PEXELS_MAX_USES_PER_CLIP", 3)  # Allow reuse
+PEXELS_MAX_USES_PER_CLIP = _env_int("PEXELS_MAX_USES_PER_CLIP", 3)
 PEXELS_ALLOW_REUSE = _env_bool("PEXELS_ALLOW_REUSE", True)
 PEXELS_ALLOW_LANDSCAPE = _env_bool("PEXELS_ALLOW_LANDSCAPE", True)
-PEXELS_MIN_DURATION = _env_int("PEXELS_MIN_DURATION", 5)  # Lower for looping
+PEXELS_MIN_DURATION = _env_int("PEXELS_MIN_DURATION", 5)
 PEXELS_MAX_DURATION = _env_int("PEXELS_MAX_DURATION", 20)
 PEXELS_MIN_HEIGHT = _env_int("PEXELS_MIN_HEIGHT", 720)
 PEXELS_STRICT_VERTICAL = _env_bool("PEXELS_STRICT_VERTICAL", False)
-PEXELS_MAX_PAGES = _env_int("PEXELS_MAX_PAGES", 25)  # More search depth
+PEXELS_MAX_PAGES = _env_int("PEXELS_MAX_PAGES", 25)
+# Prefer smaller files to speed up downloads (can set to 'hd' if desired)
+PEXELS_PREFERRED_QUALITY = _env_str("PEXELS_PREFERRED_QUALITY", "sd")
 
 ALLOW_PIXABAY_FALLBACK = _env_bool("ALLOW_PIXABAY_FALLBACK", True)
 STRICT_ENTITY_FILTER = _env_bool("STRICT_ENTITY_FILTER", False)
 
 # ============================================================
-# ✅ ULTIMATE CAPTION SETTINGS - FORCED ENABLED
+# CAPTION SETTINGS (unchanged behavior)
 # ============================================================
 
-KARAOKE_CAPTIONS = True  # FORCED TRUE
+KARAOKE_CAPTIONS = True
 KARAOKE_EFFECTS = True
 EFFECT_STYLE = "subtle"
 
@@ -214,21 +211,17 @@ KARAOKE_OUTLINE = _env_str("KARAOKE_OUTLINE", "#000000")
 CAPTION_MARGIN_V = _env_int("CAPTION_MARGIN_V", 100)
 
 # ============================================================
-# BGM SETTINGS (+ compatibility & safe defaults)
+# BGM SETTINGS
 # ============================================================
 
-# Your original flag + orchestrator alias
-BGM_ENABLE = _env_bool("BGM_ENABLE", False)  # default False (temp, see README note)
+BGM_ENABLE = _env_bool("BGM_ENABLE", False)
 BGM_ENABLED = _env_bool("BGM_ENABLED", BGM_ENABLE)
-
-# Mixer params
 BGM_VOLUME_DB = _env_float("BGM_VOLUME_DB", -28.0)
 BGM_DUCK_DB = _env_float("BGM_DUCK_DB", -14.0)
-BGM_FADE_DURATION = _env_float("BGM_FADE_DURATION", 1.5)  # seconds
+BGM_FADE_DURATION = _env_float("BGM_FADE_DURATION", 1.5)
 BGM_DIR = _env_str("BGM_DIR", "bgm")
 BGM_URLS = _parse_list(_env_str("BGM_URLS", ""))
 
-# Extra params some mixers/managers may read
 BGM_GAIN_DB = _env_float("BGM_GAIN_DB", -28.0)
 BGM_DUCK_THRESH = _env_float("BGM_DUCK_THRESH", 0.09)
 BGM_DUCK_RATIO = _env_float("BGM_DUCK_RATIO", 4.0)
@@ -236,7 +229,6 @@ BGM_DUCK_ATTACK_MS = _env_float("BGM_DUCK_ATTACK_MS", 20.0)
 BGM_DUCK_RELEASE_MS = _env_float("BGM_DUCK_RELEASE_MS", 300.0)
 BGM_FADE = _env_float("BGM_FADE", 1.5)
 
-# Aliases for other components (if they exist)
 BGM_DUCKING_DB = BGM_DUCK_DB
 BGM_FADE_MS = int(BGM_FADE_DURATION * 1000)
 
@@ -266,18 +258,18 @@ MAX_GENERATION_ATTEMPTS = _env_int("MAX_GENERATION_ATTEMPTS", 5)
 
 UPLOAD_TO_YT = _env_bool("UPLOAD_TO_YT", True)
 VISIBILITY = _env_str("VISIBILITY", "public")
-UPLOAD_AS_SHORTS = False  # FALSE for long-form
+UPLOAD_AS_SHORTS = False
 
 ENABLE_CHAPTERS = _env_bool("ENABLE_CHAPTERS", True)
 MIN_CHAPTER_DURATION = _env_int("MIN_CHAPTER_DURATION", 30)
 
 # ============================================================
-# ✅ ULTIMATE CONTENT STRUCTURE - 40-70 SENTENCES (FORCED)
+# CONTENT STRUCTURE
 # ============================================================
 
-MIN_SENTENCES = 40  # FORCED
-MAX_SENTENCES = 70  # FORCED
-TARGET_SENTENCES = 55  # FORCED
+MIN_SENTENCES = 40
+MAX_SENTENCES = 70
+TARGET_SENTENCES = 55
 
 CHAPTERS_ENABLED = True
 MIN_CHAPTER_SENTENCES = 5
@@ -294,7 +286,6 @@ TORCH_DEVICE = _env_str("TORCH_DEVICE", "cpu")
 
 OUTPUT_DIR = _env_str("OUTPUT_DIR", "out")
 
-# Create directories
 import pathlib
 pathlib.Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 pathlib.Path(STATE_DIR).mkdir(parents=True, exist_ok=True)
@@ -304,10 +295,18 @@ if BGM_ENABLED and BGM_DIR:
 # ============================================================
 # SYSTEM TYPE
 # ============================================================
+
 VIDEO_SYSTEM_TYPE = "LONG_FORM"
 
 # ============================================================
-# ✅ STARTUP VALIDATION - Print settings on import
+# PERFORMANCE TOGGLES
+# ============================================================
+
+FAST_MODE = _env_bool("FAST_MODE", True)  # default True for faster runs
+FFMPEG_THREADS = _env_int("FFMPEG_THREADS", max(2, (os.cpu_count() or 4) - 1))
+
+# ============================================================
+# STARTUP LOG
 # ============================================================
 import logging
 _logger = logging.getLogger(__name__)
@@ -319,4 +318,5 @@ _logger.info(f"Duration: {TARGET_MIN_SEC/60:.1f}-{TARGET_MAX_SEC/60:.1f} min (ta
 _logger.info(f"Captions: {'ENABLED' if KARAOKE_CAPTIONS else 'DISABLED'}")
 _logger.info(f"TTS: provider={TTS_PROVIDER}, voice={EFFECTIVE_TTS_VOICE}, rate={TTS_RATE}, pitch={TTS_PITCH}")
 _logger.info(f"BGM: {'ENABLED' if BGM_ENABLED else 'DISABLED'} | Dir: {BGM_DIR}")
+_logger.info(f"FAST_MODE: {FAST_MODE} | FFMPEG_THREADS: {FFMPEG_THREADS}")
 _logger.info("=" * 60)
