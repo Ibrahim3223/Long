@@ -3,7 +3,7 @@
 """
 YouTube Uploader - LONG-FORM with CHAPTER SUPPORT
 Uploads normal videos (not shorts) with automatic chapter timestamps
-+ SEO güçlendirme: açıklama giriş cümlesi, chapter outline, hashtag
++ SEO güçlendirme: açıklama lead, chapter outline, hashtag (5000 char korumalı)
 """
 
 import logging
@@ -11,7 +11,28 @@ import re
 import unicodedata
 from typing import Dict, Any, List, Optional
 from autoshorts.config import settings
-from autoshorts.utils.text_utils import hashtags_from_tags
+
+# Güvenli import: text_utils yoksa minimal fallback kullan
+try:
+    from autoshorts.utils.text_utils import hashtags_from_tags as _hashtags_from_tags
+except Exception:
+    def _hashtags_from_tags(tags, title, limit=5):
+        out: List[str] = []
+        seen = set()
+        pool = list(tags or [])
+        if title:
+            # başlıktan basit token üret
+            t = re.sub(r"[^a-z0-9 ]+", " ", title.lower())
+            pool.extend([w for w in t.split() if len(w) >= 3])
+        for tok in pool:
+            key = re.sub(r"[^a-z0-9]+", "", str(tok).lower())
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append("#" + key[:28])
+            if len(out) >= limit:
+                break
+        return out
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +78,7 @@ class YouTubeUploader:
         privacy_status: str = "public",
         topic: Optional[str] = None,
         chapters: Optional[List[Dict[str, Any]]] = None,  # Chapter data
-        audio_durations: Optional[List[float]] = None,  # For timestamp calculation
+        audio_durations: Optional[List[float]] = None,    # For timestamp calculation
     ) -> str:
         """Upload long-form video with chapter timestamps"""
 
@@ -71,22 +92,23 @@ class YouTubeUploader:
 
             # Optimize metadata
             optimized_title = self._optimize_title(title)
-            optimized_description = self._build_description_with_chapters(
-                description, chapters, audio_durations, title=optimized_title, tags=tags, topic=topic
-            )
             optimized_tags = self._optimize_tags(tags)
             smart_category = self._detect_category(topic, title, description) if topic else category_id
+
+            optimized_description = self._build_description_with_chapters(
+                description=description,
+                chapters=chapters,
+                audio_durations=audio_durations,
+                title=optimized_title,
+                tags=optimized_tags,
+                topic=topic,
+            )
 
             logger.info(f"[YouTube] Title: {optimized_title}")
             logger.info(f"[YouTube] Category: {smart_category}")
             logger.info(f"[YouTube] Chapters: {len(chapters) if chapters else 0}")
             logger.info(f"[YouTube] Tags: {len(optimized_tags) if optimized_tags else 0}")
-
-            # Validate
-            if not optimized_title:
-                raise ValueError("Title is empty")
-            if len(optimized_description) > 5000:
-                optimized_description = optimized_description[:5000]
+            logger.debug(f"[YouTube] Description length: {len(optimized_description)} chars")
 
             # Credentials
             creds = Credentials(
@@ -106,7 +128,7 @@ class YouTubeUploader:
             body: Dict[str, Any] = {
                 "snippet": {
                     "title": optimized_title,
-                    "description": optimized_description,
+                    "description": optimized_description[:5000],  # güvenlik için tekrar kes
                     "categoryId": str(smart_category),
                 },
                 "status": {
@@ -119,15 +141,13 @@ class YouTubeUploader:
             if optimized_tags:
                 body["snippet"]["tags"] = optimized_tags
                 logger.info(f"[YouTube] Adding {len(optimized_tags)} tags")
-                logger.debug(f"[YouTube] Tags preview: {optimized_tags}")
 
             # Add language only if valid (2-letter ISO code)
-            if hasattr(settings, "LANG") and settings.LANG:
+            if getattr(settings, "LANG", None):
                 lang_code = str(settings.LANG)[:2].lower()
-                valid_langs = [
-                    "en","tr","es","fr","de","it","pt","ru","ja","ko","zh","ar","hi","nl","pl","sv",
-                ]
-                if lang_code in valid_langs:
+                if lang_code in {
+                    "en", "tr", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh", "ar", "hi", "nl", "pl", "sv"
+                }:
                     body["snippet"]["defaultLanguage"] = lang_code
                     body["snippet"]["defaultAudioLanguage"] = lang_code
                     logger.info(f"[YouTube] Language: {lang_code}")
@@ -179,61 +199,71 @@ class YouTubeUploader:
         topic: Optional[str],
     ) -> str:
         """
-        Add an SEO-friendly lead, chapter timestamps, and hashtags to description.
-        - İlk 160 karakter: konu + değer önerisi (keyword içerir)
-        - Chapters: zaman damgalı başlıklar
+        Add an SEO-friendly lead, chapter timestamps (varsa), ve hashtags.
+        - İlk satır: konu/başlık içeren kısa lead (keyword içerir)
+        - Chapters: zaman damgalı; süre yoksa başlık listesi
         - Hashtags: 3–5 adet, en sonda
+        - 5000 karakter limiti güvenli şekilde sağlanır
         """
         base = (description or "").strip()
         primary_kw = (topic or title or "").strip()
 
-        # 1) SEO lead (ilk 160 karakter içinde anahtar kelime)
+        # 1) SEO lead (ilk satıra anahtar kelime dokundur)
+        lead_prefix = ""
         if primary_kw and primary_kw.lower() not in base.lower()[:200]:
-            lead = f"{primary_kw}: "
-        else:
-            lead = ""
-        lead_line = (lead + base).strip()
-        # Gereksiz boşlukları bastır
-        lead_line = re.sub(r"\s+", " ", lead_line)
+            lead_prefix = f"{primary_kw}: "
+        lead_line = re.sub(r"\s+", " ", (lead_prefix + base).strip())
 
-        full_description = lead_line
+        core = lead_line
 
-        # 2) Chapters (zaman damgalı)
-        if chapters and audio_durations:
-            chapter_text = "\n\n📑 CHAPTERS:\n"
-            current_time = 0.0
-            for chapter in chapters:
-                timestamp = self._format_timestamp(current_time)
-                chapter_title = chapter.get("title", "Chapter")
-                chapter_text += f"{timestamp} {chapter_title}\n"
+        # 2) Chapters
+        chapter_block = ""
+        if chapters:
+            if audio_durations:
+                chapter_block += "\n\n📑 CHAPTERS:\n"
+                current_time = 0.0
+                safe_durations = [max(0.0, float(d or 0.0)) for d in (audio_durations or [])]
+                for chapter in chapters:
+                    timestamp = self._format_timestamp(current_time)
+                    chapter_title = (chapter.get("title") or "Chapter").strip()
+                    chapter_block += f"{timestamp} {chapter_title}\n"
 
-                # Bu bölümün süre toplamı
-                start_idx = chapter.get("start_sentence", 0)
-                end_idx = chapter.get("end_sentence", 0)
-                for i in range(start_idx, min(end_idx + 1, len(audio_durations))):
-                    if i < len(audio_durations):
-                        current_time += audio_durations[i]
+                    # Bu bölümün süre toplamı
+                    start_idx = int(chapter.get("start_sentence", 0) or 0)
+                    end_idx = int(chapter.get("end_sentence", 0) or 0)
+                    for i in range(start_idx, min(end_idx + 1, len(safe_durations))):
+                        current_time += safe_durations[i]
+            else:
+                # Süreler yoksa zaman damgasız başlıklar
+                names = [c.get("title", "").strip() for c in chapters if c.get("title")]
+                if names:
+                    chapter_block += "\n\n📑 CHAPTERS:\n" + "\n".join(f"- {n}" for n in names)
 
-            full_description += chapter_text
+        core += chapter_block
 
         # 3) Kısa “what you'll learn” outline (chapter başlıklarından)
         if chapters:
             names = [c.get("title", "").strip() for c in chapters if c.get("title")]
             if names:
-                bullet = "\n\nWhat you’ll learn:\n" + "\n".join(f"• {n}" for n in names[:8])
-                full_description += bullet
+                core += "\n\nWhat you’ll learn:\n" + "\n".join(f"• {n}" for n in names[:8])
 
-        # 4) CTA (link yok; sade)
-        full_description += "\n\n🔔 Subscribe for more in-depth educational content!"
-        full_description += "\n💬 Share your thoughts below."
+        # 4) CTA
+        core += "\n\n🔔 Subscribe for more in-depth educational content!"
+        core += "\n💬 Share your thoughts below."
 
-        # 5) Hashtags (en sonda; 3–5 adet)
-        safe_tags = self._optimize_tags(tags) if tags else []
-        hashtags = hashtags_from_tags(safe_tags, title, limit=5)
-        if hashtags:
-            full_description += "\n\n" + " ".join(hashtags)
+        # 5) Hashtags (en sonda; 3–5 adet) — önce hesapla, sonra uzunluk kontrolünü yap
+        safe_tags = tags or []
+        hashtag_line = " ".join(_hashtags_from_tags(safe_tags, title, limit=5))
+        hashtag_suffix = ("\n\n" + hashtag_line) if hashtag_line else ""
 
-        return full_description.strip()
+        # 5000 karakter limitini koru: önce çekirdek metni kısalt, sonra hashtag'i ekle
+        MAX_LEN = 5000
+        reserve = len(hashtag_suffix)
+        if len(core) + reserve > MAX_LEN:
+            core = core[: MAX_LEN - reserve].rstrip()
+
+        full_description = (core + hashtag_suffix).strip()
+        return full_description
 
     def _format_timestamp(self, seconds: float) -> str:
         """Format seconds to MM:SS or HH:MM:SS"""
@@ -252,10 +282,9 @@ class YouTubeUploader:
         if not title:
             return "Untitled Video"
         t = title.strip()
-        # Fazla uzun ise kırp
         if len(t) > 100:
             t = t[:97] + "..."
-        # 60–70 bandına yumuşak yaklaşım (zorunlu değil; SEO için iyi pratik)
+        # 60–70 bandına yumuşak yaklaşım (zorunlu değil; kısa ise ufak ek)
         if len(t) < 55:
             t = (t + " | complete guide")[:70]
         return t
@@ -297,7 +326,6 @@ class YouTubeUploader:
             out.append(t)
             seen.add(key)
             total_len += len(t) + 1
-
             if len(out) >= 30:
                 break
 
