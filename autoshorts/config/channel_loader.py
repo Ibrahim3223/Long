@@ -23,23 +23,55 @@ def load_channels_config(config_path: str = "channels.yml") -> Dict[str, Any]:
         Dict with channel configurations
     """
     # Try multiple locations
-    possible_paths = [
-        config_path,
+    env_override = os.getenv("CHANNELS_CONFIG_PATH")
+
+    candidates: List[Path] = []
+
+    if env_override:
+        candidates.append(Path(env_override))
+
+    default_candidates = [
+        Path(config_path),
         Path.cwd() / config_path,
         Path(__file__).parent.parent.parent / config_path,
     ]
-    
-    for path in possible_paths:
-        if Path(path).exists():
+
+    alt_names = ["channels_long.yml", "channels.json", "channels_long.json"]
+
+    for alt in alt_names:
+        default_candidates.extend([
+            Path(alt),
+            Path.cwd() / alt,
+            Path(__file__).parent.parent.parent / alt,
+        ])
+
+    for candidate in default_candidates:
+        if candidate not in candidates:
+            candidates.append(candidate)
+
+    for path in candidates:
+        if path.exists():
             try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    config = yaml.safe_load(f)
-                    logger.info(f"✅ Loaded channels config from: {path}")
-                    return config
+                text = path.read_text(encoding="utf-8")
+                if path.suffix.lower() == ".json":
+                    import json
+
+                    config = json.loads(text)
+                else:
+                    config = yaml.safe_load(text)
+
+                if not isinstance(config, dict):
+                    logger.warning(
+                        f"⚠️ Config file {path} did not parse to a dict; got {type(config).__name__}."
+                    )
+                    continue
+
+                logger.info(f"✅ Loaded channels config from: {path}")
+                return config
             except Exception as e:
                 logger.warning(f"⚠️ Failed to load {path}: {e}")
                 continue
-    
+
     logger.warning(f"⚠️ channels.yml not found, using defaults")
     return {"channels": []}
 
