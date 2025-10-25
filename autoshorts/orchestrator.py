@@ -12,7 +12,6 @@ import time
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-import json
 import requests
 from requests.adapters import HTTPAdapter
 
@@ -26,8 +25,8 @@ from autoshorts.state.novelty_guard import NoveltyGuard
 from autoshorts.state.state_guard import StateGuard
 from autoshorts.tts.edge_handler import TTSHandler
 from autoshorts.utils.ffmpeg_utils import ffprobe_duration, run
+from autoshorts.video import PexelsClient
 
-# Pexels REST endpoint (we call directly to reuse HTTP session/caching)
 PEXELS_SEARCH_ENDPOINT = "https://api.pexels.com/videos/search"
 
 logger = logging.getLogger(__name__)
@@ -57,14 +56,12 @@ class _ClipCache:
         self._shared_limit = int(os.getenv("PERSISTENT_CLIP_CACHE_LIMIT", "200"))
 
     def cache_paths(self, url: str) -> Tuple[pathlib.Path, pathlib.Path]:
-        """Return runtime and shared cache locations for a URL."""
         digest = hashlib.sha1(url.encode("utf-8")).hexdigest()
         runtime = self._cache_dir / f"{digest}.mp4"
         shared = self._shared_root / f"{digest}.mp4"
         return runtime, shared
 
     def try_copy(self, url: str, destination: pathlib.Path) -> bool:
-        """Copy a cached clip into *destination* if available."""
         cached = self._runtime_cache.get(url)
         if cached and cached.exists():
             shutil.copy2(cached, destination)
@@ -79,27 +76,24 @@ class _ClipCache:
         return False
 
     def store(self, url: str, source: pathlib.Path) -> None:
-        """Persist *source* in the runtime and shared caches."""
         runtime, shared = self.cache_paths(url)
         try:
             if not runtime.exists():
                 shutil.copy2(source, runtime)
             self._runtime_cache[url] = runtime
-        except Exception as exc:  # best effort
+        except Exception as exc:
             logger.debug("Unable to store runtime cache for %s: %s", url, exc)
 
         try:
             if not shared.exists():
                 shutil.copy2(source, shared)
             self._enforce_shared_budget()
-        except Exception as exc:  # best effort
+        except Exception as exc:
             logger.debug("Unable to store shared cache for %s: %s", url, exc)
 
     def _enforce_shared_budget(self) -> None:
-        """Trim the shared cache directory to the configured limit."""
         if self._shared_limit <= 0:
             return
-
         entries = sorted(
             (
                 (p.stat().st_mtime, p)
@@ -108,7 +102,6 @@ class _ClipCache:
             ),
             key=lambda item: item[0],
         )
-
         overflow = len(entries) - self._shared_limit
         for _, path in entries[: max(0, overflow)]:
             try:
@@ -120,9 +113,6 @@ class _ClipCache:
 class ShortsOrchestrator:
     """Coordinate script, audio, and video generation into a final render."""
 
-    # ------------------------------------------------------------------
-    # Construction
-    # ------------------------------------------------------------------
     def __init__(
         self,
         channel_id: str,
@@ -134,7 +124,7 @@ class ShortsOrchestrator:
         self.temp_dir = pathlib.Path(temp_dir)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
-        # Services
+        # External services / helpers
         self.gemini = GeminiClient(api_key=api_key or settings.GEMINI_API_KEY)
         self.quality_scorer = QualityScorer()
         self.tts = TTSHandler()
@@ -143,29 +133,37 @@ class ShortsOrchestrator:
         self.state_guard = StateGuard(channel_id)
         self.novelty_guard = NoveltyGuard()
 
+        # Keys
         self.pexels_key = pexels_key or settings.PEXELS_API_KEY
         if not self.pexels_key:
             raise ValueError("PEXELS_API_KEY required")
 
-        # Caches
+        # Runtime caches
         self._clip_cache = _ClipCache(self.temp_dir)
         self._video_candidates: Dict[str, List[ClipCandidate]] = {}
+        self._video_url_cache: Dict[str, List[str]] = {}
 
-        # HTTP
+        # Pexels client & HTTP session
+        self.pexels = PexelsClient(api_key=self.pexels_key)
         self._http = requests.Session()
         self._http.headers.update({"Authorization": self.pexels_key})
         try:
             adapter = HTTPAdapter(pool_connections=6, pool_maxsize=12)
             self._http.mount("https://", adapter)
             self._http.mount("http://", adapter)
-        except Exception as exc:  # best effort
+        except Exception as exc:
             logger.debug("Unable to enable HTTP pooling: %s", exc)
+
+        # Performance toggles
+        self.fast_mode = (os.getenv("FAST_MODE", "0") == "1")
+        self.ffmpeg_preset = os.getenv("FFMPEG_PRESET", "fast" if self.fast_mode else "medium")
 
         logger.info("🎬 ShortsOrchestrator ready for channel %s", channel_id)
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
     def produce_video(
         self, topic_prompt: str, max_retries: int = 3
     ) -> Tuple[Optional[str], Optional[Dict]]:
@@ -187,9 +185,9 @@ class ShortsOrchestrator:
                     logger.warning("Script generation failed")
                     continue
 
-                sentences = [s.get("text", "") for s in script.get("sentences", [])]
-                is_fresh, similarity = self.novelty_guard.check_novelty(
-                    title=script.get("title", ""), script=sentences
+                sentences_txt = [s.get("text", "") for s in script.get("sentences", [])]
+                is_fresh, similarity = self._check_novelty_safe(
+                    title=script.get("title", ""), script=sentences_txt
                 )
                 if not is_fresh:
                     logger.warning(
@@ -210,33 +208,16 @@ class ShortsOrchestrator:
                     "script": script,
                 }
 
-                # Robust: support both old/new state APIs, or write fallback
-                if hasattr(self.state_guard, "save_successful_script"):
-                    try:
-                        self.state_guard.save_successful_script(script)
-                    except TypeError:
-                        # some implementations expect text+meta
-                        self.state_guard.save_successful_script(
-                            json.dumps(script, ensure_ascii=False),
-                            {"channel": self.channel_id},
-                        )
-                else:
-                    # Fallback: write to .state
-                    state_dir = pathlib.Path(
-                        os.environ.get("STATE_DIR", ".state")
-                    )
-                    state_dir.mkdir(parents=True, exist_ok=True)
-                    out = state_dir / f"{self.channel_id}_last_success.json"
-                    out.write_text(json.dumps(script, ensure_ascii=False, indent=2))
-
-                self.novelty_guard.add_used_script(
-                    title=script.get("title", ""), script=sentences
+                # Be tolerant to StateGuard API differences
+                self._save_script_state_safe(script)
+                self._novelty_add_used_safe(
+                    title=script.get("title", ""), script=sentences_txt
                 )
 
                 logger.info("✅ Video ready: %s", video_path)
                 return video_path, metadata
 
-            except Exception as exc:  # defensive logging
+            except Exception as exc:
                 logger.error("Attempt %s failed: %s", attempt, exc)
                 logger.debug("", exc_info=True)
 
@@ -246,13 +227,14 @@ class ShortsOrchestrator:
     # ------------------------------------------------------------------
     # Script generation
     # ------------------------------------------------------------------
+
     def _generate_script(self, topic_prompt: str) -> Optional[Dict]:
         logger.info("🧠 Generating script via Gemini")
         try:
             response = self.gemini.generate(
                 topic=topic_prompt,
                 style="educational, informative, engaging",
-                duration=settings.TARGET_DURATION,
+                duration=getattr(settings, "TARGET_DURATION", 210),
                 additional_context=None,
             )
         except Exception as exc:
@@ -260,7 +242,7 @@ class ShortsOrchestrator:
             logger.debug("", exc_info=True)
             return None
 
-        script: Dict = {
+        script = {
             "title": response.metadata.get("title", ""),
             "description": response.metadata.get("description", ""),
             "tags": response.metadata.get("tags", []),
@@ -269,7 +251,6 @@ class ShortsOrchestrator:
             "chapters": response.chapters,
         }
 
-        # hook
         script["sentences"].append(
             {
                 "text": response.hook,
@@ -280,37 +261,26 @@ class ShortsOrchestrator:
             }
         )
 
-        # body
         for idx, sentence in enumerate(response.script):
-            keywords = []
             if idx < len(response.search_queries):
                 keywords = [response.search_queries[idx]]
             elif response.search_queries:
                 keywords = [response.search_queries[idx % len(response.search_queries)]]
-
+            else:
+                keywords = []
             script["sentences"].append(
-                {
-                    "text": sentence,
-                    "type": "buildup",
-                    "visual_keywords": keywords,
-                }
+                {"text": sentence, "type": "buildup", "visual_keywords": keywords}
             )
 
-        # cta
         script["sentences"].append(
-            {
-                "text": response.cta,
-                "type": "conclusion",
-                "visual_keywords": [],
-            }
+            {"text": response.cta, "type": "conclusion", "visual_keywords": []}
         )
 
-        # quality
         quality = self.quality_scorer.score(
             [s.get("text", "") for s in script["sentences"]],
             script.get("title", ""),
         )
-        overall = float(quality.get("overall", 0.0))
+        overall = quality.get("overall", 0.0)
         if overall < 4.0:
             logger.warning("Script quality too low (%.1f)", overall)
             return None
@@ -321,6 +291,7 @@ class ShortsOrchestrator:
     # ------------------------------------------------------------------
     # Rendering pipeline
     # ------------------------------------------------------------------
+
     def _render_from_script(self, script: Dict) -> Optional[str]:
         logger.info("🎬 Rendering scenes")
         sentences = script.get("sentences", [])
@@ -359,63 +330,14 @@ class ShortsOrchestrator:
             logger.error("Final video missing after concat")
             return None
 
-        # BGM (robust, supports multiple API variants)
-        bgm_enabled = bool(
-            getattr(settings, "BGM_ENABLED", getattr(settings, "BGM_ENABLE", 0))
-        )
-        if bgm_enabled:
-            logger.info("🔊 Adding BGM to final video")
-            with_bgm = self._apply_bgm(final_path, total_duration)
+        if getattr(settings, "BGM_ENABLED", True):
+            logger.info("Adding BGM to final video")
+            with_bgm = self._maybe_add_bgm(final_path, total_duration)
             if with_bgm and os.path.exists(with_bgm):
                 final_path = with_bgm
 
-        logger.info("🎉 Final video assembled: %s", final_path)
+        logger.info("Final video assembled: %s", final_path)
         return final_path
-
-    def _apply_bgm(self, final_path: str, total_duration: float) -> Optional[str]:
-        """Try several BGMManager APIs & return output path if created."""
-        out = str(self.temp_dir / (pathlib.Path(final_path).stem + "_bgm.mp4"))
-        try:
-            # 1) Oldest: add_bgm_to_video(input, output)
-            if hasattr(self.bgm_manager, "add_bgm_to_video"):
-                try:
-                    result = self.bgm_manager.add_bgm_to_video(final_path, out)
-                    return result or out
-                except TypeError:
-                    # 2) Variant: add_bgm_to_video(input, duration, temp_dir)
-                    try:
-                        result = self.bgm_manager.add_bgm_to_video(
-                            final_path, total_duration, str(self.temp_dir)
-                        )
-                        return result or out
-                    except TypeError:
-                        # 3) Kwargs variant
-                        result = self.bgm_manager.add_bgm_to_video(
-                            input_video=final_path,
-                            output_video=out,
-                            duration=total_duration,
-                            temp_dir=str(self.temp_dir),
-                        )
-                        return result or out
-
-            # 4) Newer names
-            for meth in ("apply_bgm", "mix"):
-                if hasattr(self.bgm_manager, meth):
-                    fn = getattr(self.bgm_manager, meth)
-                    try:
-                        return fn(
-                            input_video=final_path,
-                            output_video=out,
-                            duration=total_duration,
-                            temp_dir=str(self.temp_dir),
-                        ) or out
-                    except TypeError:
-                        # Try positional
-                        return fn(final_path, out) or out
-        except Exception as exc:
-            logger.warning("BGM application failed, continuing without BGM: %s", exc)
-            logger.debug("", exc_info=True)
-        return None
 
     def _produce_scene(self, sentence: Dict, index: int) -> Optional[str]:
         text = sentence.get("text", "").strip()
@@ -426,7 +348,7 @@ class ShortsOrchestrator:
             logger.warning("Empty text for scene %s", index)
             return None
 
-        logger.info("📝 Text: %s", text[:120])
+        logger.info("Text: %s", text[:120])
         audio_path, words, duration = self._generate_audio(text, index)
         if not audio_path:
             return None
@@ -436,11 +358,7 @@ class ShortsOrchestrator:
             return None
 
         captioned = self._render_captions(
-            clip_path,
-            text,
-            words,
-            duration,
-            sentence_type,
+            clip_path, text, words, duration, sentence_type
         )
 
         return self._mux_audio(captioned, audio_path, duration, index)
@@ -448,7 +366,7 @@ class ShortsOrchestrator:
     def _generate_audio(
         self, text: str, index: int
     ) -> Tuple[Optional[str], List[Tuple[str, float]], float]:
-        logger.info("🎤 Generating TTS for scene %s", index)
+        logger.info("Generating TTS for scene %s", index)
         target = self.temp_dir / f"scene_{index:03d}_voice.wav"
         try:
             duration, words = self.tts.synthesize(text=text, wav_out=str(target))
@@ -471,7 +389,7 @@ class ShortsOrchestrator:
         index: int,
         sentence_type: str,
     ) -> Optional[str]:
-        logger.info("🎥 Selecting clip for scene %s", index)
+        logger.info("Selecting clip for scene %s", index)
         keyword = self._choose_keyword(text, keywords)
         candidate = self._next_candidate(keyword, keywords, text)
         if not candidate:
@@ -493,22 +411,50 @@ class ShortsOrchestrator:
 
         return str(processed)
 
+    # ----------------------- Keyword utils (SAFE) -----------------------
+
+    def _extract_keywords_safe(self, text: str) -> List[str]:
+        lang = getattr(settings, "LANG", "en")
+        try:
+            return [kw for kw in extract_keywords(text, lang) if kw]
+        except TypeError:
+            # Backward compatibility with older signature
+            try:
+                return [kw for kw in extract_keywords(text) if kw]
+            except Exception:
+                return []
+        except Exception:
+            return []
+
+    def _simplify_query_safe(self, text: str) -> str:
+        lang = getattr(settings, "LANG", "en")
+        try:
+            return simplify_query(text, lang) or ""
+        except TypeError:
+            try:
+                return simplify_query(text) or ""
+            except Exception:
+                return ""
+        except Exception:
+            return ""
+
     def _choose_keyword(self, text: str, keywords: Sequence[str]) -> str:
         pool: List[str] = []
         pool.extend([kw for kw in keywords if kw])
-        pool.extend(extract_keywords(text))
-        simplified = simplify_query(text)
+        pool.extend(self._extract_keywords_safe(text))
+
+        simplified = self._simplify_query_safe(text)
         if simplified:
             pool.append(simplified)
-        pool.append(getattr(settings, "CHANNEL_TOPIC", "interesting"))
+
+        pool.append(getattr(settings, "CHANNEL_TOPIC", "interesting facts"))
         pool.append("interesting landscape")
-        choice = next((kw for kw in pool if kw), text[:40])
-        logger.info("🔍 Search keyword: %s", choice)
+
+        choice = next((kw for kw in pool if kw), text[:40] or "interesting")
+        logger.info("Search keyword: %s", choice)
         return choice
 
-    def _min_clip_duration(self) -> float:
-        # Prefer a setting if it exists; otherwise default to 2 seconds.
-        return float(getattr(settings, "PEXELS_MIN_DURATION", 2.0))
+    # ----------------------- Candidate selection -----------------------
 
     def _next_candidate(
         self,
@@ -516,31 +462,28 @@ class ShortsOrchestrator:
         fallbacks: Sequence[str],
         text: str,
     ) -> Optional[ClipCandidate]:
-        """Return the next viable clip candidate for a scene."""
-        queries: List[str] = [primary]
+        queries = [primary]
         queries.extend([kw for kw in fallbacks if kw and kw != primary])
 
-        simplified = simplify_query(text)
+        simplified = self._simplify_query_safe(text)
         if simplified and simplified not in queries:
             queries.append(simplified)
 
-        queries.append(getattr(settings, "CHANNEL_TOPIC", "culture travel"))
+        queries.append(getattr(settings, "CHANNEL_TOPIC", "nature"))
         queries.append("dynamic landscape video")
-
-        min_dur = self._min_clip_duration()
 
         for query in queries:
             pool = self._get_candidates(query)
             if not pool:
                 continue
-
-            candidate = next((clip for clip in pool if clip.duration >= min_dur), None)
+            candidate = next(
+                (clip for clip in pool if clip.duration >= getattr(settings, "PEXELS_MIN_DURATION", 3.0)),
+                None,
+            )
             if not candidate:
                 continue
-
-            # consume one
             pool.remove(candidate)
-            logger.info("➡️ Using clip %s for query '%s'", candidate.url, query)
+            logger.info("Using clip %s for query '%s'", candidate.url, query)
             return candidate
 
         logger.warning("No clip candidate located for primary keyword '%s'", primary)
@@ -553,12 +496,14 @@ class ShortsOrchestrator:
 
         results: List[ClipCandidate] = []
         try:
+            per_page_default = getattr(settings, "PEXELS_PER_PAGE", 80)
+            per_page = min(per_page_default, (60 if self.fast_mode else 80))
             params = {
                 "query": query,
-                "per_page": min(getattr(settings, "PEXELS_PER_PAGE", 30), 80),
+                "per_page": per_page,
                 "orientation": "landscape",
             }
-            response = self._http.get(PEXELS_SEARCH_ENDPOINT, params=params, timeout=12)
+            response = self._http.get(PEXELS_SEARCH_ENDPOINT, params=params, timeout=(8 if self.fast_mode else 12))
             response.raise_for_status()
             payload = response.json()
         except Exception as exc:
@@ -568,7 +513,7 @@ class ShortsOrchestrator:
 
         for video in payload.get("videos", []) or []:
             video_id = str(video.get("id", ""))
-            duration = float(video.get("duration", 0.0) or 0.0)
+            duration = float(video.get("duration", 0.0))
             url = self._select_video_file(video)
             if not url:
                 continue
@@ -585,11 +530,10 @@ class ShortsOrchestrator:
 
         for file_data in files:
             link = file_data.get("link")
-            width = int(file_data.get("width", 0) or 0)
-            height = int(file_data.get("height", 0) or 0)
+            width = int(file_data.get("width", 0))
+            height = int(file_data.get("height", 0))
             if not link or width <= height:
                 continue
-
             quality = file_data.get("quality")
             if quality == "hd":
                 landscape.append(link)
@@ -599,15 +543,13 @@ class ShortsOrchestrator:
         pool = landscape or fallback
         if not pool:
             return None
-
         if len(pool) > 1:
             random.shuffle(pool)
-
         return pool[0]
 
     def _download_clip(self, url: str, destination: pathlib.Path) -> bool:
         if self._clip_cache.try_copy(url, destination):
-            logger.info("♻️ Reused cached clip for %s", url)
+            logger.info("Reused cached clip for %s", url)
             return True
 
         try:
@@ -650,18 +592,18 @@ class ShortsOrchestrator:
             ]
         )
 
+        fps = int(getattr(settings, "TARGET_FPS", 30))
         if sentence_type == "hook":
             filters.append(
-                "zoompan=z='min(zoom+0.0006,1.12)':d=1:s=1920x1080:fps=%d"
-                % settings.TARGET_FPS
+                "zoompan=z='min(zoom+0.0006,1.12)':d=1:s=1920x1080:fps=%d" % fps
             )
         else:
             filters.append(
                 "zoompan=z='1.06':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-                "d=1:s=1920x1080:fps=%d" % settings.TARGET_FPS
+                "d=1:s=1920x1080:fps=%d" % fps
             )
 
-        total_frames = max(2, int(round(target_duration * settings.TARGET_FPS)))
+        total_frames = max(2, int(round(target_duration * fps)))
         filters.extend(
             [
                 f"trim=start_frame=0:end_frame={total_frames}",
@@ -669,6 +611,7 @@ class ShortsOrchestrator:
             ]
         )
 
+        crf = str(getattr(settings, "CRF_VISUAL", 22))
         run(
             [
                 "ffmpeg",
@@ -681,15 +624,15 @@ class ShortsOrchestrator:
                 "-vf",
                 ",".join(filters),
                 "-r",
-                str(settings.TARGET_FPS),
+                str(fps),
                 "-vsync",
                 "cfr",
                 "-c:v",
                 "libx264",
                 "-preset",
-                "medium",
+                self.ffmpeg_preset,
                 "-crf",
-                str(settings.CRF_VISUAL),
+                crf,
                 "-pix_fmt",
                 "yuv420p",
                 "-an",
@@ -705,20 +648,21 @@ class ShortsOrchestrator:
         duration: float,
         sentence_type: str,
     ) -> str:
-        logger.info("📝 Rendering captions")
+        logger.info("Rendering captions")
         try:
             return self.caption_renderer.render(
                 video_path=video_path,
                 text=text,
                 words=list(words),
                 duration=duration,
-                is_hook=sentence_type == "hook",
+                is_hook=(sentence_type == "hook"),
                 sentence_type=sentence_type,
                 temp_dir=str(self.temp_dir),
             )
         except Exception as exc:
-            logger.error("Caption render failed, continuing without captions: %s", exc)
+            logger.error("Caption render failed: %s", exc)
             logger.debug("", exc_info=True)
+            # Fallback: return original video without captions
             return video_path
 
     def _mux_audio(
@@ -771,6 +715,8 @@ class ShortsOrchestrator:
                 for segment in segments:
                     handle.write(f"file '{segment}'\n")
 
+            crf = str(getattr(settings, "CRF_VISUAL", 22))
+            fps = int(getattr(settings, "TARGET_FPS", 30))
             run(
                 [
                     "ffmpeg",
@@ -787,9 +733,9 @@ class ShortsOrchestrator:
                     "-c:v",
                     "libx264",
                     "-preset",
-                    "medium",
+                    self.ffmpeg_preset,
                     "-crf",
-                    str(settings.CRF_VISUAL),
+                    crf,
                     "-pix_fmt",
                     "yuv420p",
                     "-c:a",
@@ -797,7 +743,7 @@ class ShortsOrchestrator:
                     "-b:a",
                     "160k",
                     "-r",
-                    str(settings.TARGET_FPS),
+                    str(fps),
                     "-vsync",
                     "cfr",
                     output,
@@ -805,3 +751,57 @@ class ShortsOrchestrator:
             )
         finally:
             concat_file.unlink(missing_ok=True)
+
+    # ----------------------- Helpers (robustness) -----------------------
+
+    def _maybe_add_bgm(self, final_path: str, total_duration: float) -> Optional[str]:
+        """
+        Some repos have different method names on BGMManager. Try a few safely.
+        """
+        candidates = [
+            ("add_bgm_to_video", (final_path, total_duration, str(self.temp_dir))),
+            ("add_to_video", (final_path, total_duration)),
+            ("apply_to_video", (final_path, total_duration)),
+            ("mix_to_video", (final_path, total_duration, str(self.temp_dir))),
+        ]
+        for method_name, args in candidates:
+            method = getattr(self.bgm_manager, method_name, None)
+            if callable(method):
+                try:
+                    out = method(*args)
+                    if out and isinstance(out, str) and os.path.exists(out):
+                        return out
+                except Exception as exc:
+                    logger.debug("BGMManager.%s failed: %s", method_name, exc)
+        logger.info("BGM step skipped (no compatible method)")
+        return None
+
+    def _save_script_state_safe(self, script: Dict) -> None:
+        for name in ["save_successful_script", "save_script", "record_script", "save"]:
+            method = getattr(self.state_guard, name, None)
+            if callable(method):
+                try:
+                    method(script)
+                    return
+                except Exception as exc:
+                    logger.debug("StateGuard.%s failed: %s", name, exc)
+        logger.debug("No StateGuard save method available")
+
+    def _check_novelty_safe(self, title: str, script: List[str]) -> Tuple[bool, float]:
+        try:
+            return self.novelty_guard.check_novelty(title=title, script=script)
+        except Exception as exc:
+            logger.debug("novelty_guard.check_novelty failed: %s", exc)
+            # Fail open: treat as fresh to proceed
+            return True, 0.0
+
+    def _novelty_add_used_safe(self, title: str, script: List[str]) -> None:
+        for name in ["add_used_script", "add_script", "add"]:
+            method = getattr(self.novelty_guard, name, None)
+            if callable(method):
+                try:
+                    method(title=title, script=script)
+                    return
+                except Exception as exc:
+                    logger.debug("novelty_guard.%s failed: %s", name, exc)
+        logger.debug("No novelty guard add method available")
