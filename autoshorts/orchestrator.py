@@ -1,54 +1,120 @@
 # -*- coding: utf-8 -*-
-"""
-Main orchestrator - FIXED VERSION
-✅ Landscape-only videos
-✅ Better scene-to-video matching
-✅ Colorful karaoke captions
-"""
+"""High level orchestration for generating complete videos."""
+from __future__ import annotations
+
+import hashlib
+import logging
 import os
 import pathlib
 import random
-import logging
-import time
-import re
 import shutil
-import hashlib
-from typing import List, Dict, Optional, Tuple
+import time
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import requests
+from requests.adapters import HTTPAdapter
 
+from autoshorts.audio.bgm_manager import BGMManager
+from autoshorts.captions.renderer import CaptionRenderer
 from autoshorts.config import settings
 from autoshorts.content.gemini_client import GeminiClient
 from autoshorts.content.quality_scorer import QualityScorer
-from autoshorts.content.text_utils import normalize_sentence, extract_keywords, simplify_query
-from autoshorts.tts.edge_handler import TTSHandler
-from autoshorts.captions.renderer import CaptionRenderer
-from autoshorts.captions.karaoke_ass import build_karaoke_ass, get_random_style
-from autoshorts.audio.bgm_manager import BGMManager
-from autoshorts.state.state_guard import StateGuard
+from autoshorts.content.text_utils import extract_keywords, simplify_query
 from autoshorts.state.novelty_guard import NoveltyGuard
-from autoshorts.utils.ffmpeg_utils import (
-    run,
-    ffprobe_duration
-)
+from autoshorts.state.state_guard import StateGuard
+from autoshorts.tts.edge_handler import TTSHandler
+from autoshorts.utils.ffmpeg_utils import ffprobe_duration, run
+from autoshorts.video import PexelsClient
 
 logger = logging.getLogger(__name__)
 
 
+class _ClipCache:
+    """Manage short lived and persistent clip caches."""
+
+    def __init__(self, temp_dir: pathlib.Path) -> None:
+        self._runtime_cache: Dict[str, pathlib.Path] = {}
+        self._cache_dir = temp_dir / "clip-cache"
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
+
+        shared_root = pathlib.Path(
+            os.getenv("SHARED_CLIP_CACHE_DIR", os.path.join(".state", "clip_cache"))
+        )
+        shared_root.mkdir(parents=True, exist_ok=True)
+        self._shared_root = shared_root
+        self._shared_limit = int(os.getenv("PERSISTENT_CLIP_CACHE_LIMIT", "200"))
+
+    def cache_paths(self, url: str) -> Tuple[pathlib.Path, pathlib.Path]:
+        """Return runtime and shared cache locations for a URL."""
+        digest = hashlib.sha1(url.encode("utf-8")).hexdigest()
+        runtime = self._cache_dir / f"{digest}.mp4"
+        shared = self._shared_root / f"{digest}.mp4"
+        return runtime, shared
+
+    def try_copy(self, url: str, destination: pathlib.Path) -> bool:
+        """Copy a cached clip into *destination* if available."""
+        cached = self._runtime_cache.get(url)
+        if cached and cached.exists():
+            shutil.copy2(cached, destination)
+            return True
+
+        runtime, shared = self.cache_paths(url)
+        for path in (runtime, shared):
+            if path.exists():
+                shutil.copy2(path, destination)
+                self._runtime_cache[url] = path
+                return True
+        return False
+
+    def store(self, url: str, source: pathlib.Path) -> None:
+        """Persist *source* in the runtime and shared caches."""
+        runtime, shared = self.cache_paths(url)
+        try:
+            if not runtime.exists():
+                shutil.copy2(source, runtime)
+            self._runtime_cache[url] = runtime
+        except Exception as exc:  # pragma: no cover - best effort cache copy
+            logger.debug("Unable to store runtime cache for %s: %s", url, exc)
+
+        try:
+            if not shared.exists():
+                shutil.copy2(source, shared)
+            self._enforce_shared_budget()
+        except Exception as exc:  # pragma: no cover - best effort cache copy
+            logger.debug("Unable to store shared cache for %s: %s", url, exc)
+
+    def _enforce_shared_budget(self) -> None:
+        """Trim the shared cache directory to the configured limit."""
+        if self._shared_limit <= 0:
+            return
+
+        entries = sorted(
+            (
+                (p.stat().st_mtime, p)
+                for p in self._shared_root.glob("*.mp4")
+                if p.is_file()
+            ),
+            key=lambda item: item[0],
+        )
+
+        overflow = len(entries) - self._shared_limit
+        for _, path in entries[: max(0, overflow)]:
+            try:
+                path.unlink()
+            except Exception:
+                logger.debug("Unable to evict cached clip: %s", path)
+
+
 class ShortsOrchestrator:
-    """
-    Complete orchestrator for automated YouTube Shorts/Long-form production.
-    ✅ FIXED: Landscape videos, better relevance, colorful captions
-    """
+    """Coordinate script, audio, and video generation into a final render."""
 
     def __init__(
         self,
         channel_id: str,
         temp_dir: str,
-        api_key: str = None,
-        pexels_key: str = None
-    ):
-        """Initialize orchestrator."""
+        api_key: Optional[str] = None,
+        pexels_key: Optional[str] = None,
+    ) -> None:
         self.channel_id = channel_id
         self.temp_dir = pathlib.Path(temp_dir)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
@@ -58,865 +124,554 @@ class ShortsOrchestrator:
         self.tts = TTSHandler()
         self.caption_renderer = CaptionRenderer()
         self.bgm_manager = BGMManager()
-        self.pexels_key = pexels_key or settings.PEXELS_API_KEY
-        if not self.pexels_key:
-            raise ValueError("PEXELS_API_KEY required")
-
-        self._http = requests.Session()
-        self._http.headers.update({"Authorization": self.pexels_key})
-        try:
-            from requests.adapters import HTTPAdapter
-
-            adapter = HTTPAdapter(pool_connections=4, pool_maxsize=8)
-            self._http.mount("https://", adapter)
-            self._http.mount("http://", adapter)
-        except Exception:
-            logger.debug("Unable to install HTTPAdapter for session pooling; continuing with default session")
-        self._video_url_cache: Dict[str, List[str]] = {}
-        self._clip_cache: Dict[str, pathlib.Path] = {}
-        self._clip_cache_dir = self.temp_dir / "_clip_cache"
-        self._clip_cache_dir.mkdir(parents=True, exist_ok=True)
-        shared_cache_root = os.getenv("SHARED_CLIP_CACHE_DIR", os.path.join(".state", "clip_cache"))
-        self._shared_clip_cache_dir = pathlib.Path(shared_cache_root)
-        self._shared_clip_cache_dir.mkdir(parents=True, exist_ok=True)
-        self._shared_cache_limit = int(os.getenv("PERSISTENT_CLIP_CACHE_LIMIT", "200"))
-
-        # State guards
         self.state_guard = StateGuard(channel_id)
         self.novelty_guard = NoveltyGuard()
 
-        logger.info(f"🎬 ShortsOrchestrator initialized for channel: {channel_id}")
+        self.pexels = PexelsClient(api_key=pexels_key or settings.PEXELS_API_KEY)
+        self._clip_cache = _ClipCache(self.temp_dir)
+        self._video_candidates: Dict[str, List[Dict[str, str]]] = {}
 
-    # ============================================================================
-    # HELPER METHODS - FFmpeg utilities
-    # ============================================================================
-    
-    def _concat_videos(self, video_paths: List[str], output_path: str, fps: int = 25):
-        """Concatenate multiple videos."""
-        if not video_paths:
-            raise ValueError("No videos to concatenate")
-        
-        # Create concat file
-        concat_file = output_path.replace(".mp4", "_concat.txt")
-        
-        with open(concat_file, 'w') as f:
-            for vp in video_paths:
-                f.write(f"file '{vp}'\n")
-        
+        self._http = requests.Session()
         try:
-            run([
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                "-f", "concat", "-safe", "0", "-i", concat_file,
-                "-c:v", "libx264", "-preset", "medium",
-                "-crf", str(settings.CRF_VISUAL),
-                "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "128k",
-                "-r", str(fps), "-vsync", "cfr",
-                output_path
-            ])
-        finally:
-            pathlib.Path(concat_file).unlink(missing_ok=True)
-    
-    def _overlay_audio(
-        self, 
-        video_path: str, 
-        audio_path: str, 
-        output_path: str,
-        video_duration: float
-    ):
-        """Overlay audio on video."""
-        run([
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-i", video_path,
-            "-i", audio_path,
-            "-t", str(video_duration),
-            "-c:v", "copy",
-            "-c:a", "aac", "-b:a", "128k",
-            "-map", "0:v:0", "-map", "1:a:0",
-            "-shortest",
-            output_path
-        ])
-    
-    # ============================================================================
-    # END HELPER METHODS
-    # ============================================================================
+            adapter = HTTPAdapter(pool_connections=6, pool_maxsize=12)
+            self._http.mount("https://", adapter)
+            self._http.mount("http://", adapter)
+        except Exception as exc:  # pragma: no cover - adapter install best effort
+            logger.debug("Unable to enable HTTP pooling: %s", exc)
+
+        if not self.pexels.api_key:
+            raise ValueError("PEXELS_API_KEY required")
+
+        logger.info("🎬 ShortsOrchestrator ready for channel %s", channel_id)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def produce_video(
-        self,
-        topic_prompt: str,
-        max_retries: int = 3
+        self, topic_prompt: str, max_retries: int = 3
     ) -> Tuple[Optional[str], Optional[Dict]]:
-        """
-        Produce complete video with metadata.
-        
-        Returns:
-            (video_path, metadata) or (None, None) on failure
-        """
+        """Produce a full video for *topic_prompt*."""
         logger.info("=" * 70)
-        logger.info("🎬 STARTING VIDEO PRODUCTION")
+        logger.info("🎬 START VIDEO PRODUCTION")
         logger.info("=" * 70)
-        logger.info(f"📝 Topic: {topic_prompt[:100]}...")
+        logger.info("📝 Topic: %s", topic_prompt[:120])
 
         for attempt in range(1, max_retries + 1):
             try:
-                logger.info(f"\n🔄 Attempt {attempt}/{max_retries}")
-
-                # ✅ Add delay between retries (avoid API rate limits)
                 if attempt > 1:
-                    delay = 2 * attempt  # Progressive delay: 2s, 4s, 6s
-                    logger.info(f"   ⏳ Waiting {delay}s before retry...")
+                    delay = min(8, 2 * attempt)
+                    logger.info("⏳ Retry in %ss", delay)
                     time.sleep(delay)
 
-                # 1. Generate script
                 script = self._generate_script(topic_prompt)
                 if not script:
-                    logger.error("❌ Script generation failed")
+                    logger.warning("Script generation failed")
                     continue
 
-                # 2. Check novelty
-                sentences_text = [s.get("text", "") for s in script.get("sentences", [])]
-                is_novel, similarity = self.novelty_guard.check_novelty(
-                    title=script.get("title", ""),
-                    script=sentences_text
+                sentences = [s.get("text", "") for s in script.get("sentences", [])]
+                is_fresh, similarity = self.novelty_guard.check_novelty(
+                    title=script.get("title", ""), script=sentences
                 )
-                if not is_novel:
-                    logger.warning(f"⚠️ Script too similar to recent ones (similarity: {similarity:.2f}), regenerating...")
+                if not is_fresh:
+                    logger.warning(
+                        "Script too similar to recent ones (similarity=%.2f), retrying",
+                        similarity,
+                    )
                     continue
 
-                # 3. Produce video
-                video_path = self._produce_video_from_script(script)
+                video_path = self._render_from_script(script)
                 if not video_path:
-                    logger.error("❌ Video production failed")
                     continue
 
-                # 4. Prepare metadata
                 metadata = {
                     "title": script.get("title", ""),
                     "description": script.get("description", ""),
                     "tags": script.get("tags", []),
                     "hook": script.get("hook", ""),
-                    "script": script
+                    "script": script,
                 }
 
-                # 5. Update state
                 self.state_guard.save_successful_script(script)
-                
-                # Update novelty guard with title and sentences
-                sentences_text = [s.get("text", "") for s in script.get("sentences", [])]
                 self.novelty_guard.add_used_script(
-                    title=script.get("title", ""),
-                    script=sentences_text
+                    title=script.get("title", ""), script=sentences
                 )
 
-                logger.info(f"\n✅ VIDEO PRODUCTION COMPLETE")
-                logger.info(f"📁 Output: {video_path}")
+                logger.info("✅ Video ready: %s", video_path)
                 return video_path, metadata
 
-            except Exception as e:
-                logger.error(f"❌ Attempt {attempt} failed: {e}")
-                import traceback
-                logger.debug(traceback.format_exc())
-                continue
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("Attempt %s failed: %s", attempt, exc)
+                logger.debug("", exc_info=True)
 
         logger.error("❌ All attempts failed")
         return None, None
 
-    def _generate_script(self, topic_prompt: str) -> Optional[Dict]:
-        """Generate script from topic."""
-        logger.info("\n📝 Generating script...")
+    # ------------------------------------------------------------------
+    # Script generation
+    # ------------------------------------------------------------------
 
+    def _generate_script(self, topic_prompt: str) -> Optional[Dict]:
+        logger.info("🧠 Generating script via Gemini")
         try:
-            # ✅ Use GeminiClient.generate() with correct parameters
-            # Long-form videos: 4-7 minutes = 240-420 seconds
-            target_duration = 300  # 5 minutes default
-            style = "educational, informative, engaging"
-            
             response = self.gemini.generate(
                 topic=topic_prompt,
-                style=style,
-                duration=target_duration,
-                additional_context=None
+                style="educational, informative, engaging",
+                duration=settings.TARGET_DURATION,
+                additional_context=None,
             )
-            
-            # ✅ Convert ContentResponse to dict format for orchestrator
-            script = {
-                "title": response.metadata.get("title", ""),
-                "description": response.metadata.get("description", ""),
-                "tags": response.metadata.get("tags", []),
-                "hook": response.hook,
-                "sentences": [],
-                "chapters": response.chapters
-            }
-            
-            # ✅ Convert script list to sentence format
-            # First sentence is hook
-            script["sentences"].append({
-                "text": response.hook,
-                "type": "hook",
-                "visual_keywords": [response.main_visual_focus] if response.main_visual_focus else []
-            })
-            
-            # Main script sentences with visual keywords
-            for idx, sentence_text in enumerate(response.script):
-                # Distribute visual keywords across sentences
-                keywords = []
-                if idx < len(response.search_queries):
-                    # Use corresponding search query as keyword
-                    keywords = [response.search_queries[idx]]
-                elif response.search_queries:
-                    # Cycle through available keywords
-                    keywords = [response.search_queries[idx % len(response.search_queries)]]
-                
-                script["sentences"].append({
-                    "text": sentence_text,
-                    "type": "buildup",
-                    "visual_keywords": keywords
-                })
-            
-            # Last sentence is CTA
-            script["sentences"].append({
-                "text": response.cta,
-                "type": "conclusion",
-                "visual_keywords": []
-            })
-            
-            if not script["sentences"]:
-                logger.error("   ❌ No sentences generated")
-                return None
-
-            # Quality check
-            sentences = [s.get("text", "") for s in script["sentences"]]
-            title = script.get("title", "")
-            
-            scores = self.quality_scorer.score(sentences, title)
-            overall_score = scores.get("overall", 0.0)
-            
-            # ✅ LOWERED: Long-form content has different quality criteria than shorts
-            if overall_score < 4.0:
-                logger.warning(f"   ⚠️ Low quality script (score: {overall_score:.1f}), skipping")
-                return None
-
-            logger.info(f"   ✅ Script generated")
-            logger.info(f"      Quality score: {overall_score:.1f}/10")
-            logger.info(f"      Title: {script.get('title', 'N/A')[:60]}...")
-            logger.info(f"      Scenes: {len(script.get('sentences', []))}")
-
-            return script
-
-        except Exception as e:
-            logger.error(f"   ❌ Script generation error: {e}")
-            
-            # Check if it's a temporary API error
-            error_str = str(e)
-            if "503" in error_str or "UNAVAILABLE" in error_str or "overloaded" in error_str.lower():
-                logger.warning(f"   ⚠️ Gemini API temporarily unavailable, will retry...")
-            elif "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                logger.warning(f"   ⚠️ Rate limit hit, will retry after delay...")
-            
-            import traceback
-            logger.debug(traceback.format_exc())
+        except Exception as exc:
+            logger.error("Gemini error: %s", exc)
+            logger.debug("", exc_info=True)
             return None
 
-    def _produce_video_from_script(self, script: Dict) -> Optional[str]:
-        """Produce video from script."""
-        logger.info("\n🎬 Producing video from script...")
-
-        sentences = script.get("sentences", [])
-        if not sentences:
-            logger.error("   ❌ No sentences in script")
-            return None
-
-        scene_videos = []
-        total_duration = 0.0
-
-        # Process each scene
-        for idx, sentence_data in enumerate(sentences, 1):
-            logger.info(f"\n{'='*70}")
-            logger.info(f"🎞️  SCENE {idx}/{len(sentences)}")
-            logger.info(f"{'='*70}")
-
-            try:
-                scene_path = self._produce_scene(sentence_data, idx)
-
-                if scene_path and os.path.exists(scene_path):
-                    scene_videos.append(scene_path)
-                    scene_duration = ffprobe_duration(scene_path)
-                    total_duration += scene_duration
-                    logger.info(f"   ✅ Scene {idx} completed ({scene_duration:.2f}s)")
-                else:
-                    logger.error(f"   ❌ Scene {idx} failed")
-
-            except Exception as e:
-                logger.error(f"   ❌ Scene {idx} error: {e}")
-                import traceback
-                logger.debug(traceback.format_exc())
-                continue
-
-        if not scene_videos:
-            logger.error("   ❌ No scenes produced")
-            return None
-
-        logger.info(f"\n{'='*70}")
-        logger.info(f"🎬 FINAL ASSEMBLY")
-        logger.info(f"{'='*70}")
-        logger.info(f"   📹 Scenes: {len(scene_videos)}")
-        logger.info(f"   ⏱️  Duration: {total_duration:.1f}s ({total_duration/60:.1f}min)")
-
-        # Concatenate scenes
-        output_name = f"final_video_{int(time.time())}.mp4"
-        output_path = str(self.temp_dir / output_name)
-
-        try:
-            self._concat_videos(scene_videos, output_path, fps=settings.TARGET_FPS)
-
-            if not os.path.exists(output_path):
-                logger.error("   ❌ Concatenation failed")
-                return None
-
-            # Add BGM if enabled
-            if settings.BGM_ENABLED:
-                logger.info(f"\n   🎵 Adding background music...")
-                final_with_bgm = self.bgm_manager.add_bgm_to_video(
-                    output_path,
-                    total_duration,
-                    str(self.temp_dir)
-                )
-
-                if final_with_bgm and os.path.exists(final_with_bgm):
-                    output_path = final_with_bgm
-                    logger.info(f"   ✅ BGM added")
-
-            logger.info(f"\n   ✅ Final video ready")
-            logger.info(f"   📊 Size: {os.path.getsize(output_path) / (1024*1024):.1f}MB")
-
-            return output_path
-
-        except Exception as e:
-            logger.error(f"   ❌ Final assembly error: {e}")
-            return None
-
-    def _produce_scene(
-        self,
-        sentence_data: Dict,
-        scene_idx: int
-    ) -> Optional[str]:
-        """Produce a single scene."""
-        text = sentence_data.get("text", "").strip()
-        scene_type = sentence_data.get("type", "buildup")
-        keywords = sentence_data.get("visual_keywords", [])
-
-        if not text:
-            logger.warning(f"   ⚠️ Empty text for scene {scene_idx}")
-            return None
-
-        logger.info(f"   📝 Text: {text[:100]}...")
-        logger.info(f"   🎯 Type: {scene_type}")
-        logger.info(f"   🔑 Keywords: {keywords}")
-
-        # 1. Generate audio
-        audio_path, words, audio_duration = self._generate_audio(text, scene_idx, scene_type)
-        if not audio_path:
-            logger.error(f"   ❌ Audio generation failed")
-            return None
-
-        # 2. Get video clip
-        video_path = self._get_video_clip(keywords, text, audio_duration, scene_idx, scene_type)
-        if not video_path:
-            logger.error(f"   ❌ Video selection failed")
-            return None
-
-        # 3. Add captions
-        video_with_captions = self._render_captions_on_scene(
-            video_path, text, words, audio_duration, scene_type
-        )
-
-        # 4. Overlay audio
-        final_scene = self._overlay_audio_on_video(
-            video_with_captions, audio_path, audio_duration, scene_idx
-        )
-
-        return final_scene
-
-    def _generate_audio(
-        self,
-        text: str,
-        scene_idx: int,
-        scene_type: str
-    ) -> Tuple[Optional[str], List[Tuple[str, float]], float]:
-        """Generate TTS audio."""
-        logger.info(f"   🎤 Generating audio...")
-
-        audio_filename = f"scene_{scene_idx:03d}_audio.wav"
-        audio_path = str(self.temp_dir / audio_filename)
-
-        try:
-            # Use synthesize method which returns (duration, words)
-            duration, words = self.tts.synthesize(
-                text=text,
-                wav_out=audio_path
-            )
-
-            if not os.path.exists(audio_path):
-                logger.error(f"      ❌ TTS failed - file not created")
-                return None, [], 0.0
-
-            logger.info(f"      ✅ Audio: {duration:.2f}s, {len(words)} words")
-
-            return audio_path, words, duration
-
-        except Exception as e:
-            logger.error(f"      ❌ Audio error: {e}")
-            return None, [], 0.0
-
-    def _get_video_clip(
-        self,
-        keywords: List[str],
-        text: str,
-        duration: float,
-        scene_idx: int,
-        scene_type: str
-    ) -> Optional[str]:
-        """
-        Get video clip with BETTER relevance.
-        
-        ✅ FIXED: Landscape-only videos with smarter keyword extraction
-        """
-        logger.info(f"   🎥 Getting video clip...")
-
-        # ✅ Choose best search keyword
-        search_keyword = self._choose_video_keyword(keywords, text)
-        logger.info(f"      🔍 Search: '{search_keyword}'")
-
-        # ✅ Fetch video URL (landscape only)
-        video_url = self._fetch_pexels_video(search_keyword, fallback_keywords=keywords)
-
-        if not video_url:
-            logger.error(f"      ❌ No video found")
-            return None
-
-        # Download and process
-        raw_video = str(self.temp_dir / f"scene_{scene_idx:03d}_raw.mp4")
-        
-        if not self._download_video(video_url, raw_video):
-            logger.error(f"      ❌ Download failed")
-            return None
-
-        # Process video
-        processed_video = self._download_and_process_clip(
-            raw_video, duration, scene_idx, scene_type
-        )
-
-        return processed_video
-
-    def _choose_video_keyword(
-        self,
-        keywords: List[str],
-        text: str
-    ) -> str:
-        """
-        ✅ IMPROVED: Choose best keyword for video search.
-        
-        Priority:
-        1. Use provided keywords (already optimized)
-        2. Extract key nouns from text
-        3. Fallback to simplified query
-        """
-        # Use first keyword if available
-        if keywords and keywords[0]:
-            return keywords[0]
-
-        # Extract from text
-        text_lower = text.lower()
-
-        # Stop words to exclude
-        stop_words = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-            'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during',
-            'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
-            'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might',
-            'can', 'this', 'that', 'these', 'those', 'it', 'its', 'their', 'them'
+        script = {
+            "title": response.metadata.get("title", ""),
+            "description": response.metadata.get("description", ""),
+            "tags": response.metadata.get("tags", []),
+            "hook": response.hook,
+            "sentences": [],
+            "chapters": response.chapters,
         }
 
-        # Extract meaningful words
-        words = re.findall(r'\b[a-z]+\b', text_lower)
-        important_words = [w for w in words if len(w) > 3 and w not in stop_words]
+        script["sentences"].append(
+            {
+                "text": response.hook,
+                "type": "hook",
+                "visual_keywords": [response.main_visual_focus]
+                if response.main_visual_focus
+                else [],
+            }
+        )
 
-        if important_words:
-            # Take first 2-3 important words
-            return " ".join(important_words[:3])
+        for idx, sentence in enumerate(response.script):
+            keywords = []
+            if idx < len(response.search_queries):
+                keywords = [response.search_queries[idx]]
+            elif response.search_queries:
+                keywords = [response.search_queries[idx % len(response.search_queries)]]
 
-        # Fallback to simplified query
-        return simplify_query(text, keep=3)
-
-    def _fetch_pexels_video(
-        self,
-        query: str,
-        per_page: int = 15,
-        fallback_keywords: Optional[List[str]] = None
-    ) -> Optional[str]:
-        """
-        ✅ FIXED: Fetch video from Pexels with LANDSCAPE-ONLY filtering.
-        """
-        # Try main query first
-        all_queries = [query]
-        
-        # Add fallback keywords if provided
-        if fallback_keywords:
-            all_queries.extend([kw for kw in fallback_keywords if kw and kw != query][:2])
-        
-        # Generic fallbacks
-        all_queries.extend(["nature landscape", "abstract motion"])
-
-        for attempt, current_query in enumerate(all_queries, 1):
-            try:
-                logger.debug(f"         Attempt {attempt}: '{current_query}'")
-
-                cached = self._video_url_cache.get(current_query)
-                if cached:
-                    url = cached.pop(0)
-                    if not cached:
-                        self._video_url_cache.pop(current_query, None)
-                    logger.info(f"      ✅ Video found from cache (attempt {attempt})")
-                    return url
-
-                # ✅ CRITICAL: Request landscape orientation
-                params = {
-                    "query": current_query,
-                    "per_page": per_page,
-                    "orientation": "landscape"  # ✅ LANDSCAPE ONLY
+            script["sentences"].append(
+                {
+                    "text": sentence,
+                    "type": "buildup",
+                    "visual_keywords": keywords,
                 }
-
-                response = self._http.get(
-                    "https://api.pexels.com/videos/search",
-                    params=params,
-                    timeout=10
-                )
-                response.raise_for_status()
-
-                data = response.json()
-                videos = data.get("videos", [])
-
-                if not videos:
-                    logger.debug(f"         No videos for '{current_query}'")
-                    continue
-
-                # ✅ DOUBLE-CHECK: Filter landscape videos
-                landscape_videos = []
-                for video in videos:
-                    width = video.get("width", 0)
-                    height = video.get("height", 0)
-
-                    # Ensure width > height (horizontal)
-                    if width > height:
-                        landscape_videos.append(video)
-
-                if not landscape_videos:
-                    logger.debug(f"         No landscape videos found")
-                    continue
-
-                hd_urls: List[str] = []
-                fallback_urls: List[str] = []
-
-                for video in landscape_videos:
-                    for vf in video.get("video_files", []):
-                        vf_width = vf.get("width", 0)
-                        vf_height = vf.get("height", 0)
-                        link = vf.get("link")
-
-                        if not link or vf_width <= vf_height:
-                            continue
-
-                        if vf.get("quality") == "hd":
-                            hd_urls.append(link)
-                        else:
-                            fallback_urls.append(link)
-
-                candidates = hd_urls or fallback_urls
-                if not candidates:
-                    logger.debug("         No usable files in landscape videos")
-                    continue
-
-                random.shuffle(candidates)
-                chosen = candidates[0]
-                remaining = candidates[1:5]  # Keep a few cached options
-
-                if remaining:
-                    self._video_url_cache[current_query] = remaining
-
-                logger.info(f"      ✅ Video found (attempt {attempt})")
-                return chosen
-
-            except Exception as e:
-                logger.debug(f"         Query {attempt} error: {e}")
-                continue
-
-        logger.warning(f"      ⚠️ No landscape video found after {len(all_queries)} attempts")
-        return None
-
-    def _cache_paths_for_url(self, url: str) -> Tuple[pathlib.Path, pathlib.Path]:
-        suffix = pathlib.Path(url.split("?")[0]).suffix or ".mp4"
-        cache_key = hashlib.sha1(url.encode('utf-8')).hexdigest()
-        run_cache_path = self._clip_cache_dir / f"{cache_key}{suffix}"
-        shared_cache_path = self._shared_clip_cache_dir / f"{cache_key}{suffix}"
-        return run_cache_path, shared_cache_path
-
-    def _enforce_shared_cache_budget(self) -> None:
-        if self._shared_cache_limit <= 0:
-            return
-
-        try:
-            files = sorted(
-                [p for p in self._shared_clip_cache_dir.glob("*") if p.is_file()],
-                key=lambda p: p.stat().st_mtime
             )
-            while len(files) > self._shared_cache_limit:
-                oldest = files.pop(0)
-                try:
-                    oldest.unlink()
-                except Exception:
-                    logger.debug(f"         ⚠️ Could not remove cached clip {oldest}")
-        except Exception as cache_err:
-            logger.debug(f"         ⚠️ Shared cache maintenance failed: {cache_err}")
 
-    def _download_video(self, url: str, output_path: str) -> bool:
-        """Download video from URL."""
-        try:
-            logger.info(f"      ⬇️  Downloading...")
+        script["sentences"].append(
+            {
+                "text": response.cta,
+                "type": "conclusion",
+                "visual_keywords": [],
+            }
+        )
 
-            cached = self._clip_cache.get(url)
-            if cached and cached.exists():
-                shutil.copy2(cached, output_path)
-                size_mb = os.path.getsize(output_path) / (1024 * 1024)
-                logger.info(f"         ✅ Reused cached download: {size_mb:.1f}MB")
-                return True
-
-            _, shared_cache_path = self._cache_paths_for_url(url)
-            if shared_cache_path.exists():
-                shutil.copy2(shared_cache_path, output_path)
-                size_mb = os.path.getsize(output_path) / (1024 * 1024)
-                logger.info(f"         ✅ Reused persistent cache: {size_mb:.1f}MB")
-                self._clip_cache[url] = shared_cache_path
-                return True
-
-            response = self._http.get(url, stream=True, timeout=30)
-            response.raise_for_status()
-
-            with open(output_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-
-            if os.path.exists(output_path):
-                size_mb = os.path.getsize(output_path) / (1024 * 1024)
-                logger.info(f"         ✅ Downloaded: {size_mb:.1f}MB")
-                run_cache_path, shared_cache_path = self._cache_paths_for_url(url)
-                try:
-                    if not run_cache_path.exists():
-                        shutil.copy2(output_path, run_cache_path)
-                    self._clip_cache[url] = run_cache_path
-                except Exception as cache_err:
-                    logger.debug(f"         ⚠️ Could not persist cache for {url}: {cache_err}")
-                try:
-                    if not shared_cache_path.exists():
-                        shutil.copy2(output_path, shared_cache_path)
-                    self._enforce_shared_cache_budget()
-                except Exception as shared_err:
-                    logger.debug(f"         ⚠️ Could not persist shared cache for {url}: {shared_err}")
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"         ❌ Download error: {e}")
-            return False
-
-    def _download_and_process_clip(
-        self,
-        video_path: str,
-        target_duration: float,
-        scene_idx: int,
-        scene_type: str
-    ) -> Optional[str]:
-        """Process video clip: loop, crop to 16:9, effects."""
-        logger.info(f"      🎬 Processing video...")
-
-        output_name = f"scene_{scene_idx:03d}_processed.mp4"
-        output_path = str(self.temp_dir / output_name)
-
-        try:
-            source_duration = ffprobe_duration(video_path)
-
-            if source_duration <= 0:
-                logger.error(f"         ❌ Invalid duration")
-                return None
-
-            # Calculate loops
-            loops_needed = int(target_duration / source_duration) + 1
-
-            # Build filter chain
-            filters = []
-
-            # 1. Loop
-            if loops_needed > 1:
-                filters.append(f"loop={loops_needed}:size=1:start=0")
-
-            # 2. Scale and crop to 1920x1080
-            filters.append("scale=1920:1080:force_original_aspect_ratio=increase")
-            filters.append("crop=1920:1080")
-
-            # 3. Subtle effects based on scene type
-            if scene_type == "hook":
-                # Gentle zoom for hooks
-                filters.append(
-                    f"zoompan=z='min(zoom+0.0005,1.1)':d={int(target_duration * settings.TARGET_FPS)}"
-                    f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1920x1080:fps={settings.TARGET_FPS}"
-                )
-            else:
-                # Very subtle pan
-                filters.append(
-                    f"zoompan=z='1.05':d={int(target_duration * settings.TARGET_FPS)}"
-                    f":x='if(gte(on,1),x+2,0)':y='ih/2-(ih/zoom/2)':s=1920x1080:fps={settings.TARGET_FPS}"
-                )
-
-            # 4. Trim to exact frames
-            target_frames = int(target_duration * settings.TARGET_FPS)
-            filters.append(f"trim=start_frame=0:end_frame={target_frames}")
-            filters.append("setpts=PTS-STARTPTS")
-
-            filter_chain = ",".join(filters)
-
-            # Execute
-            run([
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                "-i", video_path,
-                "-vf", filter_chain,
-                "-r", str(settings.TARGET_FPS),
-                "-vsync", "cfr",
-                "-c:v", "libx264",
-                "-preset", "medium",
-                "-crf", str(settings.CRF_VISUAL),
-                "-pix_fmt", "yuv420p",
-                "-an",  # Remove source audio
-                output_path
-            ])
-
-            if os.path.exists(output_path):
-                logger.info(f"         ✅ Processed: {target_duration:.2f}s")
-                return output_path
-            else:
-                logger.error(f"         ❌ Processing failed")
-                return None
-
-        except Exception as e:
-            logger.error(f"         ❌ Processing error: {e}")
+        quality = self.quality_scorer.score(
+            [s.get("text", "") for s in script["sentences"]],
+            script.get("title", ""),
+        )
+        overall = quality.get("overall", 0.0)
+        if overall < 4.0:
+            logger.warning("Script quality too low (%.1f)", overall)
             return None
 
-    def _render_captions_on_scene(
+        logger.info("Script generated with score %.1f", overall)
+        return script
+
+    # ------------------------------------------------------------------
+    # Rendering pipeline
+    # ------------------------------------------------------------------
+
+    def _render_from_script(self, script: Dict) -> Optional[str]:
+        logger.info("🎬 Rendering scenes")
+        sentences = script.get("sentences", [])
+        if not sentences:
+            logger.error("Script missing sentences")
+            return None
+
+        rendered: List[str] = []
+        total_duration = 0.0
+
+        for index, sentence in enumerate(sentences, 1):
+            logger.info("—" * 60)
+            logger.info("Scene %s/%s", index, len(sentences))
+            scene_path = self._produce_scene(sentence, index)
+            if not scene_path:
+                logger.error("Scene %s failed", index)
+                continue
+
+            rendered.append(scene_path)
+            scene_duration = ffprobe_duration(scene_path)
+            total_duration += scene_duration
+            logger.info("Scene %s duration %.2fs", index, scene_duration)
+
+        if not rendered:
+            logger.error("No scenes rendered")
+            return None
+
+        final_path = str(self.temp_dir / f"final_{int(time.time())}.mp4")
+        try:
+            self._concat_segments(rendered, final_path)
+        except Exception as exc:
+            logger.error("Concatenation failed: %s", exc)
+            return None
+
+        if not os.path.exists(final_path):
+            logger.error("Final video missing after concat")
+            return None
+
+        if settings.BGM_ENABLED:
+            logger.info("Adding BGM to final video")
+            with_bgm = self.bgm_manager.add_bgm_to_video(
+                final_path, total_duration, str(self.temp_dir)
+            )
+            if with_bgm and os.path.exists(with_bgm):
+                final_path = with_bgm
+
+        logger.info("Final video assembled: %s", final_path)
+        return final_path
+
+    def _produce_scene(self, sentence: Dict, index: int) -> Optional[str]:
+        text = sentence.get("text", "").strip()
+        sentence_type = sentence.get("type", "buildup")
+        keywords = sentence.get("visual_keywords", []) or []
+
+        if not text:
+            logger.warning("Empty text for scene %s", index)
+            return None
+
+        logger.info("Text: %s", text[:120])
+        audio_path, words, duration = self._generate_audio(text, index)
+        if not audio_path:
+            return None
+
+        clip_path = self._prepare_clip(text, keywords, duration, index, sentence_type)
+        if not clip_path:
+            return None
+
+        captioned = self._render_captions(
+            clip_path,
+            text,
+            words,
+            duration,
+            sentence_type,
+        )
+
+        return self._mux_audio(captioned, audio_path, duration, index)
+
+    def _generate_audio(
+        self, text: str, index: int
+    ) -> Tuple[Optional[str], List[Tuple[str, float]], float]:
+        logger.info("Generating TTS for scene %s", index)
+        target = self.temp_dir / f"scene_{index:03d}_voice.wav"
+        try:
+            duration, words = self.tts.synthesize(text=text, wav_out=str(target))
+        except Exception as exc:
+            logger.error("TTS failure: %s", exc)
+            logger.debug("", exc_info=True)
+            return None, [], 0.0
+
+        if not target.exists():
+            logger.error("TTS file missing for scene %s", index)
+            return None, [], 0.0
+
+        return str(target), words, duration
+
+    def _prepare_clip(
+        self,
+        text: str,
+        keywords: Sequence[str],
+        duration: float,
+        index: int,
+        sentence_type: str,
+    ) -> Optional[str]:
+        logger.info("Selecting clip for scene %s", index)
+        keyword = self._choose_keyword(text, keywords)
+        candidate = self._next_candidate(keyword, keywords, text)
+        if not candidate:
+            logger.error("No clip candidate found for scene %s", index)
+            return None
+
+        local_raw = self.temp_dir / f"scene_{index:03d}_raw.mp4"
+        if not self._download_clip(candidate["url"], local_raw):
+            logger.error("Download failed for %s", candidate["url"])
+            return None
+
+        processed = self.temp_dir / f"scene_{index:03d}_proc.mp4"
+        try:
+            self._process_clip(local_raw, processed, duration, sentence_type)
+        except Exception as exc:
+            logger.error("Processing failed: %s", exc)
+            logger.debug("", exc_info=True)
+            return None
+
+        return str(processed)
+
+    def _choose_keyword(self, text: str, keywords: Sequence[str]) -> str:
+        pool: List[str] = []
+        pool.extend([kw for kw in keywords if kw])
+        pool.extend(extract_keywords(text))
+        simplified = simplify_query(text)
+        if simplified:
+            pool.append(simplified)
+
+        pool.append(settings.CHANNEL_TOPIC)
+        pool.append("interesting landscape")
+
+        choice = next((kw for kw in pool if kw), text[:40])
+        logger.info("Search keyword: %s", choice)
+        return choice
+
+    def _next_candidate(
+        self,
+        primary: str,
+        fallbacks: Sequence[str],
+        text: str,
+    ) -> Optional[Dict[str, str]]:
+        queries = [primary]
+        queries.extend([kw for kw in fallbacks if kw and kw != primary])
+
+        simplified = simplify_query(text)
+        if simplified and simplified not in queries:
+            queries.append(simplified)
+
+        queries.append(settings.CHANNEL_TOPIC)
+        queries.append("dynamic landscape video")
+
+        for query in queries:
+            pool = self._get_candidates(query)
+            while pool:
+                candidate = pool.pop(0)
+                url = candidate.get("url")
+                if not url:
+                    continue
+                if candidate.get("duration", 0) < settings.PEXELS_MIN_DURATION:
+                    continue
+                logger.info("Using clip %s for query '%s'", url, query)
+                return candidate
+        return None
+
+    def _get_candidates(self, query: str) -> List[Dict[str, str]]:
+        cache = self._video_candidates.get(query)
+        if cache is not None:
+            return cache
+
+        videos = self.pexels.search_videos(query, per_page=settings.PEXELS_PER_PAGE)
+        results: List[Dict[str, str]] = []
+        for video in videos:
+            url = self.pexels.get_video_file_url(video, quality="hd")
+            if not url:
+                continue
+            results.append(
+                {
+                    "url": url,
+                    "id": str(video.get("id", "")),
+                    "duration": float(video.get("duration", 0.0)),
+                }
+            )
+
+        random.shuffle(results)
+        self._video_candidates[query] = results
+        return results
+
+    def _download_clip(self, url: str, destination: pathlib.Path) -> bool:
+        if self._clip_cache.try_copy(url, destination):
+            logger.info("Reused cached clip for %s", url)
+            return True
+
+        try:
+            with self._http.get(url, stream=True, timeout=45) as response:
+                response.raise_for_status()
+                with open(destination, "wb") as handle:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            handle.write(chunk)
+        except Exception as exc:
+            logger.error("Clip download failed: %s", exc)
+            logger.debug("", exc_info=True)
+            return False
+
+        if destination.exists():
+            self._clip_cache.store(url, destination)
+            return True
+        return False
+
+    def _process_clip(
+        self,
+        source: pathlib.Path,
+        output: pathlib.Path,
+        target_duration: float,
+        sentence_type: str,
+    ) -> None:
+        duration = ffprobe_duration(str(source))
+        if duration <= 0:
+            raise RuntimeError("invalid clip duration")
+
+        loops = max(1, int(target_duration // duration) + 1)
+        filters: List[str] = []
+        if loops > 1:
+            filters.append(f"loop={loops}:size=1:start=0")
+
+        filters.extend(
+            [
+                "scale=1920:1080:force_original_aspect_ratio=increase",
+                "crop=1920:1080",
+            ]
+        )
+
+        if sentence_type == "hook":
+            filters.append(
+                "zoompan=z='min(zoom+0.0006,1.12)':d=1:s=1920x1080:fps=%d"
+                % settings.TARGET_FPS
+            )
+        else:
+            filters.append(
+                "zoompan=z='1.06':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                "d=1:s=1920x1080:fps=%d" % settings.TARGET_FPS
+            )
+
+        total_frames = max(2, int(round(target_duration * settings.TARGET_FPS)))
+        filters.extend(
+            [
+                f"trim=start_frame=0:end_frame={total_frames}",
+                "setpts=PTS-STARTPTS",
+            ]
+        )
+
+        run(
+            [
+                "ffmpeg",
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(source),
+                "-vf",
+                ",".join(filters),
+                "-r",
+                str(settings.TARGET_FPS),
+                "-vsync",
+                "cfr",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                str(settings.CRF_VISUAL),
+                "-pix_fmt",
+                "yuv420p",
+                "-an",
+                str(output),
+            ]
+        )
+
+    def _render_captions(
         self,
         video_path: str,
         text: str,
-        words: List[Tuple[str, float]],
+        words: Sequence[Tuple[str, float]],
         duration: float,
-        sentence_type: str
+        sentence_type: str,
     ) -> str:
-        """
-        ✅ FIXED: Render captions with COLORFUL karaoke style!
-        """
-        logger.info(f"   📝 Adding captions...")
-
+        logger.info("Rendering captions")
         try:
-            # Check if captions enabled
-            if not settings.KARAOKE_CAPTIONS:
-                logger.info(f"      ⚠️ Captions disabled")
-                return video_path
-
-            # Generate colorful ASS file
-            ass_path = video_path.replace(".mp4", ".ass")
-            
-            # ✅ NEW: Use colorful karaoke caption system!
-            style_name = get_random_style()
-            logger.info(f"      🎨 Caption style: {style_name}")
-
-            ass_content = build_karaoke_ass(
+            return self.caption_renderer.render(
+                video_path=video_path,
                 text=text,
-                seg_dur=duration,
-                words=words,
-                is_hook=(sentence_type == "hook"),
-                style_name=style_name
+                words=list(words),
+                duration=duration,
+                is_hook=sentence_type == "hook",
+                sentence_type=sentence_type,
+                temp_dir=str(self.temp_dir),
             )
-
-            # Write ASS file
-            with open(ass_path, 'w', encoding='utf-8') as f:
-                f.write(ass_content)
-
-            if not os.path.exists(ass_path):
-                logger.error(f"      ❌ ASS file creation failed")
-                return video_path
-
-            # Burn captions in a single pass (removes previous double-encode)
-            output = video_path.replace(".mp4", "_caption.mp4")
-            frames = int(duration * settings.TARGET_FPS)
-            ass_arg = pathlib.Path(ass_path).as_posix().replace("'", r"\'")
-            subtitle_filter = (
-                f"subtitles='{ass_arg}':force_style='Kerning=1',"
-                f"setsar=1,fps={settings.TARGET_FPS},trim=start_frame=0:end_frame={frames},setpts=PTS-STARTPTS"
-            )
-
-            run([
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                "-i", video_path,
-                "-vf", subtitle_filter,
-                "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
-                "-c:v", "libx264", "-preset", "medium",
-                "-crf", str(settings.CRF_VISUAL),
-                "-pix_fmt", "yuv420p",
-                "-an",  # No audio yet
-                output
-            ])
-
-            exists = os.path.exists(output)
-            pathlib.Path(ass_path).unlink(missing_ok=True)
-
-            if exists:
-                logger.info(f"      ✅ Captions added with colorful style!")
-                return output
-
-            pathlib.Path(output).unlink(missing_ok=True)
-
+        except Exception as exc:
+            logger.error("Caption render failed: %s", exc)
+            logger.debug("", exc_info=True)
             return video_path
 
-        except Exception as e:
-            logger.error(f"      ❌ Caption error: {e}")
-            pathlib.Path(ass_path).unlink(missing_ok=True)
-            return video_path
-
-    def _overlay_audio_on_video(
+    def _mux_audio(
         self,
         video_path: str,
         audio_path: str,
         duration: float,
-        scene_idx: int
+        index: int,
     ) -> Optional[str]:
-        """Overlay audio on video."""
-        logger.info(f"   🔊 Overlaying audio...")
-
-        output_name = f"scene_{scene_idx:03d}_final.mp4"
-        output_path = str(self.temp_dir / output_name)
-
+        output = self.temp_dir / f"scene_{index:03d}_final.mp4"
         try:
-            self._overlay_audio(
-                video_path=video_path,
-                audio_path=audio_path,
-                output_path=output_path,
-                video_duration=duration
+            run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-i",
+                    video_path,
+                    "-i",
+                    audio_path,
+                    "-t",
+                    f"{duration:.3f}",
+                    "-c:v",
+                    "copy",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "160k",
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "1:a:0",
+                    "-shortest",
+                    str(output),
+                ]
             )
-
-            if os.path.exists(output_path):
-                logger.info(f"      ✅ Audio overlaid")
-                return output_path
-            else:
-                logger.error(f"      ❌ Overlay failed")
-                return None
-
-        except Exception as e:
-            logger.error(f"      ❌ Overlay error: {e}")
+        except Exception as exc:
+            logger.error("Audio mux failed: %s", exc)
+            logger.debug("", exc_info=True)
             return None
+
+        return str(output) if output.exists() else None
+
+    def _concat_segments(self, segments: Iterable[str], output: str) -> None:
+        concat_file = pathlib.Path(output).with_suffix(".txt")
+        try:
+            with open(concat_file, "w", encoding="utf-8") as handle:
+                for segment in segments:
+                    handle.write(f"file '{segment}'\n")
+
+            run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "concat",
+                    "-safe",
+                    "0",
+                    "-i",
+                    str(concat_file),
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "medium",
+                    "-crf",
+                    str(settings.CRF_VISUAL),
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "160k",
+                    "-r",
+                    str(settings.TARGET_FPS),
+                    "-vsync",
+                    "cfr",
+                    output,
+                ]
+            )
+        finally:
+            concat_file.unlink(missing_ok=True)
