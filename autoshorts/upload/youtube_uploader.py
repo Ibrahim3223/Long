@@ -1,30 +1,27 @@
-# FILE: autoshorts/upload/youtube_uploader.py
 # -*- coding: utf-8 -*-
 """
 YouTube Uploader - LONG-FORM with CHAPTER SUPPORT
-- SEO güçlendirme
-- Gerçek zaman damgalı CHAPTERS (audio_durations yoksa otomatik hesap)
+- Chapters artık açıklamanın EN BAŞINDA, 00:00 ile başlıyor
+- En az 3 bölüm ve her bölüm ≥10sn garanti
+- SEO lead + outline + hashtag bölümü chapters'dan SONRA gelir
 """
+
 import logging
 import re
 import unicodedata
 from typing import Dict, Any, List, Optional, Tuple
-
 from autoshorts.config import settings
-from autoshorts.utils.ffmpeg_utils import ffprobe_duration
+from autoshorts.utils.text_utils import hashtags_from_tags
 
 logger = logging.getLogger(__name__)
 
-class YouTubeUploader:
-    """Long-form YouTube uploader with chapters"""
 
+class YouTubeUploader:
     CATEGORIES = {
         "education": "27", "people_blogs": "22", "entertainment": "24",
         "howto_style": "26", "science_tech": "28", "news_politics": "25",
-        "comedy": "23", "sports": "17", "gaming": "20",
-        "travel": "19", "pets_animals": "15",
+        "comedy": "23", "sports": "17", "gaming": "20", "travel": "19", "pets_animals": "15",
     }
-
     _SAFE_TAG_RE = re.compile(r"[^A-Za-z0-9 _\-]")
 
     def __init__(self):
@@ -47,7 +44,6 @@ class YouTubeUploader:
         chapters: Optional[List[Dict[str, Any]]] = None,
         audio_durations: Optional[List[float]] = None,
     ) -> str:
-        """Upload long-form video with chapter timestamps"""
         try:
             from google.oauth2.credentials import Credentials
             from google.auth.transport.requests import Request
@@ -56,26 +52,14 @@ class YouTubeUploader:
 
             logger.info(f"[YouTube] Uploading: {title[:50]}...")
 
-            # Toplam süreyi ölç (fallback için)
-            total_seconds = 0.0
-            try:
-                total_seconds = float(ffprobe_duration(video_path) or 0.0)
-            except Exception:
-                total_seconds = 0.0
-
             optimized_title = self._optimize_title(title)
-            optimized_description = self._build_description_with_chapters(
-                description, chapters, audio_durations,
-                title=optimized_title, tags=tags, topic=topic,
-                video_seconds=total_seconds,
-            )
+            # ⚠️ Chapters BLOK'u açıklamanın BAŞINDA olacak!
+            chapter_block = self._chapter_block_at_top(chapters, audio_durations)
+            tail_description = self._seo_tail(description, optimized_title, tags, topic)
+            optimized_description = (chapter_block + "\n\n" + tail_description).strip()
+
             optimized_tags = self._optimize_tags(tags)
             smart_category = self._detect_category(topic, title, description) if topic else category_id
-
-            logger.info(f"[YouTube] Title: {optimized_title}")
-            logger.info(f"[YouTube] Category: {smart_category}")
-            logger.info(f"[YouTube] Chapters: {len(chapters) if chapters else 0}")
-            logger.info(f"[YouTube] Tags: {len(optimized_tags) if optimized_tags else 0}")
 
             if not optimized_title:
                 raise ValueError("Title is empty")
@@ -83,236 +67,154 @@ class YouTubeUploader:
                 optimized_description = optimized_description[:5000]
 
             creds = Credentials(
-                token=None,
-                refresh_token=self.refresh_token,
+                token=None, refresh_token=self.refresh_token,
                 token_uri="https://oauth2.googleapis.com/token",
-                client_id=self.client_id,
-                client_secret=self.client_secret,
+                client_id=self.client_id, client_secret=self.client_secret,
                 scopes=["https://www.googleapis.com/auth/youtube.upload"],
             )
             creds.refresh(Request())
             youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
 
             body: Dict[str, Any] = {
-                "snippet": {
-                    "title": optimized_title,
-                    "description": optimized_description,
-                    "categoryId": str(smart_category),
-                },
-                "status": {
-                    "privacyStatus": privacy_status,
-                    "selfDeclaredMadeForKids": False,
-                },
+                "snippet": {"title": optimized_title, "description": optimized_description, "categoryId": str(smart_category)},
+                "status": {"privacyStatus": privacy_status, "selfDeclaredMadeForKids": False},
             }
-
             if optimized_tags:
                 body["snippet"]["tags"] = optimized_tags
-                logger.info(f"[YouTube] Adding {len(optimized_tags)} tags")
 
-            if hasattr(settings, "LANG") and settings.LANG:
+            if getattr(settings, "LANG", None):
                 lang_code = str(settings.LANG)[:2].lower()
-                valid_langs = ["en","tr","es","fr","de","it","pt","ru","ja","ko","zh","ar","hi","nl","pl","sv"]
-                if lang_code in valid_langs:
+                if lang_code in {"en","tr","es","fr","de","it","pt","ru","ja","ko","zh","ar","hi","nl","pl","sv"}:
                     body["snippet"]["defaultLanguage"] = lang_code
                     body["snippet"]["defaultAudioLanguage"] = lang_code
-                    logger.info(f"[YouTube] Language: {lang_code}")
-
-            logger.info("[YouTube] Uploading video...")
 
             def _insert_video(y, bdy, path):
                 media = MediaFileUpload(path, chunksize=-1, resumable=False)
-                request = y.videos().insert(part="snippet,status", body=bdy, media_body=media)
-                return request.execute()
+                return y.videos().insert(part="snippet,status", body=bdy, media_body=media).execute()
 
             try:
                 response = _insert_video(youtube, body, video_path)
             except Exception as e:
                 msg = str(e)
                 if "invalidTags" in msg or "video keywords" in msg:
-                    logger.warning("[YouTube] invalidTags received, removing tags and retrying…")
+                    logger.warning("[YouTube] invalidTags; retrying without tags…")
                     body["snippet"].pop("tags", None)
                     response = _insert_video(youtube, body, video_path)
                 else:
                     raise
 
-            video_id = response.get("id", "")
-            if not video_id:
+            vid = response.get("id", "")
+            if not vid:
                 raise ValueError("No video ID returned from YouTube")
-
-            video_url = f"https://youtube.com/watch?v={video_id}"
-            logger.info(f"[YouTube] ✅ Uploaded: {video_url}")
-            return video_id
+            logger.info(f"[YouTube] ✅ Uploaded: https://youtube.com/watch?v={vid}")
+            return vid
 
         except Exception as e:
             logger.error(f"[YouTube] ❌ Upload failed: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
+            import traceback; logger.debug(traceback.format_exc())
             raise
 
-    # --------------------------- SEO + CHAPTERS --------------------------- #
-    def _build_description_with_chapters(
+    # -------------------- Chapters builder (top of description) -------------------- #
+    def _chapter_block_at_top(
         self,
-        description: str,
         chapters: Optional[List[Dict[str, Any]]],
         audio_durations: Optional[List[float]],
-        *,
-        title: str,
-        tags: Optional[List[str]],
-        topic: Optional[str],
-        video_seconds: float = 0.0,
     ) -> str:
         """
-        Açıklamayı SEO giriş + gerçek zaman damgalı chapters + CTA + hashtag şeklinde kurar.
-        - audio_durations yoksa: toplam video süresini cümle/chapters dağılımıyla tahminler.
+        YouTube manual chapters gereksinimleri:
+        - İlk satır mutlaka 00:00 ile başlamalı
+        - En az 3 satır
+        - Her bölüm ≥ 10s
         """
+        lines: List[str] = []
+
+        # Eğer veri yoksa boş dön
+        if not chapters or not audio_durations:
+            return ""
+
+        # Bölüm başlangıç zamanlarını hesapla
+        starts: List[Tuple[float, str, int, int]] = []  # (start_sec, title, s_idx, e_idx)
+        cur_time = 0.0
+        for ch in chapters:
+            title = (ch.get("title") or "Chapter").strip() or "Chapter"
+            s_idx = int(ch.get("start_sentence", 0))
+            e_idx = int(ch.get("end_sentence", s_idx))
+            starts.append((cur_time, title, s_idx, e_idx))
+            # bu bölümün toplam süresi
+            for i in range(s_idx, min(e_idx + 1, len(audio_durations))):
+                cur_time += float(audio_durations[i])
+
+        # En az 3 bölüm değilse: eşit böl
+        if len(starts) < 3 and audio_durations:
+            total = sum(audio_durations)
+            thirds = [0.0, total / 3.0, 2 * total / 3.0]
+            starts = [(thirds[0], "Intro", 0, 0), (thirds[1], "Middle", 0, 0), (thirds[2], "Conclusion", 0, 0)]
+
+        # Süre ≥10s şartını kontrol et, kısa olanları birleştir
+        merged: List[Tuple[float, str]] = []
+        for i, (t, title, _, _) in enumerate(starts):
+            # son başlıksa kalan süre
+            end_t = starts[i + 1][0] if i + 1 < len(starts) else cur_time
+            dur = max(0.0, end_t - t)
+            if i > 0 and dur < 10.0:
+                # önceki başlıkla birleştir
+                prev_t, prev_title = merged[-1]
+                merged[-1] = (prev_t, prev_title)  # yalnızca devam
+                continue
+            merged.append((t, title))
+
+        # İlk satır 00:00 garanti
+        if not merged or merged[0][0] != 0.0:
+            if merged:
+                merged[0] = (0.0, merged[0][1])
+            else:
+                merged = [(0.0, "Intro")]
+
+        # Minimum 3 satır
+        while len(merged) < 3:
+            # kaba eşit aralıklar
+            total = cur_time if cur_time > 0 else 180.0
+            step = total / (len(merged) + 1)
+            merged.append((step * len(merged), f"Part {len(merged)+1}"))
+            merged.sort(key=lambda x: x[0])
+
+        # YouTube güvenli format: 00:00 Title
+        for t, title in merged:
+            lines.append(f"{self._fmt_ts(t)} {title}")
+
+        return "\n".join(lines)
+
+    def _fmt_ts(self, seconds: float) -> str:
+        total = int(max(0, round(seconds)))
+        h = total // 3600
+        m = (total % 3600) // 60
+        s = total % 60
+        return f"{h:01d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
+
+    # -------------------- SEO tail (chapters sonrası) -------------------- #
+    def _seo_tail(self, description: str, title: str, tags: Optional[List[str]], topic: Optional[str]) -> str:
         base = (description or "").strip()
         primary_kw = (topic or title or "").strip()
 
-        # 1) SEO lead (ilk satır)
-        lead = f"{primary_kw}: " if primary_kw and primary_kw.lower() not in base.lower()[:200] else ""
-        full_description = re.sub(r"\s+", " ", (lead + base)).strip()
+        # kısa lead (chapters'tan sonra)
+        lead = base
+        if primary_kw and primary_kw.lower() not in lead.lower()[:200]:
+            lead = f"{primary_kw}: {lead}".strip()
 
-        # 2) CHAPTERS (timestamp zorunlu)
-        lines = []
-        ts_list: List[Tuple[int, str]] = []  # (start_seconds, title)
-        if chapters:
-            ts_list = self._compute_chapter_timestamps(chapters, audio_durations, video_seconds)
-        if ts_list:
-            lines.append("")
-            lines.append("Chapters:")
-            for sec, name in ts_list:
-                lines.append(f"{self._format_timestamp(sec)} {name}")
-            full_description += "\n" + "\n".join(lines)
+        # küçük outline yoksa ekleme (isteğe bağlı)
+        tail = lead
 
-        # 3) What you’ll learn (chapter başlıkları)
-        if chapters:
-            names = [c.get("title", "").strip() for c in chapters if c.get("title")]
-            if names:
-                full_description += "\n\nWhat you’ll learn:\n" + "\n".join(f"• {n}" for n in names[:8])
+        # CTA
+        tail += "\n\n🔔 Subscribe for more in-depth educational content!\n💬 Share your thoughts below."
 
-        # 4) CTA
-        full_description += "\n\n🔔 Subscribe for more in-depth educational content!"
-        full_description += "\n💬 Share your thoughts below."
-
-        # 5) Hashtags
+        # Hashtags (3–5)
         safe_tags = self._optimize_tags(tags) if tags else []
-        hashtags = self._hashtags_from_tags(safe_tags, title, limit=5)
+        hashtags = hashtags_from_tags(safe_tags, title, limit=5)
         if hashtags:
-            full_description += "\n\n" + " ".join(hashtags)
+            tail += "\n\n" + " ".join(hashtags)
+        return tail.strip()
 
-        return full_description.strip()
-
-    def _compute_chapter_timestamps(
-        self,
-        chapters: List[Dict[str, Any]],
-        audio_durations: Optional[List[float]],
-        video_seconds: float
-    ) -> List[Tuple[int, str]]:
-        """
-        YouTube'un chapter algılaması için satır satır 'MM:SS Başlık' üretir.
-        Öncelik: audio_durations -> cümle indeksleri -> eşit paylaşım.
-        Her bölüm en az 10 sn olacak şekilde korunur.
-        """
-        if not chapters:
-            return []
-
-        # 1) Cümle bazlı süre varsa (en doğrusu)
-        if audio_durations and len(audio_durations) > 0:
-            cur = 0.0
-            out: List[Tuple[int, str]] = []
-            for ch in chapters:
-                title = ch.get("title", "Chapter").strip() or "Chapter"
-                out.append((int(cur), title))
-                s = int(ch.get("start_sentence", 0))
-                e = int(ch.get("end_sentence", -1))
-                if e < s:
-                    e = s
-                for i in range(s, min(e + 1, len(audio_durations))):
-                    cur += max(0.0, float(audio_durations[i]))
-            # En az 3 chapter ve 0:00 ile başlamalı
-            out = self._enforce_chapter_rules(out, total_seconds=int(cur or video_seconds))
-            return out
-
-        # 2) Video süresi biliniyorsa, cümle indekslerine göre oranla
-        total = int(video_seconds or 0)
-        if total <= 0:
-            # 3) Son çare: sabit 60 sn kabul edip eşit böl
-            total = 60 * max(3, len(chapters))
-        # Cümle sayısı tahmini
-        max_end = max((int(c.get("end_sentence", -1)) for c in chapters), default=-1)
-        total_sentences = max_end + 1 if max_end >= 0 else None
-
-        starts: List[int] = []
-        if total_sentences and total_sentences > 0:
-            per_sentence = max(1.0, total / total_sentences)
-            cur = 0.0
-            for ch in chapters:
-                starts.append(int(cur))
-                s = int(ch.get("start_sentence", 0))
-                e = int(ch.get("end_sentence", s))
-                count = max(1, (e - s + 1))
-                cur += per_sentence * count
-        else:
-            # Eşit paylaş
-            per = total / max(1, len(chapters))
-            starts = [int(i * per) for i in range(len(chapters))]
-
-        out = [(starts[i], (chapters[i].get("title") or "Chapter").strip() or "Chapter")
-               for i in range(len(chapters))]
-        out = self._enforce_chapter_rules(out, total_seconds=total)
-        return out
-
-    def _enforce_chapter_rules(self, stamps: List[Tuple[int, str]], *, total_seconds: int) -> List[Tuple[int, str]]:
-        """
-        - İlk satır 0:00 olmalı
-        - En az 3 chapter olmalı
-        - Her chapter >= 10 sn
-        """
-        if not stamps:
-            return []
-        # 0:00 ile başlat
-        if stamps[0][0] != 0:
-            stamps[0] = (0, stamps[0][1])
-
-        # En az 3 satır
-        if len(stamps) < 3 and total_seconds > 0:
-            # Eşit bölüp 3'e tamamla
-            thirds = [0, int(total_seconds / 3), int(2 * total_seconds / 3)]
-            while len(thirds) > len(stamps):
-                stamps.append((thirds[len(stamps)], f"Part {len(stamps)+1}"))
-        # Süre kontrolü (min 10 sn). Çok kısa kalanları birleştir.
-        MIN_SEC = 10
-        fixed: List[Tuple[int, str]] = []
-        for i, (ts, name) in enumerate(stamps):
-            fixed.append((max(0, int(ts)), name))
-        fixed.sort(key=lambda x: x[0])
-        pruned: List[Tuple[int, str]] = []
-        for i, (ts, name) in enumerate(fixed):
-            if i == 0:
-                pruned.append((ts, name))
-                continue
-            prev_ts = pruned[-1][0]
-            if ts - prev_ts < MIN_SEC:
-                # Öncekiyle birleştir
-                continue
-            pruned.append((ts, name))
-        # Total'e göre son kontrol
-        if len(pruned) >= 2 and total_seconds > 0:
-            if total_seconds - pruned[-1][0] < MIN_SEC:
-                pruned.pop()  # son chapter çok kısaysa at
-        if len(pruned) < 3 and total_seconds > 0:
-            # tekrar eşit paylaştır
-            per = max(MIN_SEC, int(total_seconds / 3))
-            pruned = [(0, "Part 1"), (per, "Part 2"), (min(total_seconds - MIN_SEC, 2*per), "Part 3")]
-        return pruned
-
-    def _format_timestamp(self, seconds: int) -> str:
-        seconds = max(0, int(seconds))
-        h = seconds // 3600
-        m = (seconds % 3600) // 60
-        s = seconds % 60
-        return f"{h}:{m:02d}:{s:02d}" if h > 0 else f"{m}:{s:02d}"
-
+    # -------------------- helpers -------------------- #
     def _optimize_title(self, title: str) -> str:
         if not title:
             return "Untitled Video"
@@ -323,7 +225,6 @@ class YouTubeUploader:
             t = (t + " | complete guide")[:70]
         return t
 
-    # --- Tags / Hashtags ---
     def _sanitize_tag(self, tag: str) -> str:
         if not tag:
             return ""
@@ -336,44 +237,22 @@ class YouTubeUploader:
     def _optimize_tags(self, tags: Optional[List[str]]) -> List[str]:
         if not tags:
             return []
-        seen = set()
-        out: List[str] = []
-        total_len = 0
+        seen, out, total_len = set(), [], 0
         for raw in tags:
             t = self._sanitize_tag(raw)
             if not t:
                 continue
-            key = t.lower()
-            if key in seen:
+            k = t.lower()
+            if k in seen:
                 continue
             if total_len + len(t) + (1 if out else 0) > 490:
                 break
             out.append(t)
-            seen.add(key)
+            seen.add(k)
             total_len += len(t) + 1
             if len(out) >= 30:
                 break
         return out
-
-    def _hashtags_from_tags(self, tags: List[str], title: str, limit: int = 5) -> List[str]:
-        """
-        Basit ve güvenli hashtag üretimi: tag'lerden ve başlıktan.
-        """
-        hs = []
-        for t in tags:
-            core = re.sub(r"[^A-Za-z0-9]", "", t)
-            if core and len(hs) < limit:
-                hs.append("#" + core[:28])
-        if len(hs) < limit:
-            # Başlıktan 1-2 anahtar
-            words = [w for w in re.split(r"[^A-Za-z0-9]+", title) if len(w) >= 3]
-            for w in words:
-                if len(hs) >= limit:
-                    break
-                core = re.sub(r"[^A-Za-z0-9]", "", w)
-                if core and ("#" + core) not in hs:
-                    hs.append("#" + core[:28])
-        return hs
 
     def _detect_category(self, topic: str, title: str, description: str) -> str:
         text = f"{topic or ''} {title or ''} {description or ''}".lower()
@@ -385,8 +264,6 @@ class YouTubeUploader:
             "19": ["travel","country","city","geography","world","place"],
             "22": ["life","daily","personal","vlog","lifestyle"],
         }
-        scores: Dict[str, int] = {}
-        for cat_id, kws in patterns.items():
-            scores[cat_id] = sum(1 for kw in kws if kw in text)
+        scores: Dict[str,int] = {cid: sum(1 for kw in kws if kw in text) for cid, kws in patterns.items()}
         best = max(scores, key=scores.get) if scores else "27"
         return best if scores.get(best, 0) > 0 else "27"
