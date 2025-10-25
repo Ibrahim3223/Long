@@ -29,6 +29,7 @@ from autoshorts.utils.ffmpeg_utils import ffprobe_duration, run
 # share the HTTP pool and caching logic inside the orchestrator.
 
 PEXELS_SEARCH_ENDPOINT = "https://api.pexels.com/videos/search"
+from autoshorts.video import PexelsClient
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,17 @@ class ShortsOrchestrator:
 
         self._clip_cache = _ClipCache(self.temp_dir)
         self._video_candidates: Dict[str, List[ClipCandidate]] = {}
+        self._video_candidates: Dict[str, List[Dict[str, str]]] = {}
+        self.pexels = PexelsClient(api_key=self.pexels_key)
+        self._clip_cache = _ClipCache(self.temp_dir)
+        self._video_candidates: Dict[str, List[Dict[str, str]]] = {}
+        self._http = requests.Session()
+        self._http.headers.update({"Authorization": self.pexels_key})
+        self._video_url_cache: Dict[str, List[str]] = {}
+
+        # State guards
+        self.state_guard = StateGuard(channel_id)
+        self.novelty_guard = NoveltyGuard()
 
         self._http = requests.Session()
         self._http.headers.update({"Authorization": self.pexels_key})
@@ -346,6 +358,22 @@ class ShortsOrchestrator:
         logger.info("Final video assembled: %s", final_path)
         return final_path
 
+
+        if not os.path.exists(final_path):
+            logger.error("Final video missing after concat")
+            return None
+
+        if settings.BGM_ENABLED:
+            logger.info("Adding BGM to final video")
+            with_bgm = self.bgm_manager.add_bgm_to_video(
+                final_path, total_duration, str(self.temp_dir)
+            )
+            if with_bgm and os.path.exists(with_bgm):
+                final_path = with_bgm
+
+        logger.info("Final video assembled: %s", final_path)
+        return final_path
+
     def _produce_scene(self, sentence: Dict, index: int) -> Optional[str]:
         text = sentence.get("text", "").strip()
         sentence_type = sentence.get("type", "buildup")
@@ -437,12 +465,45 @@ class ShortsOrchestrator:
         logger.info("Search keyword: %s", choice)
         return choice
 
+            return None
+
+        local_raw = self.temp_dir / f"scene_{index:03d}_raw.mp4"
+        if not self._download_clip(candidate["url"], local_raw):
+            logger.error("Download failed for %s", candidate["url"])
+            return None
+
+        processed = self.temp_dir / f"scene_{index:03d}_proc.mp4"
+        try:
+            self._process_clip(local_raw, processed, duration, sentence_type)
+        except Exception as exc:
+            logger.error("Processing failed: %s", exc)
+            logger.debug("", exc_info=True)
+            return None
+
+        return str(processed)
+
+    def _choose_keyword(self, text: str, keywords: Sequence[str]) -> str:
+        pool: List[str] = []
+        pool.extend([kw for kw in keywords if kw])
+        pool.extend(extract_keywords(text))
+        simplified = simplify_query(text)
+        if simplified:
+            pool.append(simplified)
+
+        pool.append(settings.CHANNEL_TOPIC)
+        pool.append("interesting landscape")
+
+        choice = next((kw for kw in pool if kw), text[:40])
+        logger.info("Search keyword: %s", choice)
+        return choice
+
     def _next_candidate(
         self,
         primary: str,
         fallbacks: Sequence[str],
         text: str,
     ) -> Optional[ClipCandidate]:
+    ) -> Optional[Dict[str, str]]:
         queries = [primary]
         queries.extend([kw for kw in fallbacks if kw and kw != primary])
 
@@ -507,6 +568,101 @@ class ShortsOrchestrator:
             width = int(file_data.get("width", 0))
             height = int(file_data.get("height", 0))
             if not link or width <= height:
+                url = candidate.get("url")
+                if not url:
+                    continue
+                if candidate.get("duration", 0) < settings.PEXELS_MIN_DURATION:
+                    continue
+                logger.info("Using clip %s for query '%s'", url, query)
+                return candidate
+        query: str,
+        per_page: int = 15,
+        fallback_keywords: Optional[List[str]] = None
+    ) -> Optional[str]:
+        """
+        ✅ FIXED: Fetch video from Pexels with LANDSCAPE-ONLY filtering.
+        """
+        # Try main query first
+        all_queries = [query]
+        
+        # Add fallback keywords if provided
+        if fallback_keywords:
+            all_queries.extend([kw for kw in fallback_keywords if kw and kw != query][:2])
+        
+        # Generic fallbacks
+        all_queries.extend(["nature landscape", "abstract motion"])
+
+        for attempt, current_query in enumerate(all_queries, 1):
+            try:
+                logger.debug(f"         Attempt {attempt}: '{current_query}'")
+
+                cached = self._video_url_cache.get(current_query)
+                if cached:
+                    url = cached.pop(0)
+                    if not cached:
+                        self._video_url_cache.pop(current_query, None)
+                    logger.info(f"      ✅ Video found from cache (attempt {attempt})")
+                    return url
+
+                # ✅ CRITICAL: Request landscape orientation
+                params = {
+                    "query": current_query,
+                    "per_page": per_page,
+                    "orientation": "landscape"  # ✅ LANDSCAPE ONLY
+                }
+
+                response = self._http.get(
+                    "https://api.pexels.com/videos/search",
+                    params=params,
+                    timeout=10
+                )
+                response.raise_for_status()
+
+                data = response.json()
+                videos = data.get("videos", [])
+
+                if not videos:
+                    logger.debug(f"         No videos for '{current_query}'")
+                    continue
+                if candidate.get("duration", 0) < settings.PEXELS_MIN_DURATION:
+                    continue
+                logger.info("Using clip %s for query '%s'", url, query)
+                return candidate
+
+                hd_urls: List[str] = []
+                fallback_urls: List[str] = []
+
+                for video in landscape_videos:
+                    for vf in video.get("video_files", []):
+                        vf_width = vf.get("width", 0)
+                        vf_height = vf.get("height", 0)
+                        link = vf.get("link")
+
+                        if not link or vf_width <= vf_height:
+                            continue
+
+                        if vf.get("quality") == "hd":
+                            hd_urls.append(link)
+                        else:
+                            fallback_urls.append(link)
+
+                candidates = hd_urls or fallback_urls
+                if not candidates:
+                    logger.debug("         No usable files in landscape videos")
+                    continue
+
+                random.shuffle(candidates)
+                chosen = candidates[0]
+                remaining = candidates[1:5]  # Keep a few cached options
+
+                if remaining:
+                    self._video_url_cache[current_query] = remaining
+
+                logger.info(f"      ✅ Video found (attempt {attempt})")
+                return chosen
+
+            except Exception as e:
+                logger.debug(f"         Query {attempt} error: {e}")
                 continue
 
             quality = file_data.get("quality")
@@ -523,6 +679,161 @@ class ShortsOrchestrator:
             random.shuffle(pool)
 
         return pool[0]
+
+    def _download_clip(self, url: str, destination: pathlib.Path) -> bool:
+        if self._clip_cache.try_copy(url, destination):
+            logger.info("Reused cached clip for %s", url)
+            return True
+
+        try:
+            with self._http.get(url, stream=True, timeout=45) as response:
+                response.raise_for_status()
+                with open(destination, "wb") as handle:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            handle.write(chunk)
+        except Exception as exc:
+            logger.error("Clip download failed: %s", exc)
+            logger.debug("", exc_info=True)
+            return False
+
+        if destination.exists():
+            self._clip_cache.store(url, destination)
+            return True
+        return False
+
+    def _process_clip(
+        self,
+        source: pathlib.Path,
+        output: pathlib.Path,
+        target_duration: float,
+        sentence_type: str,
+    ) -> None:
+        duration = ffprobe_duration(str(source))
+        if duration <= 0:
+            raise RuntimeError("invalid clip duration")
+
+        loops = max(1, int(target_duration // duration) + 1)
+        filters: List[str] = []
+        if loops > 1:
+            filters.append(f"loop={loops}:size=1:start=0")
+
+        filters.extend(
+            [
+                "scale=1920:1080:force_original_aspect_ratio=increase",
+                "crop=1920:1080",
+            ]
+        )
+
+        if sentence_type == "hook":
+            filters.append(
+                "zoompan=z='min(zoom+0.0006,1.12)':d=1:s=1920x1080:fps=%d"
+                % settings.TARGET_FPS
+            )
+        else:
+            filters.append(
+                "zoompan=z='1.06':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                "d=1:s=1920x1080:fps=%d" % settings.TARGET_FPS
+            )
+
+    def _get_candidates(self, query: str) -> List[Dict[str, str]]:
+        cache = self._video_candidates.get(query)
+        if cache is not None:
+            return cache
+
+        results: List[Dict[str, str]] = []
+        try:
+            params = {
+                "query": query,
+                "per_page": min(settings.PEXELS_PER_PAGE, 80),
+                "orientation": "landscape",
+            }
+            response = self._http.get(PEXELS_SEARCH_ENDPOINT, params=params, timeout=12)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            logger.error("Pexels lookup failed for '%s': %s", query, exc)
+            logger.debug("", exc_info=True)
+            payload = {}
+
+        for video in payload.get("videos", []) or []:
+            video_id = str(video.get("id", ""))
+            duration = float(video.get("duration", 0.0))
+            url = self._select_video_file(video)
+            if not url:
+                continue
+            results.append({"url": url, "id": video_id, "duration": duration})
+
+        random.shuffle(results)
+        self._video_candidates[query] = results
+        return results
+
+    def _select_video_file(self, video: Dict) -> Optional[str]:
+        files = video.get("video_files", []) or []
+        landscape: List[str] = []
+        fallback: List[str] = []
+
+        for file_data in files:
+            link = file_data.get("link")
+            width = int(file_data.get("width", 0))
+            height = int(file_data.get("height", 0))
+            if not link or width <= height:
+                continue
+
+            quality = file_data.get("quality")
+            if quality == "hd":
+                landscape.append(link)
+            else:
+                fallback.append(link)
+
+        pool = landscape or fallback
+        if not pool:
+            return None
+
+        if len(pool) > 1:
+            random.shuffle(pool)
+
+        return pool[0]
+
+    def _download_clip(self, url: str, destination: pathlib.Path) -> bool:
+        if self._clip_cache.try_copy(url, destination):
+            logger.info("Reused cached clip for %s", url)
+            return True
+
+        try:
+            with self._http.get(url, stream=True, timeout=45) as response:
+                response.raise_for_status()
+                with open(destination, "wb") as handle:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            handle.write(chunk)
+        except Exception as exc:
+            logger.error("Clip download failed: %s", exc)
+            logger.debug("", exc_info=True)
+            return False
+
+        if destination.exists():
+            self._clip_cache.store(url, destination)
+            return True
+        return False
+
+        videos = self.pexels.search_videos(query, per_page=settings.PEXELS_PER_PAGE)
+        results: List[Dict[str, str]] = []
+        for video in videos:
+            url = self.pexels.get_video_file_url(video, quality="hd")
+            if not url:
+                continue
+            results.append(
+                {
+                    "url": url,
+                    "id": str(video.get("id", "")),
+                    "duration": float(video.get("duration", 0.0)),
+                }
+            )
+
+        random.shuffle(results)
+        self._video_candidates[query] = results
+        return results
 
     def _download_clip(self, url: str, destination: pathlib.Path) -> bool:
         if self._clip_cache.try_copy(url, destination):
@@ -638,6 +949,50 @@ class ShortsOrchestrator:
         except Exception as exc:
             logger.error("Caption render failed: %s", exc)
             logger.debug("", exc_info=True)
+
+            # Write ASS file
+            with open(ass_path, 'w', encoding='utf-8') as f:
+                f.write(ass_content)
+
+            if not os.path.exists(ass_path):
+                logger.error(f"      ❌ ASS file creation failed")
+                return video_path
+
+            # Burn captions in a single pass (removes previous double-encode)
+            output = video_path.replace(".mp4", "_caption.mp4")
+            frames = int(duration * settings.TARGET_FPS)
+            ass_arg = pathlib.Path(ass_path).as_posix().replace("'", r"\'")
+            subtitle_filter = (
+                f"subtitles='{ass_arg}':force_style='Kerning=1',"
+                f"setsar=1,fps={settings.TARGET_FPS},trim=start_frame=0:end_frame={frames},setpts=PTS-STARTPTS"
+            )
+
+            run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", video_path,
+                "-vf", subtitle_filter,
+                "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
+                "-c:v", "libx264", "-preset", "medium",
+                "-crf", str(settings.CRF_VISUAL),
+                "-pix_fmt", "yuv420p",
+                "-an",  # No audio yet
+                output
+            ])
+
+            exists = os.path.exists(output)
+            pathlib.Path(ass_path).unlink(missing_ok=True)
+
+            if exists:
+                logger.info(f"      ✅ Captions added with colorful style!")
+                return output
+
+            pathlib.Path(output).unlink(missing_ok=True)
+
+            return video_path
+
+        except Exception as e:
+            logger.error(f"      ❌ Caption error: {e}")
+            pathlib.Path(ass_path).unlink(missing_ok=True)
             return video_path
 
     def _mux_audio(
