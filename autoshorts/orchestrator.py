@@ -24,6 +24,10 @@ from autoshorts.state.novelty_guard import NoveltyGuard
 from autoshorts.state.state_guard import StateGuard
 from autoshorts.tts.edge_handler import TTSHandler
 from autoshorts.utils.ffmpeg_utils import ffprobe_duration, run
+# Endpoint reused for Pexels queries without the higher level client so we can
+# share the HTTP pool and caching logic inside the orchestrator.
+
+PEXELS_SEARCH_ENDPOINT = "https://api.pexels.com/videos/search"
 from autoshorts.video import PexelsClient
 
 logger = logging.getLogger(__name__)
@@ -131,6 +135,8 @@ class ShortsOrchestrator:
         if not self.pexels_key:
             raise ValueError("PEXELS_API_KEY required")
 
+        self._clip_cache = _ClipCache(self.temp_dir)
+        self._video_candidates: Dict[str, List[Dict[str, str]]] = {}
         self.pexels = PexelsClient(api_key=self.pexels_key)
         self._clip_cache = _ClipCache(self.temp_dir)
         self._video_candidates: Dict[str, List[Dict[str, str]]] = {}
@@ -454,6 +460,11 @@ class ShortsOrchestrator:
                 candidate = pool.pop(0)
                 url = candidate.get("url")
                 if not url:
+                    continue
+                if candidate.get("duration", 0) < settings.PEXELS_MIN_DURATION:
+                    continue
+                logger.info("Using clip %s for query '%s'", url, query)
+                return candidate
         query: str,
         per_page: int = 15,
         fallback_keywords: Optional[List[str]] = None
@@ -551,6 +562,82 @@ class ShortsOrchestrator:
         cache = self._video_candidates.get(query)
         if cache is not None:
             return cache
+
+        results: List[Dict[str, str]] = []
+        try:
+            params = {
+                "query": query,
+                "per_page": min(settings.PEXELS_PER_PAGE, 80),
+                "orientation": "landscape",
+            }
+            response = self._http.get(PEXELS_SEARCH_ENDPOINT, params=params, timeout=12)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            logger.error("Pexels lookup failed for '%s': %s", query, exc)
+            logger.debug("", exc_info=True)
+            payload = {}
+
+        for video in payload.get("videos", []) or []:
+            video_id = str(video.get("id", ""))
+            duration = float(video.get("duration", 0.0))
+            url = self._select_video_file(video)
+            if not url:
+                continue
+            results.append({"url": url, "id": video_id, "duration": duration})
+
+        random.shuffle(results)
+        self._video_candidates[query] = results
+        return results
+
+    def _select_video_file(self, video: Dict) -> Optional[str]:
+        files = video.get("video_files", []) or []
+        landscape: List[str] = []
+        fallback: List[str] = []
+
+        for file_data in files:
+            link = file_data.get("link")
+            width = int(file_data.get("width", 0))
+            height = int(file_data.get("height", 0))
+            if not link or width <= height:
+                continue
+
+            quality = file_data.get("quality")
+            if quality == "hd":
+                landscape.append(link)
+            else:
+                fallback.append(link)
+
+        pool = landscape or fallback
+        if not pool:
+            return None
+
+        if len(pool) > 1:
+            random.shuffle(pool)
+
+        return pool[0]
+
+    def _download_clip(self, url: str, destination: pathlib.Path) -> bool:
+        if self._clip_cache.try_copy(url, destination):
+            logger.info("Reused cached clip for %s", url)
+            return True
+
+        try:
+            with self._http.get(url, stream=True, timeout=45) as response:
+                response.raise_for_status()
+                with open(destination, "wb") as handle:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            handle.write(chunk)
+        except Exception as exc:
+            logger.error("Clip download failed: %s", exc)
+            logger.debug("", exc_info=True)
+            return False
+
+        if destination.exists():
+            self._clip_cache.store(url, destination)
+            return True
+        return False
 
         videos = self.pexels.search_videos(query, per_page=settings.PEXELS_PER_PAGE)
         results: List[Dict[str, str]] = []
