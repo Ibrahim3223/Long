@@ -127,20 +127,22 @@ class ShortsOrchestrator:
         self.state_guard = StateGuard(channel_id)
         self.novelty_guard = NoveltyGuard()
 
-        self.pexels = PexelsClient(api_key=pexels_key or settings.PEXELS_API_KEY)
+        self.pexels_key = pexels_key or settings.PEXELS_API_KEY
+        if not self.pexels_key:
+            raise ValueError("PEXELS_API_KEY required")
+
+        self.pexels = PexelsClient(api_key=self.pexels_key)
         self._clip_cache = _ClipCache(self.temp_dir)
         self._video_candidates: Dict[str, List[Dict[str, str]]] = {}
 
         self._http = requests.Session()
+        self._http.headers.update({"Authorization": self.pexels_key})
         try:
             adapter = HTTPAdapter(pool_connections=6, pool_maxsize=12)
             self._http.mount("https://", adapter)
             self._http.mount("http://", adapter)
         except Exception as exc:  # pragma: no cover - adapter install best effort
             logger.debug("Unable to enable HTTP pooling: %s", exc)
-
-        if not self.pexels.api_key:
-            raise ValueError("PEXELS_API_KEY required")
 
         logger.info("🎬 ShortsOrchestrator ready for channel %s", channel_id)
 
