@@ -147,7 +147,8 @@ class GeminiClient:
     ) -> str:
         """Build ULTRA SEO-optimized prompt"""
 
-        return f"""Create a HIGH-QUALITY, SEO-OPTIMIZED long-form YouTube video script about: {topic}
+        # Build the prompt (avoiding f-string issues with curly braces in JSON examples)
+        prompt = f"""Create a HIGH-QUALITY, SEO-OPTIMIZED long-form YouTube video script about: {topic}
 
 CRITICAL REQUIREMENTS:
 - EXACTLY {target_sentences} sentences (40-70 range)
@@ -182,10 +183,7 @@ STRUCTURE:
 - Natural keyword placement (don't stuff!)
 
 **metadata.tags** (25-35 tags):
-- Mix of:
-  * Broad: "{topic keyword}", "design history", "product evolution"
-  * Specific: long-tail phrases from the script
-  * Related: adjacent topics viewers might search
+- Mix of broad, specific, and related terms
 - All lowercase, no commas
 - NO generic words ("video", "youtube", "watch")
 
@@ -206,27 +204,34 @@ Style: {style}
 Additional: {additional_context or "None"}
 
 YOU MUST RETURN COMPLETE, VALID JSON. DO NOT TRUNCATE.
-
+"""
+        
+        # Add JSON structure template separately to avoid f-string escaping issues
+        prompt += """
 Return this EXACT JSON structure:
 
-{{
-  "hook": "{hook}",
-  "script": ["sentence 1", "sentence 2", ... EXACTLY {target_sentences}],
-  "cta": "{cta}",
+{
+  "hook": "Your hook sentence",
+  "script": ["sentence 1", "sentence 2", "sentence 3", ... include ALL sentences],
+  "cta": "Call to action",
   "search_queries": ["specific term 1", "term 2", ... 30-40 SPECIFIC terms],
   "main_visual_focus": "Primary visual theme for the video",
   "chapters": [
-    {{"title": "Keyword-Rich Title", "start_sentence": 0, "end_sentence": 7, "description": "Clear value"}},
+    {"title": "Keyword-Rich Title", "start_sentence": 0, "end_sentence": 7, "description": "Clear value"},
+    {"title": "Second Chapter", "start_sentence": 8, "end_sentence": 15, "description": "Value"},
     ... 5-7 chapters total
   ],
-  "metadata": {{
+  "metadata": {
     "title": "PRIMARY KEYWORD: Engaging Promise (60-70 chars)",
     "description": "400-500 word description with hook, chapters, questions, CTA",
-    "tags": ["tag1", "tag2", ... 25-35 tags, all lowercase, specific"]
-  }}
-}}
+    "tags": ["tag1", "tag2", "tag3", ... 25-35 tags, all lowercase, specific]
+  }
+}
 
-REMEMBER: Quality > Quantity. Make EVERY word count!"""
+REMEMBER: Quality > Quantity. Make EVERY word count!
+"""
+        
+        return prompt
 
     def _call_api_with_fallback(
         self,
