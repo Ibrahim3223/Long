@@ -402,12 +402,29 @@ class ShortsOrchestrator:
     # ------------------------------------------------------------------
 
     def _generate_script(self, topic_prompt: str) -> Optional[Dict]:
+        """Generate script using GeminiClient and convert to expected format."""
+        # Get target duration from settings (default to 5 minutes for long-form)
+        target_duration = int(os.getenv("TARGET_DURATION_SECONDS", "300"))  # 5 minutes default
+        style = getattr(settings, "CONTENT_STYLE", "educational and engaging")
+        
         for attempt in range(3):
             try:
                 logger.info("Generating script (attempt %d)", attempt + 1)
-                script = self.gemini.generate_script(
-                    topic_prompt=topic_prompt, channel_id=self.channel_id
+                
+                # Call GeminiClient.generate() with proper parameters
+                content_response = self.gemini.generate(
+                    topic=topic_prompt,
+                    style=style,
+                    duration=target_duration,
+                    additional_context=f"Channel: {self.channel_id}"
                 )
+                
+                if not content_response:
+                    continue
+                
+                # Convert ContentResponse to expected dict format
+                script = self._convert_content_response_to_script(content_response)
+                
                 if not script:
                     continue
 
@@ -425,6 +442,86 @@ class ShortsOrchestrator:
                     time.sleep(2)
 
         return None
+    
+    def _convert_content_response_to_script(self, content_response) -> Optional[Dict]:
+        """Convert GeminiClient ContentResponse to orchestrator script format."""
+        try:
+            # Build sentences list from script (list of strings -> list of dicts)
+            sentences = []
+            
+            # Add hook as first sentence
+            if content_response.hook:
+                sentences.append({
+                    "text": content_response.hook,
+                    "type": "hook"
+                })
+            
+            # Add main script sentences
+            for idx, text in enumerate(content_response.script):
+                sentence_type = "content"
+                if idx == 0 and not content_response.hook:
+                    sentence_type = "hook"
+                elif idx == len(content_response.script) - 1:
+                    sentence_type = "conclusion"
+                
+                sentences.append({
+                    "text": text,
+                    "type": sentence_type
+                })
+            
+            # Add CTA as last sentence
+            if content_response.cta:
+                sentences.append({
+                    "text": content_response.cta,
+                    "type": "cta"
+                })
+            
+            # Process chapters - fix field names and add search_queries
+            chapters = []
+            search_queries_list = content_response.search_queries or []
+            num_chapters = len(content_response.chapters) if content_response.chapters else 0
+            
+            for idx, chapter in enumerate(content_response.chapters or []):
+                # Convert field names to match orchestrator expectations
+                chapter_dict = {
+                    "title": chapter.get("title", f"Chapter {idx + 1}"),
+                    "start_sentence_index": chapter.get("start_sentence", 0),
+                    "end_sentence_index": chapter.get("end_sentence", len(sentences) - 1),
+                    "description": chapter.get("description", "")
+                }
+                
+                # Distribute search_queries across chapters
+                if search_queries_list and num_chapters > 0:
+                    queries_per_chapter = len(search_queries_list) // num_chapters
+                    start_query_idx = idx * queries_per_chapter
+                    end_query_idx = start_query_idx + queries_per_chapter
+                    
+                    # Last chapter gets remaining queries
+                    if idx == num_chapters - 1:
+                        end_query_idx = len(search_queries_list)
+                    
+                    chapter_dict["search_queries"] = search_queries_list[start_query_idx:end_query_idx]
+                else:
+                    chapter_dict["search_queries"] = []
+                
+                chapters.append(chapter_dict)
+            
+            # Build script dict with all required fields
+            script = {
+                "sentences": sentences,
+                "title": content_response.metadata.get("title", ""),
+                "description": content_response.metadata.get("description", ""),
+                "tags": content_response.metadata.get("tags", []),
+                "chapters": chapters,
+                "search_queries": search_queries_list,
+                "main_visual_focus": content_response.main_visual_focus or "",
+            }
+            
+            return script
+            
+        except Exception as exc:
+            logger.error(f"Failed to convert ContentResponse: {exc}")
+            return None
 
     def _generate_all_tts(self, sentences: List[Dict]) -> List[Optional[Tuple[str, List[Tuple[str, float]]]]]:
         results = []
