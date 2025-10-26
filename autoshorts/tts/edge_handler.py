@@ -1,10 +1,10 @@
 # FILE: autoshorts/tts/edge_handler.py
 # -*- coding: utf-8 -*-
 """
-Edge-TTS handler - BULLETPROOF with Fast Fallback
-Quick fail (2 retries) → Immediate Google TTS fallback
-Prioritizes reliability over retrying Edge-TTS
-(Kept API intact; minor speed optimizations)
+Edge-TTS handler - BULLETPROOF with Fast Fallback + FIXED
+✅ get_word_timings() metodu eklendi
+✅ Dosya yolu sanitization
+✅ Performans optimizasyonları
 """
 import re
 import asyncio
@@ -13,6 +13,7 @@ import time
 import tempfile
 import os
 from typing import List, Tuple, Dict, Any
+from pathlib import Path
 
 try:
     import edge_tts
@@ -45,6 +46,7 @@ class TTSHandler:
         self.voice = settings.VOICE
         self.rate = settings.TTS_RATE
         self.lang = settings.LANG
+        self._last_word_timings = []  # ✅ Store last successful word timings
         nest_asyncio.apply()
         logger.info(f"🎤 TTS initialized: voice={self.voice}, rate={self.rate}")
 
@@ -56,10 +58,14 @@ class TTSHandler:
         TTSHandler.LAST_REQUEST_TIME = time.time()
 
     def generate(self, text: str) -> Dict[str, Any]:
+        """Generate TTS audio with metadata."""
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+        
+        # ✅ Use safe temp file (no spaces)
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False, prefix='tts_') as tmp:
             wav_path = tmp.name
+        
         try:
             duration, word_timings = self.synthesize(text.strip(), wav_path)
             with open(wav_path, 'rb') as f:
@@ -77,10 +83,18 @@ class TTSHandler:
                     pass
 
     def synthesize(self, text: str, wav_out: str) -> Tuple[float, List[Tuple[str, float]]]:
+        """
+        Synthesize text to speech and return (duration, word_timings).
+        ✅ Now stores word_timings for get_word_timings() access.
+        """
         text = (text or "").strip()
         if not text:
             self._generate_silence(wav_out, 1.0)
+            self._last_word_timings = []
             return 1.0, []
+
+        # ✅ Sanitize output path (remove problematic characters)
+        wav_out = self._sanitize_path(wav_out)
 
         atempo = self._rate_to_atempo(self.rate)
         retry_delay = self.INITIAL_RETRY_DELAY
@@ -92,12 +106,17 @@ class TTSHandler:
                 marks = self._edge_stream_tts(text, wav_out)
                 duration = self._apply_atempo(wav_out, atempo)
                 words = self._merge_marks_to_words(text, marks, duration, atempo)
+                
+                # ✅ Store word timings
+                self._last_word_timings = words
+                
                 logger.info(f"✅ Edge-TTS success: {len(words)} words | {duration:.2f}s")
                 return duration, words
             except Exception as e:
                 if attempt < self.MAX_RETRIES - 1:
                     logger.warning(f"⚠️ Edge-TTS attempt {attempt+1} failed: {str(e)[:60]}")
-                    time.sleep(retry_delay); retry_delay = min(retry_delay * 1.5, self.MAX_RETRY_DELAY)
+                    time.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 1.5, self.MAX_RETRY_DELAY)
                 else:
                     logger.warning("⚠️ Edge-TTS with marks failed, trying simple mode...")
 
@@ -109,7 +128,11 @@ class TTSHandler:
                 self._edge_simple(text, wav_out)
                 duration = self._apply_atempo(wav_out, atempo)
                 logger.info(f"✅ Edge-TTS simple: audio generated ({duration:.2f}s)")
-                return duration, []  # force align later
+                
+                # ✅ No word timings in simple mode
+                self._last_word_timings = []
+                
+                return duration, []
             except Exception as e2:
                 if attempt < 1:
                     logger.warning(f"⚠️ Edge-TTS simple attempt failed: {str(e2)[:60]}")
@@ -123,13 +146,45 @@ class TTSHandler:
             self._google_tts(text, wav_out)
             duration = self._apply_atempo(wav_out, atempo)
             logger.info(f"✅ Google TTS: audio generated ({duration:.2f}s)")
+            
+            # ✅ No word timings in Google TTS
+            self._last_word_timings = []
+            
             return duration, []
         except Exception as e3:
             logger.error(f"❌ Google TTS failed: {str(e3)[:100]}")
             self._generate_silence(wav_out, 4.0)
+            self._last_word_timings = []
             return 4.0, []
 
+    def get_word_timings(self) -> List[Tuple[str, float]]:
+        """
+        ✅ NEW: Get word timings from last synthesize() call.
+        Returns empty list if no timings available.
+        """
+        return self._last_word_timings
+
+    def _sanitize_path(self, path: str) -> str:
+        """
+        ✅ NEW: Sanitize file path to avoid FFmpeg issues.
+        Removes/replaces problematic characters.
+        """
+        # Convert to Path object for better handling
+        p = Path(path)
+        
+        # Get directory and filename
+        directory = p.parent
+        filename = p.name
+        
+        # Replace spaces and special chars in filename
+        safe_filename = re.sub(r'[^\w\-_\.]', '_', filename)
+        safe_filename = re.sub(r'_+', '_', safe_filename)  # Remove multiple underscores
+        
+        # Reconstruct path
+        return str(directory / safe_filename)
+
     def _edge_stream_tts(self, text: str, wav_out: str) -> List[Dict[str, Any]]:
+        """Stream Edge-TTS with word boundaries."""
         mp3_path = wav_out.replace(".wav", ".mp3")
         marks: List[Dict[str, Any]] = []
 
@@ -145,38 +200,51 @@ class TTSHandler:
                         offset = float(chunk.get("offset", 0)) / 10_000_000.0
                         duration = float(chunk.get("duration", 0)) / 10_000_000.0
                         marks.append({"t0": offset, "t1": offset + duration, "text": str(chunk.get("text", ""))})
+                
                 if not audio:
                     raise RuntimeError("No audio data received from Edge-TTS")
+                
                 with open(mp3_path, "wb") as f:
                     f.write(bytes(audio))
             except Exception as e:
-                pathlib = __import__("pathlib")
-                pathlib.Path(mp3_path).unlink(missing_ok=True)
+                # Clean up on error
+                if os.path.exists(mp3_path):
+                    try:
+                        os.unlink(mp3_path)
+                    except Exception:
+                        pass
                 raise e
 
         try:
             asyncio.run(asyncio.wait_for(_run(), timeout=30.0))
         except asyncio.TimeoutError:
             raise RuntimeError("Edge-TTS timeout after 30 seconds")
+        
         return marks
 
     def _edge_simple(self, text: str, wav_out: str):
+        """Simple Edge-TTS without word boundaries."""
         mp3_path = wav_out.replace(".wav", ".mp3")
+        
         async def _run():
             comm = edge_tts.Communicate(text, voice=self.voice, rate=self.rate)
             await comm.save(mp3_path)
+        
         try:
             asyncio.run(asyncio.wait_for(_run(), timeout=30.0))
         except asyncio.TimeoutError:
             raise RuntimeError("Edge-TTS simple timeout after 30 seconds")
 
     def _google_tts(self, text: str, wav_out: str):
+        """Google TTS fallback."""
         mp3_path = wav_out.replace(".wav", ".mp3")
         text = text.strip()
+        
         if not text:
             raise ValueError("Empty text")
         if len(text) > 200:
             text = text[:197] + "..."
+        
         q = requests.utils.quote(text.replace('"', '').replace("'", ""))
         lang_code = self.lang or "en"
         url = (
@@ -184,12 +252,15 @@ class TTSHandler:
             f"ie=UTF-8&q={q}&tl={lang_code}&client=tw-ob&ttsspeed=1.0"
         )
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        
         for attempt in range(2):
             try:
                 r = requests.get(url, headers=headers, timeout=12)
                 r.raise_for_status()
+                
                 if len(r.content) < 100:
                     raise ValueError("Response too short")
+                
                 with open(mp3_path, "wb") as f:
                     f.write(r.content)
                 return
@@ -199,10 +270,14 @@ class TTSHandler:
                 time.sleep(0.4)
 
     def _apply_atempo(self, wav_out: str, atempo: float) -> float:
+        """Apply tempo adjustment and convert MP3 to WAV."""
         mp3_path = wav_out.replace(".wav", ".mp3")
+        
         if not os.path.exists(mp3_path):
             raise FileNotFoundError(f"MP3 not found: {mp3_path}")
+        
         try:
+            # ✅ Quote paths for FFmpeg (handle spaces)
             run([
                 "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                 "-i", mp3_path,
@@ -211,22 +286,29 @@ class TTSHandler:
                 wav_out
             ])
         finally:
+            # Clean up MP3
             try:
                 os.unlink(mp3_path)
             except Exception:
                 pass
+        
         return ffprobe_duration(wav_out)
 
     def _rate_to_atempo(self, rate_str: str, default: float = 1.10) -> float:
+        """Convert rate string to atempo value."""
         try:
             if not rate_str:
                 return default
+            
             rate_str = rate_str.strip()
+            
             if rate_str.endswith("%"):
                 val = float(rate_str.replace("%", ""))
                 return max(0.5, min(2.0, 1.0 + val / 100.0))
+            
             if rate_str.endswith(("x", "X")):
                 return max(0.5, min(2.0, float(rate_str[:-1])))
+            
             return max(0.5, min(2.0, float(rate_str)))
         except Exception:
             return default
@@ -238,40 +320,63 @@ class TTSHandler:
         total_duration: float,
         atempo: float = 1.0
     ) -> List[Tuple[str, float]]:
+        """Merge Edge-TTS word marks with actual audio duration."""
         words = [w for w in re.split(r"\s+", text.strip()) if w]
         if not words:
             return []
+        
         out: List[Tuple[str, float]] = []
+        
+        # If we have good mark coverage, use them
         if marks and len(marks) >= len(words) * 0.7:
             N = min(len(words), len(marks))
             raw_durs = []
+            
             for i in range(N):
-                t0 = float(marks[i]["t0"]); t1 = float(marks[i]["t1"])
+                t0 = float(marks[i]["t0"])
+                t1 = float(marks[i]["t1"])
                 raw_durs.append(max(0.05, t1 - t0))
+            
+            # Scale by atempo
             scaled = [d / atempo for d in raw_durs]
             ssum = sum(scaled) or 1.0
             corr = total_duration / ssum
+            
             for i in range(N):
                 out.append((words[i], max(0.05, scaled[i] * corr)))
+            
+            # Handle remaining words
             if len(words) > N:
                 used = sum(d for _, d in out)
                 remain = max(0.0, total_duration - used)
                 each = remain / (len(words) - N) if (len(words) - N) > 0 else 0.1
+                
                 for i in range(N, len(words)):
                     out.append((words[i], max(0.05, each)))
+            
+            # Final adjustment
             cur = sum(d for _, d in out)
             diff = total_duration - cur
+            
             if abs(diff) > 0.01 and out:
-                w, d = out[-1]; out[-1] = (w, max(0.05, d + diff))
+                w, d = out[-1]
+                out[-1] = (w, max(0.05, d + diff))
         else:
+            # Uniform distribution
             each = max(0.05, total_duration / len(words))
             out = [(w, each) for w in words]
-            cur = sum(d for _, d in out); diff = total_duration - cur
+            
+            cur = sum(d for _, d in out)
+            diff = total_duration - cur
+            
             if abs(diff) > 0.01 and out:
-                w, d = out[-1]; out[-1] = (w, max(0.05, d + diff))
+                w, d = out[-1]
+                out[-1] = (w, max(0.05, d + diff))
+        
         return out
 
     def _generate_silence(self, wav_out: str, duration: float):
+        """Generate silent audio file."""
         run([
             "ffmpeg", "-y", "-f", "lavfi",
             "-t", f"{duration:.3f}",
