@@ -2,11 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 High level orchestration for generating complete videos.
-✅ FULL FIXED VERSION v2 - Ready to use!
+✅ FULL FIXED VERSION v3 - Ready to use!
 ✅ Path sanitization
 ✅ Parallel TTS support
 ✅ get_word_timings() fix
 ✅ extract_keywords() lang parameter fix
+✅ Pexels rate limiting fix (429 error)
 """
 from __future__ import annotations
 
@@ -40,6 +41,34 @@ from autoshorts.video import PexelsClient
 PEXELS_SEARCH_ENDPOINT = "https://api.pexels.com/videos/search"
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# ✅ RATE LIMITING
+# ============================================================================
+
+class RateLimiter:
+    """Simple rate limiter for API calls."""
+    
+    def __init__(self, min_interval: float = 0.5):
+        """
+        Args:
+            min_interval: Minimum seconds between API calls
+        """
+        self.min_interval = min_interval
+        self.last_call_time = 0
+    
+    def wait(self):
+        """Wait if necessary to respect rate limit."""
+        current_time = time.time()
+        time_since_last = current_time - self.last_call_time
+        
+        if time_since_last < self.min_interval:
+            sleep_time = self.min_interval - time_since_last
+            logger.debug(f"Rate limiting: waiting {sleep_time:.2f}s")
+            time.sleep(sleep_time)
+        
+        self.last_call_time = time.time()
 
 
 # ============================================================================
@@ -121,7 +150,7 @@ def build_smart_pexels_query(
     if fallback_terms and len(fallback_terms) > 0:
         return random.choice(fallback_terms)
     
-    return "nature landscape"
+    return "abstract background"  # Generic fallback
 
 
 def enhance_pexels_selection(
@@ -129,11 +158,18 @@ def enhance_pexels_selection(
     query: str,
     duration: float,
     used_urls: Set[str],
-    max_attempts: int = 3
+    rate_limiter: RateLimiter,
+    max_attempts: int = 2  # ✅ Reduced from 3 to 2
 ) -> Tuple[Optional[str], Optional[str]]:
-    """Enhanced Pexels video selection with duplicate avoidance."""
+    """
+    Enhanced Pexels video selection with duplicate avoidance and rate limiting.
+    ✅ Now with exponential backoff for 429 errors.
+    """
     for attempt in range(max_attempts):
         try:
+            # ✅ Rate limiting - wait before API call
+            rate_limiter.wait()
+            
             page = attempt + 1
             results = pexels_client.search_videos(
                 query=query,
@@ -184,6 +220,18 @@ def enhance_pexels_selection(
                 
                 best = candidates[0]
                 return best['url'], best['id']
+        
+        except requests.exceptions.HTTPError as e:
+            # ✅ Handle 429 Rate Limiting with exponential backoff
+            if e.response.status_code == 429:
+                retry_after = int(e.response.headers.get('Retry-After', 5))
+                backoff_time = min(retry_after, 2 ** (attempt + 1))
+                logger.warning(f"⏳ Rate limited (429), waiting {backoff_time}s before retry...")
+                time.sleep(backoff_time)
+                continue
+            else:
+                logger.debug(f"Pexels HTTP error: {e}")
+                continue
         
         except Exception as exc:
             logger.debug(f"Pexels search attempt {attempt + 1} failed: {exc}")
@@ -256,6 +304,9 @@ class ShortsOrchestrator:
         self._video_candidates: Dict[str, List[ClipCandidate]] = {}
         self._video_url_cache: Dict[str, List[str]] = {}
         self._used_video_ids: Set[str] = set()
+        
+        # ✅ Rate limiter for Pexels API (0.5s between calls = max 120/min)
+        self._pexels_rate_limiter = RateLimiter(min_interval=0.5)
 
         # Pexels client & HTTP session
         self.pexels = PexelsClient(api_key=self.pexels_key)
@@ -544,10 +595,12 @@ class ShortsOrchestrator:
         
         logger.info("🎥 Rendering %d scenes", len(sentences))
         scene_paths = []
+        skipped_scenes = 0  # ✅ Track skipped scenes
 
         for idx, (sent, tts_result) in enumerate(zip(sentences, tts_results)):
             if not tts_result:
                 logger.warning("Skipping scene %d (no TTS)", idx)
+                skipped_scenes += 1
                 continue
 
             audio_path, words = tts_result
@@ -579,6 +632,8 @@ class ShortsOrchestrator:
 
             if not scene_path:
                 logger.warning("Skipping scene %d (no video clip)", idx)
+                skipped_scenes += 1
+                # ✅ Don't give up - continue to next scene
                 continue
 
             captioned = self._render_captions(
@@ -600,9 +655,19 @@ class ShortsOrchestrator:
                 scene_paths.append(final_scene)
                 logger.info("✅ Scene %d/%d complete", idx + 1, len(sentences))
 
+        # ✅ Accept video if we have at least 50% of scenes
         if not scene_paths:
             logger.error("No scenes rendered successfully")
             return None
+        
+        if skipped_scenes > 0:
+            success_rate = len(scene_paths) / len(sentences) * 100
+            logger.warning(f"⚠️ Skipped {skipped_scenes} scenes - {success_rate:.1f}% success rate")
+            
+            # ✅ Allow video if we have at least 40% of scenes
+            if success_rate < 40:
+                logger.error(f"❌ Too many skipped scenes ({success_rate:.1f}% < 40%)")
+                return None
 
         # Concatenate all scenes
         concat_out = str(self.temp_dir / "concat.mp4")
@@ -648,16 +713,18 @@ class ShortsOrchestrator:
         
         logger.info("Scene %d: query='%s' (%.2fs)", index, query, duration)
 
-        # Get video URL
+        # ✅ Get video URL with rate limiting
         video_url, video_id = enhance_pexels_selection(
             self.pexels,
             query,
             duration,
-            self._used_video_ids
+            self._used_video_ids,
+            self._pexels_rate_limiter  # Pass rate limiter
         )
         
         if not video_url:
             logger.warning("No suitable video found for query: %s", query)
+            # ✅ Don't fail completely - just skip this scene
             return None
         
         if video_id:
