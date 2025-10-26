@@ -2,10 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 High level orchestration for generating complete videos.
-✅ FULL FIXED VERSION - Ready to use!
+✅ FULL FIXED VERSION v2 - Ready to use!
 ✅ Path sanitization
 ✅ Parallel TTS support
 ✅ get_word_timings() fix
+✅ extract_keywords() lang parameter fix
 """
 from __future__ import annotations
 
@@ -565,9 +566,10 @@ class ShortsOrchestrator:
                     search_queries = chapter.get("search_queries", [])
                     break
 
+            # ✅ FIX: extract_keywords now gets lang parameter
             scene_path = self._prepare_scene_clip(
                 text=text,
-                keywords=extract_keywords(text),
+                keywords=extract_keywords(text, lang=getattr(settings, "LANG", "en")),
                 duration=audio_dur,
                 index=idx,
                 sentence_type=sentence_type,
