@@ -1,6 +1,12 @@
 # FILE: autoshorts/orchestrator.py
 # -*- coding: utf-8 -*-
-"""High level orchestration for generating complete videos (optimized)."""
+"""
+High level orchestration for generating complete videos (OPTIMIZED + SMART PEXELS).
+✅ Akıllı Pexels video seçimi
+✅ Duplicate önleme
+✅ Sahneye özel keywords
+✅ Performans optimize
+"""
 from __future__ import annotations
 
 import hashlib
@@ -11,7 +17,7 @@ import random
 import shutil
 import time
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Set
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -27,6 +33,13 @@ from autoshorts.state.state_guard import StateGuard
 from autoshorts.tts.edge_handler import TTSHandler
 from autoshorts.utils.ffmpeg_utils import ffprobe_duration, run
 from autoshorts.video import PexelsClient
+
+# ✅ SMART PEXELS IMPORT
+from autoshorts.orchestrator_enhancements import (
+    build_smart_pexels_query,
+    enhance_pexels_selection,
+    extract_scene_keywords
+)
 
 PEXELS_SEARCH_ENDPOINT = "https://api.pexels.com/videos/search"
 
@@ -143,6 +156,9 @@ class ShortsOrchestrator:
         self._clip_cache = _ClipCache(self.temp_dir)
         self._video_candidates: Dict[str, List[ClipCandidate]] = {}
         self._video_url_cache: Dict[str, List[str]] = {}
+        
+        # ✅ SMART PEXELS: Track used video IDs to avoid duplicates
+        self._used_video_ids: Set[str] = set()
 
         # Pexels client & HTTP session
         self.pexels = PexelsClient(api_key=self.pexels_key)
@@ -252,6 +268,8 @@ class ShortsOrchestrator:
             "hook": response.hook,
             "sentences": [],
             "chapters": response.chapters,
+            # ✅ SMART PEXELS: Store search_queries from Gemini
+            "search_queries": response.search_queries,
         }
 
         script["sentences"].append(
@@ -302,13 +320,26 @@ class ShortsOrchestrator:
             logger.error("Script missing sentences")
             return None
 
+        # ✅ SMART PEXELS: Get search queries and chapters
+        search_queries = script.get("search_queries", [])
+        chapters = script.get("chapters", [])
+
         rendered: List[str] = []
         total_duration = 0.0
 
         for index, sentence in enumerate(sentences, 1):
             logger.info("—" * 60)
             logger.info("Scene %s/%s", index, len(sentences))
-            scene_path = self._produce_scene(sentence, index)
+            
+            # ✅ SMART PEXELS: Determine chapter for this scene
+            chapter_title = self._get_chapter_title_for_sentence(index - 1, chapters)
+            
+            scene_path = self._produce_scene(
+                sentence, 
+                index, 
+                search_queries=search_queries,
+                chapter_title=chapter_title
+            )
             if not scene_path:
                 logger.error("Scene %s failed", index)
                 continue
@@ -343,7 +374,24 @@ class ShortsOrchestrator:
         logger.info("Final video assembled: %s", final_path)
         return final_path
 
-    def _produce_scene(self, sentence: Dict, index: int) -> Optional[str]:
+    def _get_chapter_title_for_sentence(
+        self, sentence_index: int, chapters: List[Dict]
+    ) -> Optional[str]:
+        """Get chapter title for a given sentence index."""
+        for chapter in chapters:
+            start = chapter.get("start_sentence", 0)
+            end = chapter.get("end_sentence", 0)
+            if start <= sentence_index <= end:
+                return chapter.get("title")
+        return None
+
+    def _produce_scene(
+        self, 
+        sentence: Dict, 
+        index: int,
+        search_queries: Optional[List[str]] = None,
+        chapter_title: Optional[str] = None
+    ) -> Optional[str]:
         text = sentence.get("text", "").strip()
         sentence_type = sentence.get("type", "buildup")
         keywords = sentence.get("visual_keywords", []) or []
@@ -357,7 +405,16 @@ class ShortsOrchestrator:
         if not audio_path:
             return None
 
-        clip_path = self._prepare_clip(text, keywords, duration, index, sentence_type)
+        # ✅ SMART PEXELS: Pass search_queries and chapter_title
+        clip_path = self._prepare_clip(
+            text, 
+            keywords, 
+            duration, 
+            index, 
+            sentence_type,
+            search_queries=search_queries,
+            chapter_title=chapter_title
+        )
         if not clip_path:
             return None
 
@@ -392,17 +449,51 @@ class ShortsOrchestrator:
         duration: float,
         index: int,
         sentence_type: str,
+        search_queries: Optional[List[str]] = None,
+        chapter_title: Optional[str] = None,
     ) -> Optional[str]:
+        """
+        ✅ SMART PEXELS: Prepare clip with intelligent video selection
+        """
         logger.info("Selecting clip for scene %s", index)
-        keyword = self._choose_keyword(text, keywords)
-        candidate = self._next_candidate(keyword, keywords, text)
-        if not candidate:
-            logger.error("No clip candidate found for scene %s", index)
-            return None
-
+        
+        # ✅ Build smart Pexels query
+        fallback_terms = getattr(settings, 'SEARCH_TERMS', None)
+        query = build_smart_pexels_query(
+            scene_text=text,
+            chapter_title=chapter_title,
+            search_queries=search_queries,
+            fallback_terms=fallback_terms
+        )
+        
+        logger.info("       🔍 Searching: '%s'", query)
+        
+        # ✅ Enhanced Pexels selection
+        video_url, video_id = enhance_pexels_selection(
+            pexels_client=self.pexels,
+            query=query,
+            duration=max(duration, 5.0),
+            used_urls=self._used_video_ids,
+            max_attempts=3
+        )
+        
+        if not video_url:
+            logger.warning("       ⚠️ No suitable video found, using fallback")
+            # Fallback to old method
+            candidate = self._next_candidate_fallback(text, keywords)
+            if not candidate:
+                logger.error("No clip candidate found for scene %s", index)
+                return None
+            video_url = candidate.url
+            video_id = candidate.video_id
+        
+        # ✅ Track used video
+        if video_id:
+            self._used_video_ids.add(video_id)
+        
         local_raw = self.temp_dir / f"scene_{index:03d}_raw.mp4"
-        if not self._download_clip(candidate.url, local_raw):
-            logger.error("Download failed for %s", candidate.url)
+        if not self._download_clip_from_url(video_url, local_raw):
+            logger.error("Download failed for %s", video_url)
             return None
 
         processed = self.temp_dir / f"scene_{index:03d}_proc.mp4"
@@ -457,17 +548,16 @@ class ShortsOrchestrator:
         logger.info("Search keyword: %s", choice)
         return choice
 
-    # ----------------------- Candidate selection -----------------------
+    # ----------------------- Candidate selection (FALLBACK) -----------------------
 
-    def _next_candidate(
+    def _next_candidate_fallback(
         self,
-        primary: str,
-        fallbacks: Sequence[str],
         text: str,
+        fallback_keywords: Sequence[str],
     ) -> Optional[ClipCandidate]:
-        queries = [primary]
-        queries.extend([kw for kw in fallbacks if kw and kw != primary])
-
+        """Fallback method for video selection (old approach)"""
+        queries = list(fallback_keywords)
+        
         simplified = self._simplify_query_safe(text)
         if simplified and simplified not in queries:
             queries.append(simplified)
@@ -489,7 +579,7 @@ class ShortsOrchestrator:
             logger.info("Using clip %s for query '%s'", candidate.url, query)
             return candidate
 
-        logger.warning("No clip candidate located for primary keyword '%s'", primary)
+        logger.warning("No clip candidate located")
         return None
 
     def _get_candidates(self, query: str) -> List[ClipCandidate]:
@@ -547,9 +637,10 @@ class ShortsOrchestrator:
         random.shuffle(pool)
         return pool[0].get("link")
 
-    def _download_clip(self, url: str, destination: pathlib.Path) -> bool:
+    def _download_clip_from_url(self, url: str, destination: pathlib.Path) -> bool:
+        """Download clip from URL with caching"""
         if self._clip_cache.try_copy(url, destination):
-            logger.info("Reused cached clip for %s", url)
+            logger.info("       ✅ Reused cached clip")
             return True
 
         try:
