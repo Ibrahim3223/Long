@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 Karaoke ASS subtitle builder - LANDSCAPE (16:9)
-Sade mod: vurgu YOK, animasyon YOK, yalnızca kelime bazlı \k highlight.
+✅ BÜYÜK HARF altyazılar
+✅ Vurgu YOK, animasyon YOK
+✅ Temiz kelime bazlı \k highlight
 """
 
 from typing import List, Dict, Optional, Any, Tuple
@@ -82,18 +84,19 @@ def build_karaoke_ass(
     words: List[Tuple[str, float]],
     is_hook: bool = False,
     style_name: Optional[str] = None,
-    *,
-    emphasize: bool = False,     # tutuluyor ama kullanılmıyor (vurgu kapalı)
-    fancy_motion: bool = False,  # tutuluyor ama kullanılmıyor (animasyon kapalı)
+    **kwargs  # Geriye dönük uyumluluk için (emphasize, fancy_motion vs.)
 ) -> str:
     """
-    DÜZ karaoke: vurgu/animasyon yok, kelime kelime \k akışı.
+    ✅ DÜZ karaoke: BÜYÜK HARF, vurgu/animasyon yok, kelime kelime \k akışı.
     """
+    # ✅ METNİ BÜYÜK HARFE ÇEVİR
+    text = (text or "").strip().upper()
+    
     style = get_style_info(style_name or "classic_yellow")
     fontsize = style["fontsize_hook"] if is_hook else style["fontsize_normal"]
 
     header = f"""[Script Info]
-Title: Karaoke Captions (Plain)
+Title: Karaoke Captions (Clean Uppercase)
 ScriptType: v4.00+
 PlayResX: 1920
 PlayResY: 1080
@@ -110,9 +113,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     if not words:
         end_time = _ass_time(seg_dur)
-        body = f"Dialogue: 0,0:00:00.00,{end_time},Default,,0,0,0,,{(text or '').strip()}\n"
+        body = f"Dialogue: 0,0:00:00.00,{end_time},Default,,0,0,0,,{text}\n"
         return header + body
 
+    # ✅ Kelimeleri de büyük harfe çevir
+    words = [(w.strip().upper(), d) for w, d in words if w and w.strip()]
+    
     # 2-3 kelimelik bloklar
     chunk_size = 2 if is_hook else 3
     chunks: List[Tuple[List[Tuple[str, float]], float]] = []
@@ -131,9 +137,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for chunk_words, dur in chunks:
         start = _ass_time(t)
         end = _ass_time(t + dur)
-        # yalın \k akışı — vurgu ve hareket yok
+        # ✅ Sade \k akışı - daha hassas timing
         karaoke_text = ""
         for w, d in chunk_words:
+            # Centisecond cinsinden (daha hassas)
             cs = max(1, int(round(float(d) * 100)))
             karaoke_text += f"{{\\k{cs}}}{w} "
         body_lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{karaoke_text.strip()}\n")
@@ -143,6 +150,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 def _ass_time(seconds: float) -> str:
+    """ASS format time string with millisecond precision."""
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
     s = int(seconds % 60)
