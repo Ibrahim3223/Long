@@ -428,7 +428,11 @@ class ShortsOrchestrator:
                 if not script:
                     continue
 
-                score = self.quality_scorer.score_script(script)
+                # Score script quality using correct method
+                sentences_text = [s.get("text", "") for s in script.get("sentences", [])]
+                score_dict = self.quality_scorer.score(sentences_text, title=script.get("title", ""))
+                score = score_dict.get("overall", 0) * 10  # Convert 0-10 to 0-100
+                
                 if score < 50:
                     logger.warning("Low quality script (score=%d), retrying", score)
                     continue
