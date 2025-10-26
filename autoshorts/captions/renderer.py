@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 Caption rendering - LONG-FORM (16:9)
-Sade altyazı: vurgu YOK, animasyon YOK (yukarı kayma yok)
+✅ BÜYÜK HARF altyazılar
+✅ İYİLEŞTİRİLMİŞ senkronizasyon
+✅ Vurgu YOK, animasyon YOK
 """
 
 import os
@@ -19,9 +21,9 @@ logger = logging.getLogger(__name__)
 
 class CaptionRenderer:
     WORDS_PER_CHUNK = 3
-    MIN_WORD_DURATION = 0.08
-    TIMING_PRECISION = 0.001
-    FADE_DURATION = 0.0
+    MIN_WORD_DURATION = 0.05  # ✅ Daha düşük minimum (senkronizasyon için)
+    MAX_WORD_DURATION = 4.0   # ✅ Maksimum sınır
+    TIMING_PRECISION = 0.001  # ✅ Milisaniye hassasiyeti
 
     def __init__(self, caption_offset: Optional[float] = None):
         self.language = getattr(settings, "LANG", "en").lower()
@@ -38,51 +40,63 @@ class CaptionRenderer:
         sentence_type: str = "buildup",
         temp_dir: Optional[str] = None,
     ) -> str:
+        """Render captions with improved synchronization."""
         ass_path = video_path.replace(".mp4", ".ass")
         try:
+            # ✅ Duration doğrulama
             if duration <= 0:
                 duration = ffprobe_duration(video_path) or 0.0
             if duration <= 0:
                 logger.warning("         Unknown duration; skipping captions.")
                 return video_path
 
+            # ✅ METNİ BÜYÜK HARFE ÇEVİR
+            text = (text or "").strip().upper()
+
+            # ✅ Word timing normalleştir
             if not words:
                 words = self._fallback_timings(text, duration)
             words = self._normalize_timings(words, duration)
             if not words:
+                logger.warning("         No valid word timings; skipping captions.")
                 return video_path
 
+            # ✅ ASS dosyası oluştur
             style_name = get_random_style()
             ass_content = build_karaoke_ass(
-                text=text or "",
+                text=text,
                 seg_dur=duration,
                 words=words,
                 is_hook=(sentence_type == "hook"),
-                style_name=style_name,
-                emphasize=False,      # 🔒 kapalı
-                fancy_motion=False,   # 🔒 kapalı
+                style_name=style_name
             )
+            
             with open(ass_path, "w", encoding="utf-8") as f:
                 f.write(ass_content)
 
+            # ✅ FFmpeg render (frame-accurate)
             frames = max(1, int(round(duration * settings.TARGET_FPS)))
             ass_arg = pathlib.Path(ass_path).as_posix().replace("'", r"\'")
+            
             vf = (
                 f"subtitles='{ass_arg}':force_style='Kerning=1',"
                 f"setsar=1,fps={settings.TARGET_FPS},"
                 f"trim=start_frame=0:end_frame={frames},setpts=PTS-STARTPTS"
             )
+            
             output = video_path.replace(".mp4", "_caption.mp4")
 
             run([
                 "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                 "-i", video_path,
                 "-vf", vf,
-                "-r", str(settings.TARGET_FPS), "-vsync", "cfr",
-                "-c:v", "libx264", "-preset", "medium",
+                "-r", str(settings.TARGET_FPS), 
+                "-vsync", "cfr",  # ✅ Constant frame rate
+                "-c:v", "libx264", 
+                "-preset", "medium",  # ✅ Kalite/hız dengesi
                 "-crf", str(settings.CRF_VISUAL),
                 "-pix_fmt", "yuv420p",
-                "-an",
+                "-an",  # ✅ Audio yok (sonra eklenecek)
                 output
             ])
 
@@ -91,45 +105,92 @@ class CaptionRenderer:
 
         except Exception as e:
             logger.error(f"         ❌ Caption error: {e}")
-            import traceback; logger.debug(traceback.format_exc())
+            import traceback
+            logger.debug(traceback.format_exc())
             pathlib.Path(ass_path).unlink(missing_ok=True)
             return video_path
 
-    # ---- helpers ----
+    # ✅ İYİLEŞTİRİLMİŞ HELPERS
+    
     def _fallback_timings(self, text: str, duration: float) -> List[Tuple[str, float]]:
-        ws = [w for w in re.split(r"\s+", (text or "").strip()) if w]
+        """Fallback timing with character-weighted distribution."""
+        # ✅ Büyük harf + temizlik
+        text = (text or "").strip().upper()
+        ws = [w for w in re.split(r"\s+", text) if w]
         if not ws:
             return []
-        per = max(self.MIN_WORD_DURATION, duration / len(ws))
-        times = [(w, per) for w in ws]
+        
+        # ✅ Karakter ağırlıklı dağılım (daha adil)
+        total_chars = sum(len(w) for w in ws)
+        if total_chars == 0:
+            per = max(self.MIN_WORD_DURATION, duration / len(ws))
+            return [(w, per) for w in ws]
+        
+        times = []
+        for w in ws:
+            char_ratio = len(w) / total_chars
+            word_dur = max(self.MIN_WORD_DURATION, duration * char_ratio)
+            times.append((w, word_dur))
+        
+        # ✅ Hassas düzeltme
         total = sum(d for _, d in times)
         diff = duration - total
-        if abs(diff) > 1e-3:
+        if abs(diff) > self.TIMING_PRECISION and times:
             w, d = times[-1]
             times[-1] = (w, max(self.MIN_WORD_DURATION, d + diff))
+        
         return times
 
-    def _normalize_timings(self, word_timings: List[Tuple[str, float]], total: float) -> List[Tuple[str, float]]:
+    def _normalize_timings(
+        self, 
+        word_timings: List[Tuple[str, float]], 
+        total: float
+    ) -> List[Tuple[str, float]]:
+        """
+        ✅ İYİLEŞTİRİLMİŞ timing normalleştirme:
+        - Büyük harf dönüşümü
+        - Sıkı min/max kontrolü
+        - Hassas ölçekleme
+        - Son kelime düzeltmesi
+        """
         if not word_timings:
             return []
+        
+        # ✅ Temizlik + büyük harf + sınırlar
         fixed = []
         for w, d in word_timings:
             if not w or not str(w).strip():
                 continue
-            d = max(self.MIN_WORD_DURATION, min(float(d), 5.0))
-            fixed.append((str(w).strip(), d))
+            clean_word = str(w).strip().upper()
+            # ✅ Min/max sınırları
+            clamped_dur = max(
+                self.MIN_WORD_DURATION, 
+                min(float(d), self.MAX_WORD_DURATION)
+            )
+            fixed.append((clean_word, clamped_dur))
+        
         if not fixed:
             return []
-        s = sum(d for _, d in fixed)
-        if abs(s - total) > 1e-3 and s > 0:
-            k = total / s
-            fixed = [(w, round(d * k, 3)) for w, d in fixed]
-            s2 = sum(d for _, d in fixed)
-            diff = total - s2
-            if abs(diff) > 1e-3:
+        
+        # ✅ Ölçekleme gerekli mi?
+        current_sum = sum(d for _, d in fixed)
+        if abs(current_sum - total) > self.TIMING_PRECISION and current_sum > 0:
+            scale_factor = total / current_sum
+            fixed = [
+                (w, max(self.MIN_WORD_DURATION, round(d * scale_factor, 3))) 
+                for w, d in fixed
+            ]
+            
+            # ✅ Final hassas düzeltme (rounding hatalarını gider)
+            final_sum = sum(d for _, d in fixed)
+            diff = total - final_sum
+            if abs(diff) > self.TIMING_PRECISION and fixed:
                 w, d = fixed[-1]
-                fixed[-1] = (w, max(self.MIN_WORD_DURATION, d + diff))
+                new_d = max(self.MIN_WORD_DURATION, d + diff)
+                fixed[-1] = (w, round(new_d, 3))
+        
         return fixed
 
-# Geriye dönük alias
+
+# Geriye dönük uyumluluk
 Renderer = CaptionRenderer
