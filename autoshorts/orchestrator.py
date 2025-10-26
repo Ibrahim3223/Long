@@ -34,17 +34,170 @@ from autoshorts.tts.edge_handler import TTSHandler
 from autoshorts.utils.ffmpeg_utils import ffprobe_duration, run
 from autoshorts.video import PexelsClient
 
-# ✅ SMART PEXELS IMPORT
-from autoshorts.orchestrator_enhancements import (
-    build_smart_pexels_query,
-    enhance_pexels_selection,
-    extract_scene_keywords
-)
-
 PEXELS_SEARCH_ENDPOINT = "https://api.pexels.com/videos/search"
 
 logger = logging.getLogger(__name__)
 
+
+# ============================================================================
+# ✅ SMART PEXELS HELPER FUNCTIONS (inline implementation)
+# ============================================================================
+
+def extract_scene_keywords(text: str, max_keywords: int = 3) -> List[str]:
+    """Extract key visual keywords from scene text."""
+    if not text:
+        return []
+    
+    # Common stop words to filter out
+    stop_words = {
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+        'of', 'with', 'by', 'from', 'is', 'was', 'are', 'were', 'been', 'be',
+        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+        'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those'
+    }
+    
+    # Split and clean
+    words = text.lower().split()
+    keywords = [w.strip('.,!?;:()[]{}"\'-') for w in words 
+                if len(w) > 3 and w.lower() not in stop_words]
+    
+    # Return unique keywords, limited to max_keywords
+    seen = set()
+    result = []
+    for kw in keywords:
+        if kw not in seen and len(result) < max_keywords:
+            seen.add(kw)
+            result.append(kw)
+    
+    return result
+
+
+def build_smart_pexels_query(
+    scene_text: str,
+    chapter_title: Optional[str] = None,
+    search_queries: Optional[List[str]] = None,
+    fallback_terms: Optional[List[str]] = None
+) -> str:
+    """
+    Build an intelligent Pexels search query from scene context.
+    
+    Priority:
+    1. Search queries (if provided)
+    2. Chapter title + scene keywords
+    3. Scene keywords only
+    4. Fallback terms
+    """
+    # 1. If explicit search queries provided, use them
+    if search_queries and len(search_queries) > 0:
+        # Pick a random query from the list for variety
+        return random.choice(search_queries).strip()
+    
+    # 2. Extract keywords from scene text
+    scene_keywords = extract_scene_keywords(scene_text, max_keywords=2)
+    
+    # 3. If we have chapter title, combine with scene keywords
+    if chapter_title:
+        chapter_keywords = extract_scene_keywords(chapter_title, max_keywords=1)
+        if chapter_keywords:
+            all_keywords = chapter_keywords + scene_keywords[:1]
+            return " ".join(all_keywords[:2])
+    
+    # 4. Use scene keywords
+    if scene_keywords:
+        return " ".join(scene_keywords[:2])
+    
+    # 5. Fallback to provided terms or generic
+    if fallback_terms and len(fallback_terms) > 0:
+        return random.choice(fallback_terms)
+    
+    return "nature landscape"
+
+
+def enhance_pexels_selection(
+    pexels_client: PexelsClient,
+    query: str,
+    duration: float,
+    used_urls: Set[str],
+    max_attempts: int = 3
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Enhanced Pexels video selection with duplicate avoidance.
+    
+    Returns:
+        (video_url, video_id) or (None, None) if no suitable video found
+    """
+    for attempt in range(max_attempts):
+        try:
+            # Search with pagination
+            page = attempt + 1
+            results = pexels_client.search_videos(
+                query=query,
+                per_page=15,
+                page=page
+            )
+            
+            if not results or 'videos' not in results:
+                continue
+            
+            # Filter and sort videos
+            candidates = []
+            for video in results['videos']:
+                video_id = str(video.get('id', ''))
+                
+                # Skip if already used
+                if video_id in used_urls:
+                    continue
+                
+                # Get video files
+                video_files = video.get('video_files', [])
+                if not video_files:
+                    continue
+                
+                # Find suitable quality (HD preferred)
+                suitable_file = None
+                for vf in video_files:
+                    if vf.get('width', 0) >= 1280 and vf.get('height', 0) >= 720:
+                        suitable_file = vf
+                        break
+                
+                # Fallback to any available file
+                if not suitable_file and video_files:
+                    suitable_file = video_files[0]
+                
+                if suitable_file and suitable_file.get('link'):
+                    video_duration = video.get('duration', 0)
+                    # Prefer videos longer than needed duration
+                    quality_score = suitable_file.get('width', 0) * suitable_file.get('height', 0)
+                    candidates.append({
+                        'url': suitable_file['link'],
+                        'id': video_id,
+                        'duration': video_duration,
+                        'quality': quality_score
+                    })
+            
+            # Sort by quality and duration match
+            if candidates:
+                # Prioritize videos that are slightly longer than needed
+                candidates.sort(
+                    key=lambda x: (
+                        abs(x['duration'] - duration * 1.2),  # Prefer 20% longer
+                        -x['quality']  # Higher quality better
+                    )
+                )
+                
+                best = candidates[0]
+                return best['url'], best['id']
+        
+        except Exception as exc:
+            logger.debug(f"Pexels search attempt {attempt + 1} failed: {exc}")
+            continue
+    
+    return None, None
+
+
+# ============================================================================
+# Original orchestrator code continues below
+# ============================================================================
 
 @dataclass
 class ClipCandidate:
@@ -224,225 +377,180 @@ class ShortsOrchestrator:
                     "title": script.get("title", ""),
                     "description": script.get("description", ""),
                     "tags": script.get("tags", []),
-                    "hook": script.get("hook", ""),
                     "script": script,
                 }
 
                 self._save_script_state_safe(script)
-                self._novelty_add_used_safe(
-                    title=script.get("title", ""), script=sentences_txt
-                )
+                self._novelty_add_used_safe(title=script["title"], script=sentences_txt)
 
-                logger.info("✅ Video ready: %s", video_path)
+                logger.info("=" * 70)
+                logger.info("✅ Video generation successful")
+                logger.info("=" * 70)
                 return video_path, metadata
 
+            except KeyboardInterrupt:
+                raise
             except Exception as exc:
-                logger.error("Attempt %s failed: %s", attempt, exc)
+                logger.error("Attempt %d/%d failed: %s", attempt, max_retries, exc)
                 logger.debug("", exc_info=True)
 
-        logger.error("❌ All attempts failed")
+        logger.error("All attempts failed")
         return None, None
 
     # ------------------------------------------------------------------
-    # Script generation
+    # Script & TTS
     # ------------------------------------------------------------------
 
     def _generate_script(self, topic_prompt: str) -> Optional[Dict]:
-        logger.info("🧠 Generating script via Gemini")
-        try:
-            response = self.gemini.generate(
-                topic=topic_prompt,
-                style="educational, informative, engaging",
-                duration=getattr(settings, "TARGET_DURATION", 210),
-                additional_context=None,
-            )
-        except Exception as exc:
-            logger.error("Gemini error: %s", exc)
-            logger.debug("", exc_info=True)
-            return None
+        for attempt in range(3):
+            try:
+                logger.info("Generating script (attempt %d)", attempt + 1)
+                script = self.gemini.generate_script(
+                    topic_prompt=topic_prompt, channel_id=self.channel_id
+                )
+                if not script:
+                    continue
 
-        script = {
-            "title": response.metadata.get("title", ""),
-            "description": response.metadata.get("description", ""),
-            "tags": response.metadata.get("tags", []),
-            "hook": response.hook,
-            "sentences": [],
-            "chapters": response.chapters,
-            # ✅ SMART PEXELS: Store search_queries from Gemini
-            "search_queries": response.search_queries,
-        }
+                score = self.quality_scorer.score_script(script)
+                if score < 50:
+                    logger.warning("Low quality script (score=%d), retrying", score)
+                    continue
 
-        script["sentences"].append(
-            {
-                "text": response.hook,
-                "type": "hook",
-                "visual_keywords": [response.main_visual_focus]
-                if getattr(response, "main_visual_focus", None)
-                else [],
-            }
-        )
+                logger.info("✅ Script generated (score=%d)", score)
+                return script
 
-        for idx, sentence in enumerate(response.script):
-            if idx < len(response.search_queries):
-                keywords = [response.search_queries[idx]]
-            elif response.search_queries:
-                keywords = [response.search_queries[idx % len(response.search_queries)]]
-            else:
-                keywords = []
-            script["sentences"].append(
-                {"text": sentence, "type": "buildup", "visual_keywords": keywords}
-            )
+            except Exception as exc:
+                logger.warning("Script generation attempt %d failed: %s", attempt + 1, exc)
+                if attempt < 2:
+                    time.sleep(2)
 
-        script["sentences"].append(
-            {"text": response.cta, "type": "conclusion", "visual_keywords": []}
-        )
+        return None
 
-        quality = self.quality_scorer.score(
-            [s.get("text", "") for s in script["sentences"]],
-            script.get("title", ""),
-        )
-        overall = quality.get("overall", 0.0)
-        if overall < 4.0:
-            logger.warning("Script quality too low (%.1f)", overall)
-            return None
+    def _generate_all_tts(self, sentences: List[Dict]) -> List[Optional[Tuple[str, List[Tuple[str, float]]]]]:
+        results = []
+        for idx, sent in enumerate(sentences):
+            text = sent.get("text", "")
+            if not text.strip():
+                results.append(None)
+                continue
 
-        logger.info("Script generated with score %.1f", overall)
-        return script
+            out_path = str(self.temp_dir / f"tts_{idx:03d}.mp3")
+            try:
+                self.tts.synthesize(text, out_path)
+                words = self.tts.get_word_timings() or []
+                results.append((out_path, words))
+            except Exception as exc:
+                logger.error("TTS failed for sentence %d: %s", idx, exc)
+                results.append(None)
+
+        return results
 
     # ------------------------------------------------------------------
-    # Rendering pipeline
+    # Main render loop
     # ------------------------------------------------------------------
 
     def _render_from_script(self, script: Dict) -> Optional[str]:
-        logger.info("🎬 Rendering scenes")
+        """Render complete video from script."""
         sentences = script.get("sentences", [])
         if not sentences:
-            logger.error("Script missing sentences")
+            logger.error("Script has no sentences")
             return None
 
-        # ✅ SMART PEXELS: Get search queries and chapters
-        search_queries = script.get("search_queries", [])
+        logger.info("🎙️ Generating TTS for %d sentences", len(sentences))
+        tts_results = self._generate_all_tts(sentences)
+
+        total_audio_duration = 0.0
+        for res in tts_results:
+            if res:
+                path, _ = res
+                total_audio_duration += ffprobe_duration(path)
+
+        logger.info("📊 Total audio duration: %.2fs", total_audio_duration)
+
+        # Get chapters and search queries if available
         chapters = script.get("chapters", [])
+        
+        logger.info("🎥 Rendering %d scenes", len(sentences))
+        scene_paths = []
 
-        rendered: List[str] = []
-        total_duration = 0.0
-
-        for index, sentence in enumerate(sentences, 1):
-            logger.info("—" * 60)
-            logger.info("Scene %s/%s", index, len(sentences))
-            
-            # ✅ SMART PEXELS: Determine chapter for this scene
-            chapter_title = self._get_chapter_title_for_sentence(index - 1, chapters)
-            
-            scene_path = self._produce_scene(
-                sentence, 
-                index, 
-                search_queries=search_queries,
-                chapter_title=chapter_title
-            )
-            if not scene_path:
-                logger.error("Scene %s failed", index)
+        for idx, (sent, tts_result) in enumerate(zip(sentences, tts_results)):
+            if not tts_result:
+                logger.warning("Skipping scene %d (no TTS)", idx)
                 continue
 
-            rendered.append(scene_path)
-            # We already know target duration from TTS, but probe in case of trims
-            scene_duration = ffprobe_duration(scene_path)
-            total_duration += scene_duration
-            logger.info("Scene %s duration %.2fs", index, scene_duration)
+            audio_path, words = tts_result
+            audio_dur = ffprobe_duration(audio_path)
+            text = sent.get("text", "")
+            sentence_type = sent.get("type", "content")
 
-        if not rendered:
-            logger.error("No scenes rendered")
+            # Find current chapter
+            current_chapter = None
+            search_queries = None
+            for chapter in chapters:
+                start_idx = chapter.get("start_sentence_index", 0)
+                end_idx = chapter.get("end_sentence_index", len(sentences))
+                if start_idx <= idx < end_idx:
+                    current_chapter = chapter.get("title")
+                    search_queries = chapter.get("search_queries", [])
+                    break
+
+            scene_path = self._prepare_scene_clip(
+                text=text,
+                keywords=extract_keywords(text),
+                duration=audio_dur,
+                index=idx,
+                sentence_type=sentence_type,
+                search_queries=search_queries,
+                chapter_title=current_chapter,
+            )
+
+            if not scene_path:
+                logger.warning("Skipping scene %d (no video clip)", idx)
+                continue
+
+            captioned = self._render_captions(
+                video_path=scene_path,
+                text=text,
+                words=words,
+                duration=audio_dur,
+                sentence_type=sentence_type,
+            )
+
+            final_scene = self._mux_audio(
+                video_path=captioned,
+                audio_path=audio_path,
+                duration=audio_dur,
+                index=idx,
+            )
+
+            if final_scene:
+                scene_paths.append(final_scene)
+                logger.info("✅ Scene %d/%d complete", idx + 1, len(sentences))
+
+        if not scene_paths:
+            logger.error("No scenes rendered successfully")
             return None
 
-        final_path = str(self.temp_dir / f"final_{int(time.time())}.mp4")
-        try:
-            self._concat_segments(rendered, final_path)
-        except Exception as exc:
-            logger.error("Concatenation failed: %s", exc)
+        # Concatenate all scenes
+        concat_out = str(self.temp_dir / "concat.mp4")
+        logger.info("🔗 Concatenating %d scenes", len(scene_paths))
+        self._concat_segments(scene_paths, concat_out)
+
+        if not os.path.exists(concat_out):
+            logger.error("Concatenation failed")
             return None
 
-        if not os.path.exists(final_path):
-            logger.error("Final video missing after concat")
-            return None
+        # Add background music
+        logger.info("🎵 Adding background music")
+        final_video = self._maybe_add_bgm(concat_out, total_audio_duration)
 
-        if getattr(settings, "BGM_ENABLED", True):
-            logger.info("Adding BGM to final video")
-            with_bgm = self._maybe_add_bgm(final_path, total_duration)
-            if with_bgm and os.path.exists(with_bgm):
-                final_path = with_bgm
+        return final_video or concat_out
 
-        logger.info("Final video assembled: %s", final_path)
-        return final_path
+    # ------------------------------------------------------------------
+    # Pexels / Video selection
+    # ------------------------------------------------------------------
 
-    def _get_chapter_title_for_sentence(
-        self, sentence_index: int, chapters: List[Dict]
-    ) -> Optional[str]:
-        """Get chapter title for a given sentence index."""
-        for chapter in chapters:
-            start = chapter.get("start_sentence", 0)
-            end = chapter.get("end_sentence", 0)
-            if start <= sentence_index <= end:
-                return chapter.get("title")
-        return None
-
-    def _produce_scene(
-        self, 
-        sentence: Dict, 
-        index: int,
-        search_queries: Optional[List[str]] = None,
-        chapter_title: Optional[str] = None
-    ) -> Optional[str]:
-        text = sentence.get("text", "").strip()
-        sentence_type = sentence.get("type", "buildup")
-        keywords = sentence.get("visual_keywords", []) or []
-
-        if not text:
-            logger.warning("Empty text for scene %s", index)
-            return None
-
-        logger.info("Text: %s", text[:120])
-        audio_path, words, duration = self._generate_audio(text, index)
-        if not audio_path:
-            return None
-
-        # ✅ SMART PEXELS: Pass search_queries and chapter_title
-        clip_path = self._prepare_clip(
-            text, 
-            keywords, 
-            duration, 
-            index, 
-            sentence_type,
-            search_queries=search_queries,
-            chapter_title=chapter_title
-        )
-        if not clip_path:
-            return None
-
-        captioned = self._render_captions(
-            clip_path, text, words, duration, sentence_type
-        )
-
-        return self._mux_audio(captioned, audio_path, duration, index)
-
-    def _generate_audio(
-        self, text: str, index: int
-    ) -> Tuple[Optional[str], List[Tuple[str, float]], float]:
-        logger.info("Generating TTS for scene %s", index)
-        target = self.temp_dir / f"scene_{index:03d}_voice.wav"
-        try:
-            duration, words = self.tts.synthesize(text=text, wav_out=str(target))
-        except Exception as exc:
-            logger.error("TTS failure: %s", exc)
-            logger.debug("", exc_info=True)
-            return None, [], 0.0
-
-        if not target.exists():
-            logger.error("TTS file missing for scene %s", index)
-            return None, [], 0.0
-
-        return str(target), words, duration
-
-    def _prepare_clip(
+    def _prepare_scene_clip(
         self,
         text: str,
         keywords: Sequence[str],
@@ -490,206 +598,103 @@ class ShortsOrchestrator:
         # ✅ Track used video
         if video_id:
             self._used_video_ids.add(video_id)
-        
-        local_raw = self.temp_dir / f"scene_{index:03d}_raw.mp4"
-        if not self._download_clip_from_url(video_url, local_raw):
-            logger.error("Download failed for %s", video_url)
-            return None
+            logger.info("       ✅ Selected video ID: %s", video_id)
 
-        processed = self.temp_dir / f"scene_{index:03d}_proc.mp4"
-        try:
-            self._process_clip(local_raw, processed, duration, sentence_type)
-        except Exception as exc:
-            logger.error("Processing failed: %s", exc)
-            logger.debug("", exc_info=True)
-            return None
+        raw_clip = self.temp_dir / f"raw_{index:03d}.mp4"
 
-        return str(processed)
-
-    # ----------------------- Keyword utils (SAFE) -----------------------
-
-    def _extract_keywords_safe(self, text: str) -> List[str]:
-        lang = getattr(settings, "LANG", "en")
-        try:
-            return [kw for kw in extract_keywords(text, lang) if kw]
-        except TypeError:
+        if self._clip_cache.try_copy(video_url, raw_clip):
+            logger.info("       ♻️ Using cached clip")
+        else:
+            logger.info("       📥 Downloading...")
             try:
-                return [kw for kw in extract_keywords(text) if kw]
-            except Exception:
-                return []
-        except Exception:
-            return []
+                resp = self._http.get(video_url, timeout=60, stream=True)
+                resp.raise_for_status()
+                with open(raw_clip, "wb") as fh:
+                    for chunk in resp.iter_content(chunk_size=1048576):
+                        fh.write(chunk)
+                self._clip_cache.store(video_url, raw_clip)
+            except Exception as exc:
+                logger.error("Download failed: %s", exc)
+                return None
 
-    def _simplify_query_safe(self, text: str) -> str:
-        lang = getattr(settings, "LANG", "en")
-        try:
-            return simplify_query(text, lang) or ""
-        except TypeError:
-            try:
-                return simplify_query(text) or ""
-            except Exception:
-                return ""
-        except Exception:
-            return ""
+        processed = self.temp_dir / f"scene_{index:03d}_video.mp4"
+        self._process_clip(raw_clip, processed, duration)
 
-    def _choose_keyword(self, text: str, keywords: Sequence[str]) -> str:
-        pool: List[str] = []
-        pool.extend([kw for kw in keywords if kw])
-        pool.extend(self._extract_keywords_safe(text))
-
-        simplified = self._simplify_query_safe(text)
-        if simplified:
-            pool.append(simplified)
-
-        pool.append(getattr(settings, "CHANNEL_TOPIC", "interesting facts"))
-        pool.append("interesting landscape")
-
-        choice = next((kw for kw in pool if kw), text[:40] or "interesting")
-        logger.info("Search keyword: %s", choice)
-        return choice
-
-    # ----------------------- Candidate selection (FALLBACK) -----------------------
+        return str(processed) if processed.exists() else None
 
     def _next_candidate_fallback(
-        self,
-        text: str,
-        fallback_keywords: Sequence[str],
+        self, text: str, keywords: Sequence[str]
     ) -> Optional[ClipCandidate]:
-        """Fallback method for video selection (old approach)"""
-        queries = list(fallback_keywords)
+        """Fallback method for finding video clips."""
+        simplified = simplify_query(text) or (keywords[0] if keywords else "nature")
         
-        simplified = self._simplify_query_safe(text)
-        if simplified and simplified not in queries:
-            queries.append(simplified)
+        if simplified not in self._video_candidates:
+            try:
+                results = self.pexels.search_videos(simplified, per_page=10)
+                candidates = []
+                for video in results.get("videos", []):
+                    video_id = str(video.get("id", ""))
+                    video_files = video.get("video_files", [])
+                    if not video_files:
+                        continue
+                    
+                    # Find HD quality
+                    selected_file = None
+                    for vf in video_files:
+                        if vf.get("width", 0) >= 1280:
+                            selected_file = vf
+                            break
+                    if not selected_file:
+                        selected_file = video_files[0]
+                    
+                    if selected_file.get("link"):
+                        candidates.append(
+                            ClipCandidate(
+                                url=selected_file["link"],
+                                duration=video.get("duration", 15),
+                                video_id=video_id,
+                            )
+                        )
+                
+                self._video_candidates[simplified] = candidates
+            except Exception as exc:
+                logger.error("Pexels search failed for '%s': %s", simplified, exc)
+                return None
 
-        queries.append(getattr(settings, "CHANNEL_TOPIC", "nature"))
-        queries.append("dynamic landscape video")
-
-        for query in queries:
-            pool = self._get_candidates(query)
-            if not pool:
-                continue
-            candidate = next(
-                (clip for clip in pool if clip.duration >= getattr(settings, "PEXELS_MIN_DURATION", 3.0)),
-                None,
-            )
-            if not candidate:
-                continue
-            pool.remove(candidate)
-            logger.info("Using clip %s for query '%s'", candidate.url, query)
-            return candidate
-
-        logger.warning("No clip candidate located")
-        return None
-
-    def _get_candidates(self, query: str) -> List[ClipCandidate]:
-        cache = self._video_candidates.get(query)
-        if cache is not None:
-            return cache
-
-        results: List[ClipCandidate] = []
-        try:
-            per_page_default = getattr(settings, "PEXELS_PER_PAGE", 80)
-            per_page = min(per_page_default, (50 if self.fast_mode else 80))
-            params = {
-                "query": query,
-                "per_page": per_page,
-                "orientation": "landscape",
-            }
-            response = self._http.get(PEXELS_SEARCH_ENDPOINT, params=params, timeout=(8 if self.fast_mode else 12))
-            response.raise_for_status()
-            payload = response.json()
-        except Exception as exc:
-            logger.error("Pexels lookup failed for '%s': %s", query, exc)
-            logger.debug("", exc_info=True)
-            payload = {}
-
-        for video in payload.get("videos", []) or []:
-            video_id = str(video.get("id", ""))
-            duration = float(video.get("duration", 0.0))
-            url = self._select_video_file(video)
-            if not url:
-                continue
-            results.append(ClipCandidate(url=url, duration=duration, video_id=video_id))
-
-        random.shuffle(results)
-        self._video_candidates[query] = results
-        return results
-
-    def _select_video_file(self, video: Dict) -> Optional[str]:
-        files = video.get("video_files", []) or []
-        landscape = [fd for fd in files if fd.get("link") and int(fd.get("width", 0)) > int(fd.get("height", 0))]
-        if not landscape:
+        pool = self._video_candidates.get(simplified, [])
+        if not pool:
             return None
 
-        # Prefer 'sd' in FAST_MODE to download smaller files; otherwise prefer 'hd'
-        preferred_quality = "sd" if self.fast_mode else "hd"
-        preferred = [f for f in landscape if (f.get("quality") or "").lower() == preferred_quality]
-        pool = preferred or landscape
+        # Filter out already used videos
+        available = [c for c in pool if c.video_id not in self._used_video_ids]
+        if not available:
+            available = pool  # If all used, reuse
 
-        # Sort by width ascending (smaller first) to speed downloads
-        try:
-            pool.sort(key=lambda f: int(f.get("width", 0)))
-        except Exception:
-            pass
-
-        # Shuffle lightly to avoid overusing the same file
-        random.shuffle(pool)
-        return pool[0].get("link")
-
-    def _download_clip_from_url(self, url: str, destination: pathlib.Path) -> bool:
-        """Download clip from URL with caching"""
-        if self._clip_cache.try_copy(url, destination):
-            logger.info("       ✅ Reused cached clip")
-            return True
-
-        try:
-            with self._http.get(url, stream=True, timeout=45) as response:
-                response.raise_for_status()
-                with open(destination, "wb") as handle:
-                    for chunk in response.iter_content(chunk_size=64 * 1024):
-                        if chunk:
-                            handle.write(chunk)
-        except Exception as exc:
-            logger.error("Clip download failed: %s", exc)
-            logger.debug("", exc_info=True)
-            return False
-
-        if destination.exists():
-            self._clip_cache.store(url, destination)
-            return True
-        return False
+        return random.choice(available) if available else None
 
     def _process_clip(
-        self,
-        source: pathlib.Path,
-        output: pathlib.Path,
-        target_duration: float,
-        sentence_type: str,
+        self, source: pathlib.Path, output: pathlib.Path, target_duration: float
     ) -> None:
-        duration = ffprobe_duration(str(source))
-        if duration <= 0:
-            raise RuntimeError("invalid clip duration")
+        """Process raw clip: resize, crop, loop, etc."""
+        clip_dur = ffprobe_duration(str(source))
+        if clip_dur <= 0:
+            clip_dur = target_duration
 
-        loops = max(1, int(target_duration // duration) + 1)
+        loops = max(1, int((target_duration / clip_dur) + 0.999))
 
-        # Build filter chain (lighter zoompan), no 'loop' filter (use -stream_loop instead)
-        filters: List[str] = [
-            "scale=1920:1080:force_original_aspect_ratio=increase",
-            "crop=1920:1080",
+        # Build video filters
+        target_w = int(getattr(settings, "TARGET_WIDTH", 1080))
+        target_h = int(getattr(settings, "TARGET_HEIGHT", 1920))
+        
+        filters = [
+            f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase",
+            f"crop={target_w}:{target_h}",
         ]
 
-        fps = int(getattr(settings, "TARGET_FPS", 30))
-        if sentence_type == "hook":
-            filters.append(f"zoompan=z='min(zoom+0.0005,1.10)':d=1:s=1920x1080:fps={fps}")
-        else:
-            filters.append(f"fps={fps}")
-
-        total_frames = max(2, int(round(target_duration * fps)))
-        filters.extend([f"trim=start_frame=0:end_frame={total_frames}", "setpts=PTS-STARTPTS"])
-
         crf = str(getattr(settings, "CRF_VISUAL", 22))
-        input_opts: List[str] = []
+        fps = int(getattr(settings, "TARGET_FPS", 30))
+
+        input_opts = []
         if loops > 1:
             input_opts = ["-stream_loop", str(loops - 1)]
 
