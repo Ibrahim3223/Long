@@ -1,70 +1,44 @@
 # -*- coding: utf-8 -*-
 """
 Karaoke ASS subtitle builder - LANDSCAPE (16:9)
-✅ BÜYÜK HARF altyazılar
-✅ Vurgu YOK, animasyon YOK
-✅ Temiz kelime bazlı \k highlight
+✅ BÜYÜK HARF - temiz ve okunabilir
+✅ SADE geçiş: beyaz → sarı (vurgu YOK)
+✅ Kelime bazlı \k timing (hassas senkronizasyon)
 """
 
 from typing import List, Dict, Optional, Any, Tuple
 
 # 16:9 alt yazı stilleri (alt hizalı)
 CAPTION_STYLES: Dict[str, Dict[str, Any]] = {
-    "classic_yellow": {
-        "name": "Classic Yellow",
+    "clean_yellow": {
+        "name": "Clean Yellow",
+        "fontname": "Arial Black",
+        "fontsize_normal": 46,
+        "fontsize_hook": 52,
+        "outline": 5,
+        "shadow": "3",
+        "color_inactive": "&H00FFFFFF",  # Beyaz (başlangıç)
+        "color_active": "&H0000FFFF",    # Sarı (aktif)
+        "color_outline": "&H00000000",   # Siyah outline
+        "margin_v": 90
+    },
+    "clean_cyan": {
+        "name": "Clean Cyan",
         "fontname": "Arial Black",
         "fontsize_normal": 44,
         "fontsize_hook": 50,
-        "outline": 5,
-        "shadow": "3",
-        "color_inactive": "&H00FFFFFF",  # White
-        "color_active": "&H0000FFFF",    # Yellow
-        "color_outline": "&H00000000",   # Black
-        "margin_v": 90
-    },
-    "neon_cyan": {
-        "name": "Neon Cyan",
-        "fontname": "Arial Black",
-        "fontsize_normal": 42,
-        "fontsize_hook": 48,
         "outline": 4,
         "shadow": "3",
         "color_inactive": "&H00FFFFFF",
         "color_active": "&H00FFFF00",    # Cyan
         "color_outline": "&H00000000",
         "margin_v": 90
-    },
-    "hot_pink": {
-        "name": "Hot Pink",
-        "fontname": "Impact",
-        "fontsize_normal": 42,
-        "fontsize_hook": 48,
-        "outline": 4,
-        "shadow": "3",
-        "color_inactive": "&H00FFFFFF",
-        "color_active": "&H00FF1493",
-        "color_outline": "&H00000000",
-        "margin_v": 90
-    },
-    "lime_green": {
-        "name": "Lime Green",
-        "fontname": "Arial Black",
-        "fontsize_normal": 44,
-        "fontsize_hook": 50,
-        "outline": 5,
-        "shadow": "3",
-        "color_inactive": "&H00FFFFFF",
-        "color_active": "&H0000FF00",
-        "color_outline": "&H00000000",
-        "margin_v": 95
     }
 }
 
 STYLE_WEIGHTS = {
-    "classic_yellow": 0.4,
-    "neon_cyan": 0.25,
-    "hot_pink": 0.2,
-    "lime_green": 0.15,
+    "clean_yellow": 0.7,  # Daha çok sarı (en temiz)
+    "clean_cyan": 0.3,
 }
 
 def get_random_style() -> str:
@@ -72,7 +46,7 @@ def get_random_style() -> str:
     return random.choices(list(STYLE_WEIGHTS.keys()), weights=list(STYLE_WEIGHTS.values()))[0]
 
 def get_style_info(style_name: str) -> Dict[str, Any]:
-    return CAPTION_STYLES.get(style_name, CAPTION_STYLES["classic_yellow"])
+    return CAPTION_STYLES.get(style_name, CAPTION_STYLES["clean_yellow"])
 
 def list_all_styles() -> List[str]:
     return list(CAPTION_STYLES.keys())
@@ -84,19 +58,20 @@ def build_karaoke_ass(
     words: List[Tuple[str, float]],
     is_hook: bool = False,
     style_name: Optional[str] = None,
-    **kwargs  # Geriye dönük uyumluluk için (emphasize, fancy_motion vs.)
+    **kwargs  # Geriye dönük uyumluluk
 ) -> str:
     """
-    ✅ DÜZ karaoke: BÜYÜK HARF, vurgu/animasyon yok, kelime kelime \k akışı.
+    ✅ SADE karaoke: BÜYÜK HARF, beyaz→sarı geçiş, kelime kelime \k
+    ❌ VURGU YOK, animasyon YOK
     """
-    # ✅ METNİ BÜYÜK HARFE ÇEVİR
+    # ✅ BÜYÜK HARF
     text = (text or "").strip().upper()
     
-    style = get_style_info(style_name or "classic_yellow")
+    style = get_style_info(style_name or "clean_yellow")
     fontsize = style["fontsize_hook"] if is_hook else style["fontsize_normal"]
 
     header = f"""[Script Info]
-Title: Karaoke Captions (Clean Uppercase)
+Title: Clean Uppercase Captions
 ScriptType: v4.00+
 PlayResX: 1920
 PlayResY: 1080
@@ -116,11 +91,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         body = f"Dialogue: 0,0:00:00.00,{end_time},Default,,0,0,0,,{text}\n"
         return header + body
 
-    # ✅ Kelimeleri de büyük harfe çevir
+    # ✅ Kelimeleri büyük harfe çevir
     words = [(w.strip().upper(), d) for w, d in words if w and w.strip()]
     
-    # 2-3 kelimelik bloklar
-    chunk_size = 2 if is_hook else 3
+    # 3 kelimelik bloklar (uzun video için optimal)
+    chunk_size = 3
     chunks: List[Tuple[List[Tuple[str, float]], float]] = []
     cur, cur_d = [], 0.0
     for w, d in words:
@@ -137,12 +112,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for chunk_words, dur in chunks:
         start = _ass_time(t)
         end = _ass_time(t + dur)
-        # ✅ Sade \k akışı - daha hassas timing
+        
+        # ✅ SADE \k akışı - VURGU YOK
         karaoke_text = ""
         for w, d in chunk_words:
-            # Centisecond cinsinden (daha hassas)
-            cs = max(1, int(round(float(d) * 100)))
+            cs = max(1, int(round(float(d) * 100)))  # Centisecond
             karaoke_text += f"{{\\k{cs}}}{w} "
+        
         body_lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{karaoke_text.strip()}\n")
         t += dur
 
@@ -150,7 +126,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 def _ass_time(seconds: float) -> str:
-    """ASS format time string with millisecond precision."""
+    """ASS format time string."""
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
     s = int(seconds % 60)
