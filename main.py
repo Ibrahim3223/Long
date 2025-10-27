@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 Main entry point for autoshorts.
-Run this file to generate a YouTube Short.
+Run this file to generate a YouTube Video.
+✅ WITH THUMBNAIL SUPPORT
 """
 import sys
 import os
@@ -114,7 +115,7 @@ def _import_long_uploader():
 def main():
     """Main entry point."""
     print("=" * 60)
-    print("  YouTube Shorts Generator v2.0")
+    print("  YouTube Video Generator v2.0")
     print("=" * 60)
     
     # ✅ Set up logging properly
@@ -173,6 +174,19 @@ def main():
             print(f"\n📦 Copying final video to {destination_path}")
             shutil.copy2(video_path, destination_path)
 
+            # ✅ Copy thumbnail if available
+            script_data = metadata.get("script", {})
+            thumbnail_src = script_data.get("thumbnail_path")
+            
+            if thumbnail_src and os.path.exists(thumbnail_src):
+                thumbnail_dest = destination_path.replace(".mp4", "_thumbnail.jpg")
+                print(f"🖼️ Copying thumbnail to {thumbnail_dest}")
+                shutil.copy2(thumbnail_src, thumbnail_dest)
+                print(f"✅ Thumbnail saved successfully")
+            else:
+                thumbnail_dest = None
+                print("⚠️ No thumbnail available")
+
             meta_payload = {
                 "channel": channel_name,
                 "channel_slug": safe_channel,
@@ -182,6 +196,10 @@ def main():
                 "topic_prompt": topic_prompt,
                 "metadata": metadata,
             }
+
+            # ✅ Add thumbnail path to metadata
+            if thumbnail_dest:
+                meta_payload["thumbnail_path"] = thumbnail_dest
 
             metadata_path = destination_path.replace(".mp4", ".json")
             with open(metadata_path, "w", encoding="utf-8") as fh:
@@ -212,6 +230,9 @@ def main():
                         yt_visibility = os.getenv("VISIBILITY", "public")
                         topic_env = os.getenv("TOPIC")
 
+                        # ✅ Thumbnail'ı da gönder
+                        thumbnail_path = meta_payload.get("thumbnail_path")
+
                         vid = uploader.upload(
                             video_path=destination_path,
                             title=metadata.get("title", "Untitled"),
@@ -221,7 +242,8 @@ def main():
                             privacy_status=yt_visibility,
                             topic=topic_env,
                             chapters=chapters,
-                            audio_durations=audio_durations
+                            audio_durations=audio_durations,
+                            thumbnail_path=thumbnail_path  # ✅ YENİ: thumbnail ekle
                         )
                         print(f"📺 YouTube Video ID: {vid}")
                     except Exception as e:
