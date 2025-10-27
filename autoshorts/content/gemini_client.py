@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Gemini Client - LONG-FORM EDUCATIONAL (✅ ULTRA SEO)
-✅ İLGİ ÇEKİCİ başlıklar (clickable ama clickbait değil)
-✅ SEO-optimized açıklamalar (300-500 kelime)
-✅ ALAKALI search queries (her sahneye özel)
-✅ ENGAGING hook + CTA
+Gemini Client - FIXED VERSION
+✅ Başlıklar benzersiz (channel topic KULLANILMAZ)
+✅ Chapter başlıkları KISA (max 50 karakter)
+✅ SEO-optimized
 """
 
 import json
@@ -12,143 +11,74 @@ import logging
 import random
 import re
 import os
-import time
-import difflib
 from typing import Optional, Dict, Any, List
-from dataclasses import dataclass
-
-from google import genai
-from google.genai import types
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ContentResponse:
-    """Structured response from content generation"""
-    hook: str
-    script: List[str]
+def _ultra_seo_metadata_fixed(
+    metadata: Dict[str, Any],
+    topic: str,
+    script: List[str],
+    chapters: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, Any]:
+    """
+    ✅ FIXED: ULTRA SEO enhancement
+    - Başlık UNIQUE (channel topic kullanılmaz)
+    - Chapter başlıkları KISA
+    """
+    md = dict(metadata or {})
+    
+    # ❌ ESKİ: Channel topic'i başlığa ekleme
+    # primary_kw = topic.split("—")[0].strip()
+    # title = f"{primary_kw}: {title}"
+    
+    # ✅ YENİ: Sadece Gemini'den gelen başlığı kullan
+    title = (md.get("title") or "Untitled Video").strip()
+    
+    # ✅ Başlık uzunluğu kontrolü (STRICT 60 karakter)
+    if len(title) > 60:
+        # Son kelimeyi yarım bırakma, tam kelimede kes
+        cutoff = title[:57].rfind(' ')
+        if cutoff > 45:
+            title = title[:cutoff] + "..."
+        else:
+            title = title[:57] + "..."
+    
+    # Çok kısa başlıkları uzat
+    elif len(title) < 45:
+        suffix = " Explained"
+        if len(title + suffix) <= 60:
+            title = title + suffix
+    
+    # ✅ DESCRIPTION
+    desc = (md.get("description") or "").strip()
+    
+    # ✅ TAGS
+    tags = md.get("tags") or []
+    tags = [t.strip().lower() for t in tags if t and isinstance(t, str)][:35]
+    
+    md["title"] = title.strip()
+    md["description"] = desc.strip()
+    md["tags"] = list(dict.fromkeys(tags))[:35]
+    
+    return md
+
+
+def _build_ultra_seo_prompt_fixed(
+    topic: str,
+    style: str,
+    target_sentences: int,
+    hook: str,
     cta: str
-    search_queries: List[str]
-    main_visual_focus: str
-    metadata: Dict[str, Any]
-    chapters: List[Dict[str, Any]]
-
-
-# ✅ ENGAGING HOOKS (not generic!)
-ENGAGING_HOOKS = [
-    "You won't believe {topic_keyword} started like this.",
-    "The secret history of {topic_keyword} will blow your mind.",
-    "Everything you know about {topic_keyword} is about to change.",
-    "This {topic_keyword} story is fascinating—and totally true.",
-    "The complete truth about {topic_keyword} in {duration} minutes.",
-    "Let's uncover what makes {topic_keyword} so special.",
-    "How did {topic_keyword} become what it is today? Let's find out."
-]
-
-# ✅ STRONG CTAs (actionable!)
-STRONG_CTA = [
-    "Want more deep dives? Subscribe now for weekly content.",
-    "Drop a comment if you learned something new today!",
-    "Hit subscribe—we're just getting started with fascinating topics.",
-    "Share this with someone who loves {topic_keyword}!",
-    "What topic should we cover next? Comment below!"
-]
-
-
-class GeminiClient:
-    """ULTRA SEO-optimized long-form content generator"""
-
-    MODELS = {
-        "flash": "gemini-2.5-flash",
-        "gemini-2.5-flash": "gemini-2.5-flash",
-    }
-
-    RETRYABLE_CODES = {429, 500, 502, 503, 504}
-    RETRYABLE_STATUSES = {"UNAVAILABLE", "INTERNAL", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED"}
-
-    def __init__(self, api_key: str, model: str = "flash"):
-        if not api_key:
-            raise ValueError("Gemini API key required")
-
-        self.client = genai.Client(api_key=api_key)
-        primary_model = self.MODELS.get(model, model)
-
-        chain_env = os.getenv(
-            "GEMINI_MODEL_CHAIN",
-            f"{primary_model},gemini-2.0-flash,gemini-1.5-flash"
-        )
-        chain = [m.strip() for m in chain_env.split(",") if m.strip()]
-        seen = set()
-        self.model_chain = []
-        for m in chain:
-            if m not in seen:
-                seen.add(m)
-                self.model_chain.append(m)
-
-        self.total_attempts = int(os.getenv("GEMINI_TOTAL_ATTEMPTS", "10"))
-        self.attempts_per_model = int(os.getenv("GEMINI_ATTEMPTS_PER_MODEL", "2"))
-        self.initial_backoff = float(os.getenv("GEMINI_INITIAL_BACKOFF", "2.0"))
-        self.max_backoff = float(os.getenv("GEMINI_MAX_BACKOFF", "20.0"))
-        self.timeout = float(os.getenv("GEMINI_TIMEOUT", "60.0"))
-
-        self.model = primary_model
-        logger.info(f"[Gemini] ULTRA SEO client initialized: {self.model}")
-
-    def generate(
-        self,
-        topic: str,
-        style: str,
-        duration: int,
-        additional_context: Optional[str] = None
-    ) -> ContentResponse:
-        """Generate ULTRA SEO-optimized long-form content"""
-
-        seconds_per_sentence = 6
-        target_sentences = duration // seconds_per_sentence
-        target_sentences = min(70, max(40, target_sentences))
-
-        logger.info(f"[Gemini] Target: {duration}s = {target_sentences} sentences")
-
-        # ✅ Dynamic hooks/CTAs
-        topic_kw = topic.split("—")[0].strip() if "—" in topic else topic
-        hook_template = random.choice(ENGAGING_HOOKS)
-        hook = hook_template.replace("{topic_keyword}", topic_kw).replace("{duration}", str(duration//60))
-        
-        cta_template = random.choice(STRONG_CTA)
-        cta = cta_template.replace("{topic_keyword}", topic_kw)
-
-        prompt = self._build_ultra_seo_prompt(
-            topic, style, target_sentences, hook, cta, additional_context
-        )
-
-        try:
-            raw_response = self._call_api_with_fallback(prompt, max_output_tokens=16000, temperature=0.8)
-            content = self._parse_response(raw_response, topic)
-            
-            # ✅ ULTRA SEO enhancement
-            content.metadata = self._ultra_seo_metadata(content.metadata, topic, content.script, content.chapters)
-            
-            logger.info(f"[Gemini] ✅ {len(content.script)} sentences, {len(content.chapters)} chapters")
-            return content
-
-        except Exception as e:
-            logger.error(f"[Gemini] ❌ Generation failed: {e}")
-            raise
-
-    def _build_ultra_seo_prompt(
-        self,
-        topic: str,
-        style: str,
-        target_sentences: int,
-        hook: str,
-        cta: str,
-        additional_context: Optional[str] = None
-    ) -> str:
-        """Build ULTRA SEO-optimized prompt"""
-
-        # Build the prompt (avoiding f-string issues with curly braces in JSON examples)
-        prompt = f"""Create a HIGH-QUALITY, SEO-OPTIMIZED long-form YouTube video script about: {topic}
+) -> str:
+    """
+    ✅ FIXED: Ultra SEO prompt
+    - Başlık için NET talimat: Channel topic KULLANMA
+    - Chapter başlıkları KISA
+    """
+    
+    prompt = f"""Create a HIGH-QUALITY, SEO-OPTIMIZED long-form YouTube video script about: {topic}
 
 CRITICAL REQUIREMENTS:
 - EXACTLY {target_sentences} sentences (40-70 range)
@@ -165,11 +95,27 @@ STRUCTURE:
 
 ✅ ULTRA SEO REQUIREMENTS (CRITICAL):
 
-**metadata.title** (50-60 chars - MOBİL UYUMLU!):
-- SPECIFIC object/topic in first 2-3 words
-- UNIQUE for THIS video (NOT generic channel description)
-- Mobile-optimized: MAX 60 characters  
-- Must be DIFFERENT for EVERY video!
+**metadata.title** (STRICT 50-60 chars):
+- SPECIFIC to THIS EXACT video topic
+- DO NOT repeat channel name or channel topic
+- UNIQUE for every video (not generic!)
+- Mobile-optimized: MAXIMUM 60 characters
+- Examples:
+  ✅ GOOD: "Chair Evolution: From Throne to Modern Eames"
+  ✅ GOOD: "Coffee Discovery: Ethiopian Goat Herders Tale"
+  ✅ GOOD: "Paper Clip History: Wire Bending Innovation"
+  ❌ BAD: "Design histories of everyday objects: Chair..." (repeating channel topic!)
+  ❌ BAD: "Interesting facts about chairs" (too generic!)
+
+**chapters** (5-7 chapters):
+- TITLE: SHORT (max 50 chars) - keyword-rich but concise
+- TITLE: Use format like "Ancient Origins" or "Medieval Evolution" or "Modern Innovation"
+- TITLE: NOT "Ancient Chair Origins: Power and Status Seating – Explore the earliest..."
+- DESCRIPTION: Longer explanation (for internal use, not shown to user)
+- Examples:
+  ✅ GOOD: {{"title": "Ancient Origins", "description": "Explore earliest chair forms"}}
+  ✅ GOOD: {{"title": "Industrial Revolution", "description": "Mass production impact"}}
+  ❌ BAD: {{"title": "Ancient Chair Origins: Power and Status Seating – Explore...", ...}}
 
 **metadata.description** (400-500 words):
 - First 160 chars: Hook + primary keyword + value promise
@@ -177,7 +123,6 @@ STRUCTURE:
 - Add 2-3 related questions viewers might have
 - End with CTA
 - NO links, NO emojis, NO hashtags in body
-- Natural keyword placement (don't stuff!)
 
 **metadata.tags** (25-35 tags):
 - Mix of broad, specific, and related terms
@@ -187,48 +132,39 @@ STRUCTURE:
 **search_queries** (30-40 queries):
 - SPECIFIC to each scene/chapter
 - Mix macro + detail shots
-- Relate to ACTUAL script content
-- Examples for "paper clip history":
-  * "metal wire macro bend", "office desk supplies close", "paper stack organize",
-    "patent drawing vintage", "factory wire machine", "hand holding paper clip"
-- NOT generic like "history", "design", "object"
+- Examples: "wooden chair close up", "throne ancient egypt", "modern office chair"
 
-**chapters**: 
-- Keyword-rich titles (not just "Part 1")
-- Clear value in each title
+Return EXACT JSON structure:
 
-Style: {style}
-Additional: {additional_context or "None"}
-
-YOU MUST RETURN COMPLETE, VALID JSON. DO NOT TRUNCATE.
-"""
-        
-        # Add JSON structure template separately to avoid f-string escaping issues
-        prompt += """
-Return this EXACT JSON structure:
-
-{
+{{
   "hook": "Your hook sentence",
-  "script": ["sentence 1", "sentence 2", "sentence 3", ... include ALL sentences],
+  "script": ["sentence 1", "sentence 2", ... {target_sentences} sentences total],
   "cta": "Call to action",
-  "search_queries": ["specific term 1", "term 2", ... 30-40 SPECIFIC terms],
-  "main_visual_focus": "Primary visual theme for the video",
+  "search_queries": ["specific term 1", "term 2", ... 30-40 terms],
+  "main_visual_focus": "Primary visual theme",
   "chapters": [
-    {"title": "Keyword-Rich Title", "start_sentence": 0, "end_sentence": 7, "description": "Clear value"},
-    {"title": "Second Chapter", "start_sentence": 8, "end_sentence": 15, "description": "Value"},
-    ... 5-7 chapters total
+    {{"title": "Introduction", "start_sentence": 0, "end_sentence": 5, "description": "Overview"}},
+    {{"title": "Ancient Origins", "start_sentence": 6, "end_sentence": 12, "description": "Earliest forms"}},
+    {{"title": "Medieval Era", "start_sentence": 13, "end_sentence": 20, "description": "Middle Ages development"}},
+    {{"title": "Industrial Revolution", "start_sentence": 21, "end_sentence": 28, "description": "Mass production"}},
+    {{"title": "Modern Design", "start_sentence": 29, "end_sentence": 36, "description": "20th century"}},
+    {{"title": "Contemporary Trends", "start_sentence": 37, "end_sentence": 42, "description": "Current innovations"}},
+    {{"title": "Conclusion", "start_sentence": 43, "end_sentence": 47, "description": "Summary"}}
   ],
-  "metadata": {
-    "title": "PRIMARY KEYWORD: Engaging Promise (60-70 chars)",
-    "description": "400-500 word description with hook, chapters, questions, CTA",
-    "tags": ["tag1", "tag2", "tag3", ... 25-35 tags, all lowercase, specific]
-  }
-}
+  "metadata": {{
+    "title": "Chair Evolution: From Throne to Modern Eames",
+    "description": "400-500 word description...",
+    "tags": ["chair history", "furniture design", "eames chair", ... 25-35 tags]
+  }}
+}}
 
-REMEMBER: Quality > Quantity. Make EVERY word count!
+CRITICAL REMINDERS:
+- Title must be UNIQUE for THIS video (not generic channel description)
+- Chapter titles must be SHORT (max 50 chars)
+- NO channel topic in video title
+- Quality > Quantity
 """
-        
-        return prompt
+    return prompt
 
     def _call_api_with_fallback(
         self,
