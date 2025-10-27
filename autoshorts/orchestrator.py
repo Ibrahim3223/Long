@@ -269,11 +269,48 @@ class ShortsOrchestrator:
         """Generate script using GeminiClient."""
         try:
             logger.info("🤖 Generating script via Gemini...")
-            script = self.gemini.generate_script(topic_prompt)
             
-            if not script:
-                logger.error("Gemini returned empty script")
+            # Call Gemini API - returns ContentResponse dataclass
+            content_response = self.gemini.generate(
+                topic=topic_prompt,
+                style="educational",
+                duration=300  # 5 minutes target
+            )
+            
+            if not content_response:
+                logger.error("Gemini returned empty response")
                 return None
+            
+            # Convert ContentResponse to dict format expected by orchestrator
+            script = {
+                "hook": content_response.hook,
+                "script": content_response.script,
+                "cta": content_response.cta,
+                "search_queries": content_response.search_queries,
+                "main_visual_focus": content_response.main_visual_focus,
+                "title": content_response.metadata.get("title", "Untitled"),
+                "description": content_response.metadata.get("description", ""),
+                "tags": content_response.metadata.get("tags", []),
+                "chapters": content_response.chapters,
+                "sentences": []  # Will be populated below
+            }
+            
+            # Build sentences list from script parts
+            sentences = []
+            
+            # Add hook
+            if script["hook"]:
+                sentences.append({"text": script["hook"], "type": "hook"})
+            
+            # Add main script sentences
+            for sentence in script["script"]:
+                sentences.append({"text": sentence, "type": "content"})
+            
+            # Add CTA
+            if script["cta"]:
+                sentences.append({"text": script["cta"], "type": "cta"})
+            
+            script["sentences"] = sentences
             
             # Validate script structure
             if not script.get("sentences"):
