@@ -258,7 +258,7 @@ jobs:
 
           # ===== CAPTIONS (Bottom Positioned) =====
           REQUIRE_CAPTIONS: "1"
-          KARAOKE_CAPTIONS: "1"
+          KARAOKE_CAPTIONS: "0"
           CAPTIONS_UPPER: "1"
           CAPTION_POSITION: "bottom"
           CAPTION_FONT_SIZE: "48"
@@ -275,7 +275,7 @@ jobs:
           CAPTION_LEAD_MS: "0"
 
           # ===== VIDEO EFFECTS (Subtle) =====
-          KARAOKE_EFFECTS: "1"
+          KARAOKE_EFFECTS: "0"
           EFFECT_STYLE: "subtle"
           VIDEO_MOTION: "1"
           MOTION_INTENSITY: "1.08"
