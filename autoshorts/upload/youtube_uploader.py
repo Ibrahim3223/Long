@@ -156,9 +156,8 @@ class YouTubeUploader:
             logger.warning("[Chapters] No data - skipping chapters")
             return ""
 
-        # ✅ Bölüm başlangıç zamanlarını hesapla
+        # ✅ Bölüm başlangıç zamanlarını hesapla - CUMULATIVE SUM
         starts: List[Tuple[float, str]] = []
-        cur_time = 0.0
         
         for ch in chapters:
             # ✅ Sadece TITLE kullan, description KULLANMA
@@ -179,41 +178,46 @@ class YouTubeUploader:
         
             # Chapter indeksleri
             s_idx = int(ch.get("start_sentence", 0))
-            e_idx = int(ch.get("end_sentence", s_idx))
             
-            # ✅ FIX: Chapter başlangıcı MEVCUT zamanda kaydet
-            starts.append((cur_time, title))
+            # ✅ DOĞRU MANTIK: Bu chapter'ın başlangıç zamanı = 
+            #    başlangıcından ÖNCEKİ tüm sentence'ların toplam süresi
+            #    (kendi sentence'larını DAHIL ETME!)
+            chapter_start_time = 0.0
+            if s_idx > 0 and s_idx <= len(audio_durations):
+                # İlk s_idx sentence'ın toplam süresi
+                chapter_start_time = sum(float(audio_durations[i]) for i in range(min(s_idx, len(audio_durations))))
+            
+            starts.append((chapter_start_time, title))
         
-            # ✅ Şimdi bu bölümün toplam süresini ekle (SONRAKİ chapter için)
-            for i in range(s_idx, min(e_idx + 1, len(audio_durations))):
-                if i < len(audio_durations):
-                    cur_time += float(audio_durations[i])
+        # Toplam video süresini hesapla (validation için)
+        total_duration = sum(float(d) for d in audio_durations) if audio_durations else 0.0
+        logger.info(f"[Chapters] Total video duration: {total_duration:.1f}s ({self._fmt_ts(total_duration)})")
+        
+        # ✅ CRITICAL: Timestamp'leri video süresinden uzun olanları temizle
+        starts = [(t, title) for t, title in starts if t < total_duration]
+        logger.info(f"[Chapters] Generated {len(starts)} chapter timestamps")
 
         # ✅ Fallback: En az 3 bölüm kontrolü
         if len(starts) < 3:
             logger.warning(f"[Chapters] Only {len(starts)} chapters, need 3+ for YouTube")
             
-            # ✅ Gerçek video süresini kullan (fallback değil!)
-            if audio_durations:
-                total = sum(audio_durations)
-            else:
-                total = cur_time if cur_time > 0 else 180.0  # Son çare fallback
-        
-            if total < 30:
-                logger.warning(f"[Chapters] Video too short ({total}s), skipping chapters")
+            # Gerçek video süresini kullan
+            if not total_duration or total_duration < 30:
+                logger.warning(f"[Chapters] Video too short ({total_duration}s), skipping chapters")
                 return ""
         
             # ✅ AKILLI fallback: Giriş/Orta/Sonuç
             starts = [
                 (0.0, "Introduction"),
-                (total * 0.4, "Main Content"),
-                (total * 0.8, "Conclusion")
+                (total_duration * 0.4, "Main Content"),
+                (total_duration * 0.8, "Conclusion")
             ]
 
         # ✅ Süre ≥10s şartını kontrol et
         merged: List[Tuple[float, str]] = []
         for i, (t, title) in enumerate(starts):
-            end_t = starts[i + 1][0] if i + 1 < len(starts) else cur_time
+            # Sonraki chapter'ın başlangıcı veya video sonu
+            end_t = starts[i + 1][0] if i + 1 < len(starts) else total_duration
             dur = max(0.0, end_t - t)
         
             # İlk chapter hariç, <10s olan chapter'ları önceki ile birleştir
@@ -231,9 +235,8 @@ class YouTubeUploader:
                 merged = [(0.0, "Introduction")]
 
         # Minimum 3 satır kontrolü (son çare)
-        while len(merged) < 3 and cur_time > 30:
-            total = cur_time if cur_time > 0 else 180.0
-            step = total / (len(merged) + 1)
+        while len(merged) < 3 and total_duration > 30:
+            step = total_duration / (len(merged) + 1)
             merged.append((step * len(merged), f"Part {len(merged)}"))
             merged.sort(key=lambda x: x[0])
 
@@ -241,6 +244,16 @@ class YouTubeUploader:
         if len(merged) < 3:
             logger.warning(f"[Chapters] Could not create 3 chapters, skipping")
             return ""
+        
+        # ✅ FINAL VALIDATION: Video süresini aşan timestamp'leri temizle
+        merged = [(t, title) for t, title in merged if t < total_duration]
+        
+        # Son chapter'ı video sonuna çok yakınsa çıkar (son 5 saniye)
+        if merged and len(merged) > 3:
+            last_time = merged[-1][0]
+            if total_duration - last_time < 5.0:
+                merged = merged[:-1]
+                logger.info(f"[Chapters] Removed last chapter (too close to end)")
 
         # YouTube formatı: 00:00 Title
         for t, title in merged:
