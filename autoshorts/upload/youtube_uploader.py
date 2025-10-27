@@ -113,104 +113,149 @@ class YouTubeUploader:
             raise
 
     # -------------------- Chapters builder (top of description) -------------------- #
-    def _chapter_block_at_top(
-        self,
+# -*- coding: utf-8 -*-
+"""
+YouTube Uploader - FIXED VERSION V2
+✅ Chapter başlıkları KISA (sadece title, description YOK)
+✅ Timestamp hesaplama DÜZELTİLDİ
+✅ Fallback sistem daha akıllı
+"""
+
+import logging
+from typing import Dict, Any, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
+
+    def _chapter_block_at_top_fixed(
         chapters: Optional[List[Dict[str, Any]]],
         audio_durations: Optional[List[float]],
     ) -> str:
         """
-        ✅ FIXED: YouTube manual chapters gereksinimleri:
-        - İlk satır mutlaka 00:00 ile başlamalı
-        - En az 3 satır
-        - Her bölüm ≥ 10s
-        - Timestamp hesaplama düzeltildi: chapter ÖNCE kaydedilir, SONRA zaman eklenir
+        ✅ FIXED: YouTube manual chapters
+        - Chapter başlıkları KISA (max 50 karakter)
+        - Timestamp hesaplama düzeltildi
+        - Fallback daha akıllı
         """
         lines: List[str] = []
-
+    
         # Eğer veri yoksa boş dön
         if not chapters or not audio_durations:
+            logger.warning("[Chapters] No data - skipping chapters")
             return ""
-
-        # ✅ DÜZELTME: Bölüm başlangıç zamanlarını hesapla
-        starts: List[Tuple[float, str, int, int]] = []  # (start_sec, title, s_idx, e_idx)
+    
+        # ✅ Bölüm başlangıç zamanlarını hesapla
+        starts: List[Tuple[float, str]] = []
         cur_time = 0.0
+        
         for ch in chapters:
-            title = (ch.get("title") or "Chapter").strip() or "Chapter"
+            # ✅ Sadece TITLE kullan, description KULLANMA
+            title_raw = ch.get("title", "Chapter").strip()
+            
+            # ✅ Başlık çok uzunsa kısalt (max 50 karakter)
+            if len(title_raw) > 50:
+                # Tire veya iki nokta varsa orada kes
+                if ":" in title_raw:
+                    title = title_raw.split(":")[0].strip()
+                elif "–" in title_raw or "—" in title_raw:
+                    title = title_raw.split("–")[0].split("—")[0].strip()
+                else:
+                    # Son kelimede kes
+                    title = title_raw[:47] + "..."
+            else:
+                title = title_raw
+        
+            # Chapter indeksleri
             s_idx = int(ch.get("start_sentence", 0))
             e_idx = int(ch.get("end_sentence", s_idx))
             
-            # ✅ FIX: Chapter başlangıcı MEVCUT zamanda kaydedilmeli (cümle başlamadan ÖNCE)
-            starts.append((cur_time, title, s_idx, e_idx))
-            
+            # ✅ FIX: Chapter başlangıcı MEVCUT zamanda kaydet
+            starts.append((cur_time, title))
+        
             # ✅ Şimdi bu bölümün toplam süresini ekle (SONRAKİ chapter için)
             for i in range(s_idx, min(e_idx + 1, len(audio_durations))):
-                cur_time += float(audio_durations[i])
-
-        # En az 3 bölüm değilse: eşit böl
-        if len(starts) < 3 and audio_durations:
-            total = sum(audio_durations)
-            thirds = [0.0, total / 3.0, 2 * total / 3.0]
-            starts = [(thirds[0], "Intro", 0, 0), (thirds[1], "Middle", 0, 0), (thirds[2], "Conclusion", 0, 0)]
-
-        # Süre ≥10s şartını kontrol et, kısa olanları birleştir
+                if i < len(audio_durations):
+                    cur_time += float(audio_durations[i])
+    
+        # ✅ Fallback: En az 3 bölüm kontrolü
+        if len(starts) < 3:
+            logger.warning(f"[Chapters] Only {len(starts)} chapters, need 3+ for YouTube")
+            
+            # ✅ Gerçek video süresini kullan (fallback değil!)
+            if audio_durations:
+                total = sum(audio_durations)
+            else:
+                total = cur_time if cur_time > 0 else 180.0  # Son çare fallback
+        
+            if total < 30:
+                logger.warning(f"[Chapters] Video too short ({total}s), skipping chapters")
+                return ""
+        
+            # ✅ AKILLI fallback: Giriş/Orta/Sonuç
+            starts = [
+                (0.0, "Introduction"),
+                (total * 0.4, "Main Content"),
+                (total * 0.8, "Conclusion")
+            ]
+    
+        # ✅ Süre ≥10s şartını kontrol et
         merged: List[Tuple[float, str]] = []
-        for i, (t, title, _, _) in enumerate(starts):
-            # son başlıksa kalan süre
+        for i, (t, title) in enumerate(starts):
             end_t = starts[i + 1][0] if i + 1 < len(starts) else cur_time
             dur = max(0.0, end_t - t)
-            if i > 0 and dur < 10.0:
-                # önceki başlıkla birleştir
-                prev_t, prev_title = merged[-1]
-                merged[-1] = (prev_t, prev_title)  # yalnızca devam
+        
+            # İlk chapter hariç, <10s olan chapter'ları önceki ile birleştir
+            if i > 0 and dur < 10.0 and merged:
+                # Önceki chapter'a dahil et (başlığı güncelleme)
                 continue
+        
             merged.append((t, title))
-
+    
         # İlk satır 00:00 garanti
         if not merged or merged[0][0] != 0.0:
             if merged:
                 merged[0] = (0.0, merged[0][1])
             else:
-                merged = [(0.0, "Intro")]
-
-        # Minimum 3 satır
-        while len(merged) < 3:
-            # kaba eşit aralıklar
+                merged = [(0.0, "Introduction")]
+    
+    # Minimum 3 satır kontrolü (son çare)
+        while len(merged) < 3 and cur_time > 30:
             total = cur_time if cur_time > 0 else 180.0
             step = total / (len(merged) + 1)
-            merged.append((step * len(merged), f"Part {len(merged)+1}"))
+            merged.append((step * len(merged), f"Part {len(merged)}"))
             merged.sort(key=lambda x: x[0])
-
-        # YouTube güvenli format: 00:00 Title
+    
+    # Final kontrol: Hala 3'ten az ve çok kısa video
+        if len(merged) < 3:
+            logger.warning(f"[Chapters] Could not create 3 chapters, skipping")
+            return ""
+    
+    # YouTube formatı: 00:00 Title
         for t, title in merged:
-            lines.append(f"{self._fmt_ts(t)} {title}")
-
+            lines.append(f"{_fmt_ts(t)} {title}")
+    
+        logger.info(f"[Chapters] Created {len(lines)} chapters")
+        for line in lines:
+            logger.info(f"[Chapters]   {line}")
+    
         return "\n".join(lines)
 
-    def _fmt_ts(self, seconds: float) -> str:
+
+    def _fmt_ts(seconds: float) -> str:
         """
-        ✅ FIXED: Format seconds to YouTube timestamp format.
         YouTube timestamp format:
-        - Always shows MM:SS minimum
-        - If hours exist, shows H:MM:SS (no leading zero on hours)
-        
-        Examples:
-        - 45s   → 00:45
-        - 125s  → 02:05
-        - 3665s → 1:01:05  (not 01:01:05)
-        - 7325s → 2:02:05
+        - Always MM:SS minimum
+        - If hours: H:MM:SS (no leading zero on hour)
         """
         total = int(max(0, round(seconds)))
         h = total // 3600
         m = (total % 3600) // 60
         s = total % 60
-        
-        # ✅ YouTube format rules:
-        # - Always MM:SS minimum (even for 5 seconds → 00:05)
-        # - If hours exist, H:MM:SS (single digit hour is OK, no leading zero)
+    
         if h > 0:
-            return f"{h}:{m:02d}:{s:02d}"  # e.g., "1:30:45" or "2:00:00"
+            return f"{h}:{m:02d}:{s:02d}"
         else:
-            return f"{m:02d}:{s:02d}"  # e.g., "00:45" or "12:30"
+            return f"{m:02d}:{s:02d}"
     
     # -------------------- SEO tail (chapters sonrası) -------------------- #
     def _seo_tail(self, description: str, title: str, tags: Optional[List[str]], topic: Optional[str]) -> str:
