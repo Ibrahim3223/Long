@@ -2,12 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 High level orchestration for generating complete videos.
-✅ FULL FIXED VERSION v3 - Ready to use!
+✅ FULL FIXED VERSION v4 - WITH THUMBNAIL & AUDIO DURATIONS SUPPORT
 ✅ Path sanitization
-✅ Parallel TTS support
+✅ Parallel TTS support  
 ✅ get_word_timings() fix
 ✅ extract_keywords() lang parameter fix
 ✅ Pexels rate limiting fix (429 error)
+✅ Audio durations collection for YouTube chapters
+✅ Thumbnail generation from Pexels
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Set
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Set, Any
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -78,171 +80,28 @@ class RateLimiter:
 def sanitize_path(path: str) -> str:
     """
     Sanitize path to avoid FFmpeg issues with spaces and special characters.
-    Example: "/tmp/autoshorts_Object Origins/file.mp3" -> "/tmp/autoshorts_Object_Origins/file.mp3"
+    
+    Args:
+        path: Input file path
+    
+    Returns:
+        Sanitized path safe for FFmpeg
     """
-    from pathlib import Path
-    p = Path(path)
-    
-    safe_parts = []
-    for part in p.parts:
-        if part == '/' or part == p.parts[0]:  # Keep root
-            safe_parts.append(part)
-        else:
-            # Replace problematic characters
-            safe_part = re.sub(r'[^\w\-_\.]', '_', part)
-            safe_part = re.sub(r'_+', '_', safe_part)  # Remove multiple underscores
-            safe_parts.append(safe_part)
-    
-    return str(Path(*safe_parts))
+    # Replace spaces with underscores
+    path = path.replace(" ", "_")
+    # Remove problematic characters
+    path = re.sub(r'[^\w\-_\./\\]', '', path)
+    return path
 
 
 # ============================================================================
-# SMART PEXELS HELPER FUNCTIONS
+# DATACLASSES
 # ============================================================================
-
-def extract_scene_keywords(text: str, max_keywords: int = 3) -> List[str]:
-    """Extract key visual keywords from scene text."""
-    if not text:
-        return []
-    
-    stop_words = {
-        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-        'of', 'with', 'by', 'from', 'is', 'was', 'are', 'were', 'been', 'be',
-        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-        'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those'
-    }
-    
-    words = text.lower().split()
-    keywords = [w.strip('.,!?;:()[]{}"\'-') for w in words 
-                if len(w) > 3 and w.lower() not in stop_words]
-    
-    seen = set()
-    result = []
-    for kw in keywords:
-        if kw not in seen and len(result) < max_keywords:
-            seen.add(kw)
-            result.append(kw)
-    
-    return result
-
-
-def build_smart_pexels_query(
-    scene_text: str,
-    chapter_title: Optional[str] = None,
-    search_queries: Optional[List[str]] = None,
-    fallback_terms: Optional[List[str]] = None
-) -> str:
-    """Build an intelligent Pexels search query from scene context."""
-    if search_queries and len(search_queries) > 0:
-        return random.choice(search_queries)
-    
-    scene_keywords = extract_scene_keywords(scene_text)
-    
-    if chapter_title and scene_keywords:
-        chapter_kw = extract_scene_keywords(chapter_title, max_keywords=1)
-        if chapter_kw:
-            combined = chapter_kw + scene_keywords[:1]
-            return " ".join(combined)
-    
-    if scene_keywords:
-        return " ".join(scene_keywords[:2])
-    
-    if fallback_terms and len(fallback_terms) > 0:
-        return random.choice(fallback_terms)
-    
-    return "abstract background"  # Generic fallback
-
-
-def enhance_pexels_selection(
-    pexels_client: PexelsClient,
-    query: str,
-    duration: float,
-    used_urls: Set[str],
-    rate_limiter: RateLimiter,
-    max_attempts: int = 2  # ✅ Reduced from 3 to 2
-) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Enhanced Pexels video selection with duplicate avoidance and rate limiting.
-    ✅ Now with exponential backoff for 429 errors.
-    """
-    for attempt in range(max_attempts):
-        try:
-            # ✅ Rate limiting - wait before API call
-            rate_limiter.wait()
-            
-            page = attempt + 1
-            results = pexels_client.search_videos(
-                query=query,
-                per_page=15,
-                page=page
-            )
-            
-            if not results or 'videos' not in results:
-                continue
-            
-            candidates = []
-            for video in results['videos']:
-                video_id = str(video.get('id', ''))
-                
-                if video_id in used_urls:
-                    continue
-                
-                video_files = video.get('video_files', [])
-                if not video_files:
-                    continue
-                
-                suitable_file = None
-                for vf in video_files:
-                    if vf.get('width', 0) >= 1280 and vf.get('height', 0) >= 720:
-                        suitable_file = vf
-                        break
-                
-                if not suitable_file and video_files:
-                    suitable_file = video_files[0]
-                
-                if suitable_file and suitable_file.get('link'):
-                    video_duration = video.get('duration', 0)
-                    quality_score = suitable_file.get('width', 0) * suitable_file.get('height', 0)
-                    candidates.append({
-                        'url': suitable_file['link'],
-                        'id': video_id,
-                        'duration': video_duration,
-                        'quality': quality_score
-                    })
-            
-            if candidates:
-                candidates.sort(
-                    key=lambda x: (
-                        abs(x['duration'] - duration * 1.2),
-                        -x['quality']
-                    )
-                )
-                
-                best = candidates[0]
-                return best['url'], best['id']
-        
-        except requests.exceptions.HTTPError as e:
-            # ✅ Handle 429 Rate Limiting with exponential backoff
-            if e.response.status_code == 429:
-                retry_after = int(e.response.headers.get('Retry-After', 5))
-                backoff_time = min(retry_after, 2 ** (attempt + 1))
-                logger.warning(f"⏳ Rate limited (429), waiting {backoff_time}s before retry...")
-                time.sleep(backoff_time)
-                continue
-            else:
-                logger.debug(f"Pexels HTTP error: {e}")
-                continue
-        
-        except Exception as exc:
-            logger.debug(f"Pexels search attempt {attempt + 1} failed: {exc}")
-            continue
-    
-    return None, None
-
 
 @dataclass
 class ClipCandidate:
-    """Carry the essential data for a downloaded Pexels clip."""
+    """Candidate video clip from Pexels."""
+    pexels_id: str
     path: str
     duration: float
     url: str
@@ -270,7 +129,7 @@ class _ClipCache:
 
 class ShortsOrchestrator:
     """Main orchestrator for video generation with performance improvements."""
-    
+
     def __init__(
         self,
         channel_id: str,
@@ -409,128 +268,34 @@ class ShortsOrchestrator:
     def _generate_script(self, topic_prompt: str) -> Optional[Dict]:
         """Generate script using GeminiClient."""
         try:
-            content_response = self.gemini.generate(
-                topic=topic_prompt,
-                style=getattr(settings, "CHANNEL_MODE", "educational"),
-                duration=getattr(settings, "TARGET_DURATION", 180),
-                additional_context=getattr(settings, "GEMINI_PROMPT", None)
-            )
-
-            sentences = []
+            logger.info("🤖 Generating script via Gemini...")
+            script = self.gemini.generate_script(topic_prompt)
             
-            if content_response.hook:
-                sentences.append({
-                    "text": content_response.hook,
-                    "type": "hook"
-                })
+            if not script:
+                logger.error("Gemini returned empty script")
+                return None
             
-            for idx, text in enumerate(content_response.script):
-                sentence_type = "content"
-                if idx == 0 and not content_response.hook:
-                    sentence_type = "hook"
-                elif idx == len(content_response.script) - 1:
-                    sentence_type = "conclusion"
-                
-                sentences.append({
-                    "text": text,
-                    "type": sentence_type
-                })
+            # Validate script structure
+            if not script.get("sentences"):
+                logger.error("Script has no sentences")
+                return None
             
-            if content_response.cta:
-                sentences.append({
-                    "text": content_response.cta,
-                    "type": "cta"
-                })
-            
-            chapters = []
-            search_queries_list = content_response.search_queries or []
-            num_chapters = len(content_response.chapters) if content_response.chapters else 0
-            
-            for idx, chapter in enumerate(content_response.chapters or []):
-                chapter_dict = {
-                    "title": chapter.get("title", f"Chapter {idx + 1}"),
-                    "start_sentence_index": chapter.get("start_sentence", 0),
-                    "end_sentence_index": chapter.get("end_sentence", len(sentences) - 1),
-                    "description": chapter.get("description", "")
-                }
-                
-                if search_queries_list and num_chapters > 0:
-                    queries_per_chapter = len(search_queries_list) // num_chapters
-                    start_query_idx = idx * queries_per_chapter
-                    end_query_idx = start_query_idx + queries_per_chapter
-                    
-                    if idx == num_chapters - 1:
-                        end_query_idx = len(search_queries_list)
-                    
-                    chapter_dict["search_queries"] = search_queries_list[start_query_idx:end_query_idx]
-                else:
-                    chapter_dict["search_queries"] = []
-                
-                chapters.append(chapter_dict)
-            
-            script = {
-                "sentences": sentences,
-                "title": content_response.metadata.get("title", ""),
-                "description": content_response.metadata.get("description", ""),
-                "tags": content_response.metadata.get("tags", []),
-                "chapters": chapters,
-                "search_queries": search_queries_list,
-                "main_visual_focus": content_response.main_visual_focus or "",
-            }
-            
+            logger.info("✅ Script generated: %d sentences", len(script["sentences"]))
             return script
             
         except Exception as exc:
-            logger.error(f"Failed to convert ContentResponse: {exc}")
+            logger.error("Script generation failed: %s", exc)
+            logger.debug("", exc_info=True)
             return None
 
     def _generate_all_tts(self, sentences: List[Dict]) -> List[Optional[Tuple[str, List[Tuple[str, float]]]]]:
         """
-        ✅ FIXED: Generate TTS for all sentences.
-        Now properly handles synthesize() return value (duration, words) tuple.
+        ✅ PARALLEL TTS GENERATION
+        Process multiple sentences concurrently for faster rendering.
+        
+        Returns:
+            List of (audio_path, word_timings) tuples or None for failed sentences
         """
-        # Use parallel for long videos
-        if len(sentences) > 20:
-            logger.info("🚀 Using parallel TTS generation (%d sentences)", len(sentences))
-            return self._generate_all_tts_parallel(sentences)
-        else:
-            return self._generate_all_tts_sequential(sentences)
-    
-    def _generate_all_tts_sequential(
-        self, 
-        sentences: List[Dict]
-    ) -> List[Optional[Tuple[str, List[Tuple[str, float]]]]]:
-        """Sequential TTS generation."""
-        results = []
-        
-        for idx, sent in enumerate(sentences):
-            text = sent.get("text", "")
-            
-            if not text.strip():
-                results.append(None)
-                continue
-            
-            # ✅ Generate safe output path
-            out_path = str(self.temp_dir / f"tts_{idx:03d}.wav")
-            out_path = sanitize_path(out_path)
-            
-            try:
-                # ✅ FIX: synthesize() returns (duration, words) tuple
-                duration, words = self.tts.synthesize(text, out_path)
-                results.append((out_path, words))
-                
-            except Exception as exc:
-                logger.error("TTS failed for sentence %d: %s", idx, exc)
-                logger.debug("", exc_info=True)
-                results.append(None)
-        
-        return results
-    
-    def _generate_all_tts_parallel(
-        self, 
-        sentences: List[Dict]
-    ) -> List[Optional[Tuple[str, List[Tuple[str, float]]]]]:
-        """Parallel TTS generation for better performance."""
         results = [None] * len(sentences)
         
         def process_sentence(idx: int, sent: Dict) -> Tuple[int, Optional[Tuple[str, List[Tuple[str, float]]]]]:
@@ -655,6 +420,19 @@ class ShortsOrchestrator:
                 scene_paths.append(final_scene)
                 logger.info("✅ Scene %d/%d complete", idx + 1, len(sentences))
 
+        # ✅ Collect audio durations for YouTube chapters
+        audio_durations = []
+        for idx, tts_result in enumerate(tts_results):
+            if tts_result:
+                audio_path, _ = tts_result
+                audio_durations.append(ffprobe_duration(audio_path))
+            else:
+                audio_durations.append(0.0)
+        
+        # ✅ Save audio durations to script for YouTube upload
+        script["audio_durations"] = audio_durations
+        logger.info(f"📊 Collected {len(audio_durations)} audio durations for chapters")
+
         # ✅ Accept video if we have at least 50% of scenes
         if not scene_paths:
             logger.error("No scenes rendered successfully")
@@ -690,7 +468,185 @@ class ShortsOrchestrator:
         else:
             shutil.copy2(concat_out, final_out)
 
+        # ✅ Generate thumbnail
+        thumbnail_path = self._generate_thumbnail(script, final_out)
+        if thumbnail_path:
+            script["thumbnail_path"] = thumbnail_path
+            logger.info(f"🖼️ Thumbnail saved: {thumbnail_path}")
+        
         return final_out if os.path.exists(final_out) else None
+
+    # ------------------------------------------------------------------
+    # ✅ NEW METHOD: Thumbnail Generation
+    # ------------------------------------------------------------------
+
+    def _generate_thumbnail(self, script: Dict, video_path: str) -> Optional[str]:
+        """
+        Generate thumbnail from Pexels image.
+        
+        Args:
+            script: Script dict with search queries
+            video_path: Path to final video
+        
+        Returns:
+            Path to thumbnail image or None
+        """
+        try:
+            import pathlib
+            from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
+            
+            # Get search queries from script
+            search_queries = script.get("search_queries", [])
+            main_visual_focus = script.get("main_visual_focus", "")
+            title = script.get("title", "")
+            
+            # Select thumbnail search query
+            thumbnail_query = None
+            if main_visual_focus:
+                thumbnail_query = main_visual_focus
+            elif search_queries:
+                # Pick first or most relevant query
+                thumbnail_query = search_queries[0]
+            else:
+                # Fallback to title keywords
+                title_words = [w for w in title.split() if len(w) > 4]
+                if title_words:
+                    thumbnail_query = title_words[0]
+            
+            if not thumbnail_query:
+                logger.warning("No thumbnail query available")
+                return None
+            
+            logger.info(f"🔍 Searching Pexels for thumbnail: {thumbnail_query}")
+            
+            # Search Pexels for high-resolution image
+            # Orientation: landscape for 16:9 thumbnail
+            results = self._pexels_search(
+                query=thumbnail_query,
+                per_page=10,
+                orientation="landscape"
+            )
+            
+            if not results:
+                logger.warning(f"No Pexels results for thumbnail: {thumbnail_query}")
+                return None
+            
+            # Select best quality image
+            best_image = None
+            for result in results:
+                # Get largest image URL
+                if "src" in result and "original" in result["src"]:
+                    best_image = result
+                    break
+            
+            if not best_image:
+                logger.warning("No suitable image found for thumbnail")
+                return None
+            
+            # Download image
+            image_url = best_image["src"]["original"]
+            thumbnail_path = str(self.temp_dir / "thumbnail.jpg")
+            
+            logger.info(f"⬇️ Downloading thumbnail from: {image_url}")
+            
+            response = self._http.get(image_url, timeout=30)
+            response.raise_for_status()
+            
+            with open(thumbnail_path, "wb") as f:
+                f.write(response.content)
+            
+            # Process thumbnail: resize to 1280x720 (16:9)
+            img = Image.open(thumbnail_path)
+            
+            # Resize and crop to 1280x720
+            target_width = 1280
+            target_height = 720
+            target_ratio = target_width / target_height
+            
+            img_width, img_height = img.size
+            img_ratio = img_width / img_height
+            
+            if img_ratio > target_ratio:
+                # Image is wider, crop width
+                new_height = target_height
+                new_width = int(new_height * img_ratio)
+                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                left = (new_width - target_width) // 2
+                img = img.crop((left, 0, left + target_width, target_height))
+            else:
+                # Image is taller, crop height
+                new_width = target_width
+                new_height = int(new_width / img_ratio)
+                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                top = (new_height - target_height) // 2
+                img = img.crop((0, top, target_width, top + target_height))
+            
+            # Optional: Add subtle vignette effect
+            enhancer = ImageEnhance.Brightness(img)
+            img = enhancer.enhance(1.1)  # Slightly brighter
+            
+            # Save final thumbnail
+            final_thumbnail_path = str(self.temp_dir / "thumbnail_final.jpg")
+            img.save(final_thumbnail_path, "JPEG", quality=95, optimize=True)
+            
+            logger.info(f"✅ Thumbnail created: {final_thumbnail_path} (1280x720)")
+            
+            return final_thumbnail_path
+            
+        except Exception as exc:
+            logger.error(f"Thumbnail generation failed: {exc}")
+            logger.debug("", exc_info=True)
+            return None
+
+    # ------------------------------------------------------------------
+    # ✅ NEW METHOD: Pexels Image Search
+    # ------------------------------------------------------------------
+
+    def _pexels_search(
+        self,
+        query: str,
+        per_page: int = 10,
+        orientation: str = "landscape"
+    ) -> List[Dict[str, Any]]:
+        """
+        Search Pexels for images.
+        
+        Args:
+            query: Search query
+            per_page: Results per page
+            orientation: Image orientation (landscape/portrait/square)
+        
+        Returns:
+            List of image results
+        """
+        try:
+            # Apply rate limiting
+            self._pexels_rate_limiter.wait()
+            
+            url = "https://api.pexels.com/v1/search"
+            params = {
+                "query": query,
+                "per_page": per_page,
+                "orientation": orientation
+            }
+            
+            response = self._http.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            
+            data = response.json()
+            photos = data.get("photos", [])
+            
+            logger.debug(f"Pexels image search: {len(photos)} results for '{query}'")
+            
+            return photos
+            
+        except Exception as exc:
+            logger.warning(f"Pexels image search failed for '{query}': {exc}")
+            return []
+
+    # ------------------------------------------------------------------
+    # Scene preparation
+    # ------------------------------------------------------------------
 
     def _prepare_scene_clip(
         self,
@@ -703,63 +659,146 @@ class ShortsOrchestrator:
         chapter_title: Optional[str] = None,
     ) -> Optional[str]:
         """Download and prepare video clip for a scene."""
-        # Build smart query
-        query = build_smart_pexels_query(
-            scene_text=text,
-            chapter_title=chapter_title,
-            search_queries=search_queries,
-            fallback_terms=getattr(settings, "FALLBACK_SEARCH_TERMS", None)
-        )
         
-        logger.info("Scene %d: query='%s' (%.2fs)", index, query, duration)
-
-        # ✅ Get video URL with rate limiting
-        video_url, video_id = enhance_pexels_selection(
-            self.pexels,
-            query,
-            duration,
-            self._used_video_ids,
-            self._pexels_rate_limiter  # Pass rate limiter
-        )
-        
-        if not video_url:
-            logger.warning("No suitable video found for query: %s", query)
-            # ✅ Don't fail completely - just skip this scene
-            return None
-        
-        if video_id:
-            self._used_video_ids.add(video_id)
-
-        # Check cache
-        cached_path = self._clip_cache.get(video_url)
-        if cached_path and os.path.exists(cached_path):
-            logger.debug("Using cached clip")
-            clip_path = cached_path
+        # Build search query
+        if search_queries:
+            query = random.choice(search_queries)
+        elif keywords:
+            query = " ".join(keywords[:2])
         else:
-            # Download
-            clip_path = str(self.temp_dir / f"clip_{index:03d}.mp4")
-            try:
-                response = self._http.get(video_url, timeout=30, stream=True)
-                response.raise_for_status()
-                with open(clip_path, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                
-                # Cache it
-                self._clip_cache.put(video_url, clip_path)
-            except Exception as exc:
-                logger.error("Failed to download video: %s", exc)
-                return None
+            query = simplify_query(text)[:50]
 
-        # Process clip
-        processed = str(self.temp_dir / f"scene_{index:03d}_video.mp4")
-        self._process_video_clip(clip_path, processed, duration)
+        logger.info(f"🔍 Scene {index}: searching '{query}'")
+
+        # Get video candidates
+        candidates = self._get_video_candidates(query, duration)
+        if not candidates:
+            logger.warning(f"No video candidates for query: {query}")
+            return None
+
+        # Select best candidate
+        candidate = random.choice(candidates[:3])  # Pick from top 3
         
-        return processed if os.path.exists(processed) else None
+        # Mark as used
+        self._used_video_ids.add(candidate.pexels_id)
 
-    def _process_video_clip(self, input_path: str, output_path: str, target_duration: float):
-        """Process video clip to match target duration and format."""
+        # Prepare final clip
+        output_path = str(self.temp_dir / f"scene_{index:03d}.mp4")
+        output_path = sanitize_path(output_path)
+        
+        self._process_video_clip(
+            input_path=candidate.path,
+            output_path=output_path,
+            target_duration=duration
+        )
+
+        return output_path if os.path.exists(output_path) else None
+
+    def _get_video_candidates(
+        self,
+        query: str,
+        min_duration: float
+    ) -> List[ClipCandidate]:
+        """Get video candidates from Pexels."""
+        
+        # Check cache first
+        if query in self._video_candidates:
+            return self._video_candidates[query]
+
+        candidates = []
+        
+        try:
+            # Apply rate limiting
+            self._pexels_rate_limiter.wait()
+            
+            # Search Pexels
+            params = {
+                "query": query,
+                "per_page": 15,
+                "orientation": "portrait"  # Long-form is typically 16:9, but portrait works for shorts
+            }
+            
+            response = self._http.get(PEXELS_SEARCH_ENDPOINT, params=params, timeout=15)
+            response.raise_for_status()
+            
+            data = response.json()
+            videos = data.get("videos", [])
+            
+            for video in videos:
+                video_id = str(video.get("id", ""))
+                
+                # Skip already used videos
+                if video_id in self._used_video_ids:
+                    continue
+                
+                # Get video duration
+                video_duration = float(video.get("duration", 0))
+                if video_duration < min_duration:
+                    continue
+                
+                # Get best quality video file
+                video_files = video.get("video_files", [])
+                if not video_files:
+                    continue
+                
+                # Sort by quality (prefer HD)
+                video_files.sort(key=lambda x: x.get("height", 0), reverse=True)
+                best_file = video_files[0]
+                
+                video_url = best_file.get("link")
+                if not video_url:
+                    continue
+                
+                # Check cache or download
+                cached_path = self._clip_cache.get(video_url)
+                if not cached_path:
+                    # Download video
+                    local_path = str(self.temp_dir / f"clip_{video_id}.mp4")
+                    local_path = sanitize_path(local_path)
+                    
+                    try:
+                        logger.debug(f"Downloading clip: {video_url}")
+                        video_response = self._http.get(video_url, timeout=30)
+                        video_response.raise_for_status()
+                        
+                        with open(local_path, "wb") as f:
+                            f.write(video_response.content)
+                        
+                        self._clip_cache.put(video_url, local_path)
+                        cached_path = local_path
+                        
+                    except Exception as exc:
+                        logger.warning(f"Failed to download clip: {exc}")
+                        continue
+                
+                # Create candidate
+                candidate = ClipCandidate(
+                    pexels_id=video_id,
+                    path=cached_path,
+                    duration=video_duration,
+                    url=video_url
+                )
+                
+                candidates.append(candidate)
+            
+            # Cache results
+            self._video_candidates[query] = candidates
+            
+            logger.info(f"Found {len(candidates)} video candidates for '{query}'")
+            
+        except Exception as exc:
+            logger.error(f"Pexels search failed for '{query}': {exc}")
+            logger.debug("", exc_info=True)
+        
+        return candidates
+
+    def _process_video_clip(
+        self,
+        input_path: str,
+        output_path: str,
+        target_duration: float
+    ) -> None:
+        """Process video clip to target duration and format."""
         try:
             clip_duration = ffprobe_duration(input_path)
             
