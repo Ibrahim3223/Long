@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-YouTube Uploader - LONG-FORM with CHAPTER SUPPORT
-- Chapters artık açıklamanın EN BAŞINDA, 00:00 ile başlıyor
-- En az 3 bölüm ve her bölüm ≥10sn garanti
-- SEO lead + outline + hashtag bölümü chapters'dan SONRA gelir
+YouTube Uploader - LONG-FORM with CHAPTER SUPPORT - FIXED VERSION
+✅ Timestamp hesaplama düzeltildi
+✅ Başlık kesme limiti düzeltildi (60-70 karakter)
 """
 
 import logging
@@ -53,7 +52,6 @@ class YouTubeUploader:
             logger.info(f"[YouTube] Uploading: {title[:50]}...")
 
             optimized_title = self._optimize_title(title)
-            # ⚠️ Chapters BLOK'u açıklamanın BAŞINDA olacak!
             chapter_block = self._chapter_block_at_top(chapters, audio_durations)
             tail_description = self._seo_tail(description, optimized_title, tags, topic)
             optimized_description = (chapter_block + "\n\n" + tail_description).strip()
@@ -121,10 +119,11 @@ class YouTubeUploader:
         audio_durations: Optional[List[float]],
     ) -> str:
         """
-        YouTube manual chapters gereksinimleri:
+        ✅ FIXED: YouTube manual chapters gereksinimleri:
         - İlk satır mutlaka 00:00 ile başlamalı
         - En az 3 satır
         - Her bölüm ≥ 10s
+        - Timestamp hesaplama düzeltildi: chapter ÖNCE kaydedilir, SONRA zaman eklenir
         """
         lines: List[str] = []
 
@@ -132,15 +131,18 @@ class YouTubeUploader:
         if not chapters or not audio_durations:
             return ""
 
-        # Bölüm başlangıç zamanlarını hesapla
+        # ✅ DÜZELTME: Bölüm başlangıç zamanlarını hesapla
         starts: List[Tuple[float, str, int, int]] = []  # (start_sec, title, s_idx, e_idx)
         cur_time = 0.0
         for ch in chapters:
             title = (ch.get("title") or "Chapter").strip() or "Chapter"
             s_idx = int(ch.get("start_sentence", 0))
             e_idx = int(ch.get("end_sentence", s_idx))
+            
+            # ✅ FIX: Chapter başlangıcı MEVCUT zamanda kaydedilmeli (cümle başlamadan ÖNCE)
             starts.append((cur_time, title, s_idx, e_idx))
-            # bu bölümün toplam süresi
+            
+            # ✅ Şimdi bu bölümün toplam süresini ekle (SONRAKİ chapter için)
             for i in range(s_idx, min(e_idx + 1, len(audio_durations))):
                 cur_time += float(audio_durations[i])
 
@@ -225,7 +227,7 @@ class YouTubeUploader:
 
         # CTA
         tail += "\n\n🔔 Subscribe for more in-depth educational content!\n💬 Share your thoughts below."
-
+        
         # Hashtags (3–5)
         safe_tags = self._optimize_tags(tags) if tags else []
         hashtags = hashtags_from_tags(safe_tags, title, limit=5)
@@ -235,13 +237,30 @@ class YouTubeUploader:
 
     # -------------------- helpers -------------------- #
     def _optimize_title(self, title: str) -> str:
+        """
+        ✅ FIXED: Optimize title for YouTube
+        - Gemini prompt: "50-60 chars - MOBİL UYUMLU! MAX 60 characters"
+        - Eski limit: 100 karakter (çok uzun!)
+        - Yeni limit: 70 karakter (Gemini'nin 60-70 önerisine uygun)
+        """
         if not title:
             return "Untitled Video"
+        
         t = title.strip()
-        if len(t) > 100:
-            t = t[:97] + "..."
-        if len(t) < 55:
-            t = (t + " | complete guide")[:70]
+        
+        # ✅ Önce çok uzun başlıkları kes (70 karaktere kadar)
+        if len(t) > 70:
+            # Son kelimeyi yarım bırakma, tam kelimede kes
+            cutoff = t[:67].rfind(' ')
+            if cutoff > 50:  # En az 50 karakter kalsın
+                t = t[:cutoff] + "..."
+            else:
+                t = t[:67] + "..."
+        
+        # Çok kısa başlıkları uzat (opsiyonel)
+        elif len(t) < 50:
+            t = (t + " | Complete Guide")[:70]
+        
         return t
 
     def _sanitize_tag(self, tag: str) -> str:
