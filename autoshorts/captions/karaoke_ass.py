@@ -1,55 +1,95 @@
 # -*- coding: utf-8 -*-
 """
-Karaoke ASS subtitle builder - LANDSCAPE (16:9)
-✅ BÜYÜK HARF - temiz ve okunabilir
-✅ SADE geçiş: beyaz → sarı (vurgu YOK)
-✅ Kelime bazlı \k timing (hassas senkronizasyon)
+CapCut-Style Viral Captions - NO KARAOKE
+✅ KALIN font (Impact/Bold)
+✅ BÜYÜK gölgelendirme
+✅ Sahne sahne CANLI renkler
+❌ Karaoke efekti YOK (kelime kelime değişim yok)
 """
 
 from typing import List, Dict, Optional, Any, Tuple
+import random
 
-# 16:9 alt yazı stilleri (alt hizalı)
+# CapCut tarzı viral renk paleti (ASS format: &H00BBGGRR)
+VIRAL_COLORS = {
+    "electric_yellow": "&H0000FFFF",   # Elektrik sarısı
+    "hot_pink": "&H00FF00FF",          # Pembe
+    "neon_cyan": "&H00FFFF00",         # Neon cyan
+    "lime_green": "&H0000FF00",        # Lime yeşil
+    "electric_blue": "&H00FF6600",     # Elektrik mavisi
+    "orange": "&H0000A5FF",            # Turuncu
+    "purple": "&H00FF00CC",            # Mor
+    "red": "&H000000FF",               # Kırmızı
+}
+
+# CapCut stili - MÜTHİŞ KALIN ve GÖLGELİ
 CAPTION_STYLES: Dict[str, Dict[str, Any]] = {
-    "clean_yellow": {
-        "name": "Clean Yellow",
-        "fontname": "Arial Black",
-        "fontsize_normal": 46,
-        "fontsize_hook": 52,
-        "outline": 5,
-        "shadow": "3",
-        "color_inactive": "&H00FFFFFF",  # Beyaz (başlangıç)
-        "color_active": "&H0000FFFF",    # Sarı (aktif)
-        "color_outline": "&H00000000",   # Siyah outline
-        "margin_v": 90
+    "capcut_impact": {
+        "name": "CapCut Impact",
+        "fontname": "Impact",  # ✅ En kalın font
+        "fontsize_normal": 52,  # ✅ Daha büyük
+        "fontsize_hook": 58,    # ✅ Hook için daha da büyük
+        "bold": -1,  # ✅ Extra bold (ASS'de -1 = çok kalın)
+        "outline": 7,  # ✅ Çok kalın outline (viral görünüm)
+        "shadow": "4",  # ✅ Derinlik için kalın gölge
+        "color_outline": "&H00000000",  # Siyah outline
+        "color_shadow": "&H80000000",   # Yarı saydam siyah gölge
+        "margin_v": 80  # Alt kısımdan mesafe
     },
-    "clean_cyan": {
-        "name": "Clean Cyan",
-        "fontname": "Arial Black",
-        "fontsize_normal": 44,
-        "fontsize_hook": 50,
-        "outline": 4,
+    "capcut_montserrat": {
+        "name": "CapCut Montserrat",
+        "fontname": "Montserrat Black",  # Modern ve kalın
+        "fontsize_normal": 50,
+        "fontsize_hook": 56,
+        "bold": -1,
+        "outline": 6,
         "shadow": "3",
-        "color_inactive": "&H00FFFFFF",
-        "color_active": "&H00FFFF00",    # Cyan
         "color_outline": "&H00000000",
-        "margin_v": 90
+        "color_shadow": "&H80000000",
+        "margin_v": 80
+    },
+    "capcut_bebas": {
+        "name": "CapCut Bebas",
+        "fontname": "Bebas Neue",  # Yüksek ve dikkat çekici
+        "fontsize_normal": 54,
+        "fontsize_hook": 60,
+        "bold": -1,
+        "outline": 7,
+        "shadow": "4",
+        "color_outline": "&H00000000",
+        "color_shadow": "&H80000000",
+        "margin_v": 80
     }
 }
 
+# Font fallback sırası (eğer yoksa)
+FONT_FALLBACK = [
+    "Impact",           # Windows/Linux
+    "Arial Black",      # Evrensel
+    "Montserrat Black", # Modern
+    "Bebas Neue",      # Viral
+    "Anton",           # Alternatif
+    "Oswald Bold",     # Alternatif
+    "Arial"            # Son çare
+]
+
 STYLE_WEIGHTS = {
-    "clean_yellow": 0.7,  # Daha çok sarı (en temiz)
-    "clean_cyan": 0.3,
+    "capcut_impact": 0.5,       # En popüler
+    "capcut_montserrat": 0.3,
+    "capcut_bebas": 0.2,
 }
 
 def get_random_style() -> str:
-    import random
+    """Rastgele CapCut stili seç"""
     return random.choices(list(STYLE_WEIGHTS.keys()), weights=list(STYLE_WEIGHTS.values()))[0]
 
-def get_style_info(style_name: str) -> Dict[str, Any]:
-    return CAPTION_STYLES.get(style_name, CAPTION_STYLES["clean_yellow"])
+def get_random_color() -> Tuple[str, str]:
+    """Rastgele viral renk seç (renk adı, ASS kodu)"""
+    color_name = random.choice(list(VIRAL_COLORS.keys()))
+    return color_name, VIRAL_COLORS[color_name]
 
-def list_all_styles() -> List[str]:
-    return list(CAPTION_STYLES.keys())
+def get_style_info(style_name: str) -> Dict[str, Any]:
+    return CAPTION_STYLES.get(style_name, CAPTION_STYLES["capcut_impact"])
 
 
 def build_karaoke_ass(
@@ -58,20 +98,34 @@ def build_karaoke_ass(
     words: List[Tuple[str, float]],
     is_hook: bool = False,
     style_name: Optional[str] = None,
-    **kwargs  # Geriye dönük uyumluluk
+    **kwargs
 ) -> str:
     """
-    ✅ SADE karaoke: BÜYÜK HARF, beyaz→sarı geçiş, kelime kelime \k
-    ❌ VURGU YOK, animasyon YOK
+    ✅ CapCut tarzı viral altyazı:
+    - BÜYÜK HARF
+    - KALIN font (Impact/Montserrat)
+    - Kalın outline + gölge
+    - Cümle başına RASTGELE canlı renk
+    - ❌ Karaoke efekti YOK (kelime kelime değişim yok)
     """
     # ✅ BÜYÜK HARF
     text = (text or "").strip().upper()
     
-    style = get_style_info(style_name or "clean_yellow")
+    # ✅ Rastgele stil seç (her cümle için)
+    if not style_name:
+        style_name = get_random_style()
+    style = get_style_info(style_name)
+    
+    # ✅ Rastgele viral renk seç (her cümle için farklı)
+    color_name, color_code = get_random_color()
+    
     fontsize = style["fontsize_hook"] if is_hook else style["fontsize_normal"]
 
+    # ✅ Font fallback ile dene
+    primary_font = style["fontname"]
+    
     header = f"""[Script Info]
-Title: Clean Uppercase Captions
+Title: CapCut Viral Captions - NO KARAOKE
 ScriptType: v4.00+
 PlayResX: 1920
 PlayResY: 1080
@@ -80,49 +134,28 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style['fontname']},{fontsize},{style['color_inactive']},{style['color_active']},{style['color_outline']},&H80000000,-1,0,0,0,100,100,1,0,1,{style['outline']},{style['shadow']},2,50,50,{style['margin_v']},1
+Style: Default,{primary_font},{fontsize},{color_code},{color_code},{style['color_outline']},{style['color_shadow']},{style['bold']},0,0,0,100,100,1.5,0,1,{style['outline']},{style['shadow']},2,50,50,{style['margin_v']},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-
-    if not words:
-        end_time = _ass_time(seg_dur)
-        body = f"Dialogue: 0,0:00:00.00,{end_time},Default,,0,0,0,,{text}\n"
-        return header + body
-
-    # ✅ Kelimeleri büyük harfe çevir
-    words = [(w.strip().upper(), d) for w, d in words if w and w.strip()]
     
-    # 3 kelimelik bloklar (uzun video için optimal)
-    chunk_size = 3
-    chunks: List[Tuple[List[Tuple[str, float]], float]] = []
-    cur, cur_d = [], 0.0
-    for w, d in words:
-        cur.append((w, float(d)))
-        cur_d += float(d)
-        if len(cur) >= chunk_size:
-            chunks.append((cur, cur_d))
-            cur, cur_d = [], 0.0
-    if cur:
-        chunks.append((cur, cur_d))
-
-    body_lines = []
-    t = 0.0
-    for chunk_words, dur in chunks:
-        start = _ass_time(t)
-        end = _ass_time(t + dur)
-        
-        # ✅ SADE \k akışı - VURGU YOK
-        karaoke_text = ""
-        for w, d in chunk_words:
-            cs = max(1, int(round(float(d) * 100)))  # Centisecond
-            karaoke_text += f"{{\\k{cs}}}{w} "
-        
-        body_lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{karaoke_text.strip()}\n")
-        t += dur
-
-    return header + "".join(body_lines)
+    # ✅ SADE ALTYAZI - Tüm metin aynı anda, aynı renkte
+    # Karaoke \k tag'leri YOK
+    end_time = _ass_time(seg_dur)
+    
+    # ✅ Metin çok uzunsa 2 satıra böl (daha okunabilir)
+    words_list = text.split()
+    if len(words_list) > 8:
+        # Ortadan böl
+        mid = len(words_list) // 2
+        line1 = " ".join(words_list[:mid])
+        line2 = " ".join(words_list[mid:])
+        text = f"{line1}\\N{line2}"  # \\N = yeni satır (ASS formatı)
+    
+    body = f"Dialogue: 0,0:00:00.00,{end_time},Default,,0,0,0,,{text}\n"
+    
+    return header + body
 
 
 def _ass_time(seconds: float) -> str:
@@ -132,3 +165,20 @@ def _ass_time(seconds: float) -> str:
     s = int(seconds % 60)
     cs = int((seconds % 1) * 100)
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+
+# ============================================================================
+# Geriye dönük uyumluluk için helper fonksiyonlar
+# ============================================================================
+
+def get_random_color_name() -> str:
+    """Renk adı döndür (debug için)"""
+    return random.choice(list(VIRAL_COLORS.keys()))
+
+def list_all_colors() -> List[str]:
+    """Tüm renkleri listele"""
+    return list(VIRAL_COLORS.keys())
+
+def list_all_styles() -> List[str]:
+    """Tüm stilleri listele"""
+    return list(CAPTION_STYLES.keys())
