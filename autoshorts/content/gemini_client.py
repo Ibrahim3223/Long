@@ -350,10 +350,14 @@ class GeminiClient:
                 json_str = json_str[:-3]
             json_str = json_str.strip()
 
+        # ✅ Clean invalid control characters
+        json_str = self._clean_json_string(json_str)
+
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
             logger.error(f"[Gemini] JSON parse error: {e}")
+            logger.debug(f"[Gemini] Problematic JSON (first 500 chars): {json_str[:500]}")
             raise ValueError(f"Invalid JSON: {e}")
 
         required = ["hook", "script", "cta", "search_queries", "main_visual_focus", "metadata"]
@@ -392,6 +396,63 @@ class GeminiClient:
             metadata=data["metadata"],
             chapters=data["chapters"]
         )
+
+    def _clean_json_string(self, json_str: str) -> str:
+        """
+        Clean JSON string from invalid control characters.
+        Preserves valid escape sequences but removes raw control characters.
+        """
+        # Replace problematic control characters with escaped versions
+        replacements = {
+            '\n': '\\n',   # Newline
+            '\r': '\\r',   # Carriage return
+            '\t': '\\t',   # Tab
+            '\b': '\\b',   # Backspace
+            '\f': '\\f',   # Form feed
+        }
+        
+        result = []
+        i = 0
+        in_string = False
+        escape_next = False
+        
+        while i < len(json_str):
+            char = json_str[i]
+            
+            # Track if we're inside a string
+            if char == '"' and not escape_next:
+                in_string = not in_string
+                result.append(char)
+                i += 1
+                continue
+            
+            # Track escape sequences
+            if char == '\\' and not escape_next:
+                escape_next = True
+                result.append(char)
+                i += 1
+                continue
+            
+            # If this was escaped, just add it
+            if escape_next:
+                result.append(char)
+                escape_next = False
+                i += 1
+                continue
+            
+            # If we're in a string and hit a control character, replace it
+            if in_string and char in replacements:
+                result.append(replacements[char])
+            # Remove other control characters (ASCII 0-31 except allowed ones)
+            elif in_string and ord(char) < 32 and char not in '\n\r\t':
+                # Skip invalid control characters
+                pass
+            else:
+                result.append(char)
+            
+            i += 1
+        
+        return ''.join(result)
 
     def _is_near_duplicate(self, a: str, b: str, thresh: float = 0.85) -> bool:
         na = re.sub(r"[^a-z0-9]+", " ", (a or "").lower()).strip()
