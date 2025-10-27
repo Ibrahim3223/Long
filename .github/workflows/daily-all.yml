@@ -2,7 +2,9 @@ name: Daily Long Videos (all channels)
 
 on:
   schedule:
-    - cron: "0 12 * * *"  # Once daily at 12:00 UTC
+    # Every day at 15:00 EST (20:00 UTC during winter, 19:00 UTC during summer DST)
+    # Using 20:00 UTC as standard time (EST = UTC-5, so 15:00 EST = 20:00 UTC)
+    - cron: "0 20 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -63,6 +65,8 @@ jobs:
                   "lang": ch.get("lang","en"),
                   "visibility": ch.get("visibility","public"),
                   "seed": str(ch.get("seed","0")),
+                  "topic": ch.get("topic", ""),
+                  "search_terms": ch.get("search_terms", []),
               })
           open("mx.json","w",encoding="utf-8").write(json.dumps({"include": chs}))
           PY
@@ -72,11 +76,10 @@ jobs:
     needs: make-matrix
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    
     strategy:
       fail-fast: false
-      max-parallel: 3
-      matrix: ${{ fromJSON(needs.make-matrix.outputs.matrix) }}
-    environment: ${{ matrix.env }}
+      matrix: ${{ fromJson(needs.make-matrix.outputs.matrix) }}
 
     steps:
       - name: Checkout
@@ -100,33 +103,26 @@ jobs:
           echo "✅ FFmpeg version:"
           ffmpeg -version | head -n1
 
-      # ---------- ENV export ----------
+      # ---------- Kanal ENV'leri ----------
       - name: Export channel variables (safe)
         shell: bash
         env:
-          MATRIX_NAME:           ${{ matrix.name }}
-          DEFAULT_LANG:          ${{ matrix.lang }}
-          DEFAULT_MODE:          ${{ matrix.mode }}
-          DEFAULT_VISIBILITY:    ${{ matrix.visibility }}
-          DEFAULT_SEED:          ${{ matrix.seed }}
-
-          VARS_TOPIC:            ${{ vars.TOPIC }}
-          VARS_LANG:             ${{ vars.LANG }}
-          VARS_MODE:             ${{ vars.MODE }}
-          VARS_VISIBILITY:       ${{ vars.VISIBILITY }}
-          VARS_ROTATION_SEED:    ${{ vars.ROTATION_SEED }}
-          VARS_SEARCH_TERMS:     ${{ vars.SEARCH_TERMS }}
-          VARS_GEMINI_PROMPT:    ${{ vars.GEMINI_PROMPT }}
-          VARS_TTS_RATE:         ${{ vars.TTS_RATE }}
-          VARS_TTS_VOICE:        ${{ vars.TTS_VOICE }}
-          VARS_BGM_URLS:         ${{ vars.BGM_URLS }}
+          CHANNEL_NAME:       ${{ matrix.name }}
+          CHANNEL_ENV:        ${{ matrix.env }}
+          DEFAULT_LANG:       ${{ matrix.lang }}
+          DEFAULT_MODE:       ${{ matrix.mode }}
+          DEFAULT_VISIBILITY: ${{ matrix.visibility }}
+          DEFAULT_SEED:       ${{ matrix.seed }}
+          DEFAULT_TOPIC:      ${{ matrix.topic }}
         run: |
           set -euo pipefail
-          CHANNEL_NAME="${MATRIX_NAME}"
-          LANG_VAL="${VARS_LANG:-$DEFAULT_LANG}"
-          MODE_VAL="${VARS_MODE:-$DEFAULT_MODE}"
-          VIS_VAL="${VARS_VISIBILITY:-$DEFAULT_VISIBILITY}"
-          SEED_VAL="${VARS_ROTATION_SEED:-$DEFAULT_SEED}"
+
+          # TTS voice boşsa hızlı ve stabil default atıyoruz (Edge-TTS default)
+          if [ -z "${VARS_TTS_VOICE:-}" ]; then
+            DEF_VOICE="en-US-GuyNeural"
+          else
+            DEF_VOICE="${VARS_TTS_VOICE}"
+          fi
 
           wenv () {
             local __name="$1"; shift
@@ -139,29 +135,51 @@ jobs:
             } >> "$GITHUB_ENV"
           }
 
+          LANG_VAL="${DEFAULT_LANG:-en}"
+          MODE_VAL="${DEFAULT_MODE:-educational}"
+          VIS_VAL="${DEFAULT_VISIBILITY:-public}"
+          SEED_VAL="${DEFAULT_SEED:-0}"
+          TOPIC_VAL="${DEFAULT_TOPIC:-}"
+
           wenv CHANNEL_NAME        "${CHANNEL_NAME}"
-          wenv TOPIC               "${VARS_TOPIC}"
+          wenv TOPIC               "${TOPIC_VAL}"
           wenv LANG                "${LANG_VAL}"
           wenv MODE                "${MODE_VAL}"
-          wenv VISIBILITY          "${VIS_VAL:-public}"
+          wenv VISIBILITY          "${VIS_VAL}"
           wenv ROTATION_SEED       "${SEED_VAL}"
-          wenv SEARCH_TERMS        "${VARS_SEARCH_TERMS}"
-          wenv GEMINI_PROMPT       "${VARS_GEMINI_PROMPT}"
-          wenv TTS_RATE            "${VARS_TTS_RATE:-+5%}"
-          wenv TTS_VOICE           "${VARS_TTS_VOICE}"
-          wenv BGM_URLS            "${VARS_BGM_URLS}"
+          wenv SEARCH_TERMS        ""
+          wenv GEMINI_PROMPT       ""
+          wenv TTS_RATE            "+5%"
+          wenv TTS_VOICE           "${DEF_VOICE}"
+          wenv BGM_URLS            ""
           wenv UPLOAD_TO_YT        "1"
 
       - name: Restore state from cache
         uses: actions/cache/restore@v4
         with:
           path: .state
-          key: state-long-${{ env.CHANNEL_NAME }}-${{ github.run_id }}
+          key: state-long-${{ matrix.env }}-${{ github.run_id }}
           restore-keys: |
-            state-long-${{ env.CHANNEL_NAME }}-
+            state-long-${{ matrix.env }}-
             state-long-
 
+      # 🔥 Model ağırlıklarını cache'le — SentenceTransformer, torch, HF vb.
+      - name: Cache model weights (HF/torch/ST)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/torch
+            ~/.cache/huggingface
+            ~/.cache/sentence_transformers
+          key: models-${{ matrix.env }}-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            models-${{ matrix.env }}-${{ runner.os }}-
+            models-
+
       - name: Install Python dependencies
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: "1"
+          PIP_NO_WARN_SCRIPT_LOCATION: "1"
         run: |
           echo "📦 Installing Python packages..."
           python -m pip install -U pip setuptools wheel
@@ -169,59 +187,40 @@ jobs:
           echo "✅ Python dependencies installed"
 
       # ============================================================
-      # CRITICAL: stable-ts for MILISECOND-PERFECT caption sync
+      # stable-ts (phoneme-level align) — Edge-TTS marker varsa çoğunlukla gerekmez,
+      # ama yüklü dursun (fallback olduğunda kırılmasın).
       # ============================================================
       - name: Install stable-ts (milisecond-perfect captions)
         run: |
           echo "🎯 Installing stable-ts for phoneme-level caption alignment..."
           pip install stable-ts>=2.14.0
           echo "✅ stable-ts installed - milisecond caption sync enabled!"
-          echo "   Caption precision: ~10-20ms (phoneme-level)"
 
-      - name: Build long-form video
+      - name: Run video generation
         env:
-          GEMINI_API_KEY:   ${{ secrets.GEMINI_API_KEY }}
-          PEXELS_API_KEY:   ${{ secrets.PEXELS_API_KEY }}
-          PIXABAY_API_KEY:  ${{ secrets.PIXABAY_API_KEY }}
-          YT_CLIENT_ID:     ${{ secrets.YT_CLIENT_ID }}
+          # ===== API KEYS =====
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
 
-          # ===== LONG-FORM VIDEO SETTINGS =====
-          VIDEO_WIDTH: "1920"
-          VIDEO_HEIGHT: "1080"
-          ASPECT_RATIO: "16:9"
-          TARGET_DURATION: "240"
-          TARGET_MIN_SEC: "180"
-          TARGET_MAX_SEC: "600"
-          MIN_SENTENCES: "20"
-          MAX_SENTENCES: "35"
-          TARGET_SENTENCES: "25"
+          # ===== PERFORMANCE (Faster Rendering) =====
+          FAST_MODE: "1"
+          FFMPEG_PRESET: "veryfast"
+          PARALLEL_SCENES: "1"
+          MAX_WORKERS: "4"
 
-          # ===== TTS (Natural Pacing) =====
-          TTS_SSML: "0"
-          TTS_RATE: "+5%"
-
-          # ===== CAPTIONS (Bottom Positioned) =====
-          REQUIRE_CAPTIONS: "1"
+          # ===== CAPTIONS (Karaoke OFF for speed) =====
           KARAOKE_CAPTIONS: "1"
-          CAPTIONS_UPPER: "1"
           CAPTION_POSITION: "bottom"
-          CAPTION_FONT_SIZE: "48"
-          CAPTION_MAX_LINES: "2"
-          CAPTION_MARGIN_V: "100"
-          KARAOKE_INACTIVE: "#FFD700"
-          KARAOKE_ACTIVE: "#3EA6FF"
-          KARAOKE_OUTLINE: "#000000"
-          KARAOKE_OFFSET_MS: "0"
-          KARAOKE_SPEED: "1.0"
-          KARAOKE_SPEEDUP_PCT: "0.0"
-          KARAOKE_RAMP_PCT: "0.0"
-          KARAOKE_EARLY_END_MS: "0"
-          CAPTION_LEAD_MS: "0"
+          CAPTION_STYLE: "modern"
+          CAPTION_FONT_SIZE: "72"
+          CAPTION_MAX_WORDS: "6"
+          USE_STABLE_TS: "0"
 
           # ===== VIDEO EFFECTS (Subtle) =====
-          KARAOKE_EFFECTS: "1"
+          KARAOKE_EFFECTS: "0"
           EFFECT_STYLE: "subtle"
           VIDEO_MOTION: "1"
           MOTION_INTENSITY: "1.08"
@@ -243,21 +242,22 @@ jobs:
           SIM_TH_ENTITY: "0.92"
           STATE_DIR: ".state"
 
-          # ===== PEXELS (Reuse Allowed) =====
+          # ===== PEXELS (Faster Search) =====
           SCENE_STRATEGY: "topic_only"
           PEXELS_DEEP_SEARCH: "1"
           PEXELS_STRICT_VERTICAL: "0"
           PEXELS_ALLOW_LANDSCAPE: "1"
           PEXELS_MIN_HEIGHT: "720"
-          PEXELS_PER_PAGE: "80"
+          PEXELS_PER_PAGE: "60"          # 80 -> 60 (daha hızlı)
           PEXELS_ALLOW_REUSE: "1"
-          PEXELS_MAX_USES_PER_CLIP: "2"
-          PEXELS_MAX_PAGES: "15"
+          PEXELS_MAX_USES_PER_CLIP: "3"  # 2 -> 3 (daha az indirme)
+          PEXELS_MAX_PAGES: "8"          # 15 -> 8 (arama derinliği kısaldı)
           ALLOW_PIXABAY_FALLBACK: "1"
           STRICT_ENTITY_FILTER: "0"
 
           # ===== BGM =====
-          BGM_ENABLE: "1"
+          # Geçici olarak kapalı (BGMManager alias fix gelene kadar)
+          BGM_ENABLE: "0"
           BGM_DIR: "bgm"
           BGM_FADE: "1.5"
           BGM_GAIN_DB: "-28"
@@ -283,8 +283,7 @@ jobs:
           echo "== ${CHANNEL_NAME} (LONG-FORM) =="
           echo "TOPIC=${TOPIC}"
           echo "LANG=${LANG}"
-          echo "TARGET: 3-10 minutes (20-35 sentences)"
-          echo "FORMAT: 16:9 landscape"
+          echo "TARGET: 3-10 minutes (20-35 sentences) | 16:9"
 
           python main.py 2>&1 | tee "${LOG_FILE}"
           status=${PIPESTATUS[0]}
@@ -306,7 +305,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.CHANNEL_NAME }}-long
+          name: ${{ matrix.env }}-long
           path: |
             out/**/*.mp4
             out/*.mp4
@@ -317,7 +316,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.CHANNEL_NAME }}-logs
+          name: ${{ matrix.env }}-logs
           path: |
             build_*.log
             out/**/*.json
@@ -330,4 +329,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .state
-          key: state-long-${{ env.CHANNEL_NAME }}-${{ github.run_id }}
+          key: state-long-${{ matrix.env }}-${{ github.run_id }}
