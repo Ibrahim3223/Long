@@ -3,6 +3,7 @@
 YouTube Uploader - LONG-FORM with CHAPTER SUPPORT - FIXED VERSION
 ✅ Timestamp hesaplama düzeltildi
 ✅ Başlık kesme limiti düzeltildi (60-70 karakter)
+✅ Indent hataları düzeltildi
 """
 
 import logging
@@ -109,25 +110,12 @@ class YouTubeUploader:
 
         except Exception as e:
             logger.error(f"[YouTube] ❌ Upload failed: {e}")
-            import traceback; logger.debug(traceback.format_exc())
+            import traceback
+            logger.debug(traceback.format_exc())
             raise
 
-    # -------------------- Chapters builder (top of description) -------------------- #
-# -*- coding: utf-8 -*-
-"""
-YouTube Uploader - FIXED VERSION V2
-✅ Chapter başlıkları KISA (sadece title, description YOK)
-✅ Timestamp hesaplama DÜZELTİLDİ
-✅ Fallback sistem daha akıllı
-"""
-
-import logging
-from typing import Dict, Any, List, Optional, Tuple
-
-logger = logging.getLogger(__name__)
-
-
-    def _chapter_block_at_top_fixed(
+    def _chapter_block_at_top(
+        self,
         chapters: Optional[List[Dict[str, Any]]],
         audio_durations: Optional[List[float]],
     ) -> str:
@@ -135,15 +123,14 @@ logger = logging.getLogger(__name__)
         ✅ FIXED: YouTube manual chapters
         - Chapter başlıkları KISA (max 50 karakter)
         - Timestamp hesaplama düzeltildi
-        - Fallback daha akıllı
         """
         lines: List[str] = []
-    
+
         # Eğer veri yoksa boş dön
         if not chapters or not audio_durations:
             logger.warning("[Chapters] No data - skipping chapters")
             return ""
-    
+
         # ✅ Bölüm başlangıç zamanlarını hesapla
         starts: List[Tuple[float, str]] = []
         cur_time = 0.0
@@ -176,7 +163,7 @@ logger = logging.getLogger(__name__)
             for i in range(s_idx, min(e_idx + 1, len(audio_durations))):
                 if i < len(audio_durations):
                     cur_time += float(audio_durations[i])
-    
+
         # ✅ Fallback: En az 3 bölüm kontrolü
         if len(starts) < 3:
             logger.warning(f"[Chapters] Only {len(starts)} chapters, need 3+ for YouTube")
@@ -197,7 +184,7 @@ logger = logging.getLogger(__name__)
                 (total * 0.4, "Main Content"),
                 (total * 0.8, "Conclusion")
             ]
-    
+
         # ✅ Süre ≥10s şartını kontrol et
         merged: List[Tuple[float, str]] = []
         for i, (t, title) in enumerate(starts):
@@ -210,38 +197,37 @@ logger = logging.getLogger(__name__)
                 continue
         
             merged.append((t, title))
-    
+
         # İlk satır 00:00 garanti
         if not merged or merged[0][0] != 0.0:
             if merged:
                 merged[0] = (0.0, merged[0][1])
             else:
                 merged = [(0.0, "Introduction")]
-    
-    # Minimum 3 satır kontrolü (son çare)
+
+        # Minimum 3 satır kontrolü (son çare)
         while len(merged) < 3 and cur_time > 30:
             total = cur_time if cur_time > 0 else 180.0
             step = total / (len(merged) + 1)
             merged.append((step * len(merged), f"Part {len(merged)}"))
             merged.sort(key=lambda x: x[0])
-    
-    # Final kontrol: Hala 3'ten az ve çok kısa video
+
+        # Final kontrol: Hala 3'ten az ve çok kısa video
         if len(merged) < 3:
             logger.warning(f"[Chapters] Could not create 3 chapters, skipping")
             return ""
-    
-    # YouTube formatı: 00:00 Title
+
+        # YouTube formatı: 00:00 Title
         for t, title in merged:
-            lines.append(f"{_fmt_ts(t)} {title}")
-    
+            lines.append(f"{self._fmt_ts(t)} {title}")
+
         logger.info(f"[Chapters] Created {len(lines)} chapters")
         for line in lines:
             logger.info(f"[Chapters]   {line}")
-    
+
         return "\n".join(lines)
 
-
-    def _fmt_ts(seconds: float) -> str:
+    def _fmt_ts(self, seconds: float) -> str:
         """
         YouTube timestamp format:
         - Always MM:SS minimum
@@ -251,14 +237,14 @@ logger = logging.getLogger(__name__)
         h = total // 3600
         m = (total % 3600) // 60
         s = total % 60
-    
+
         if h > 0:
             return f"{h}:{m:02d}:{s:02d}"
         else:
             return f"{m:02d}:{s:02d}"
-    
-    # -------------------- SEO tail (chapters sonrası) -------------------- #
+
     def _seo_tail(self, description: str, title: str, tags: Optional[List[str]], topic: Optional[str]) -> str:
+        """SEO tail (chapters sonrası)"""
         base = (description or "").strip()
         primary_kw = (topic or title or "").strip()
 
@@ -280,73 +266,82 @@ logger = logging.getLogger(__name__)
             tail += "\n\n" + " ".join(hashtags)
         return tail.strip()
 
-    # -------------------- helpers -------------------- #
     def _optimize_title(self, title: str) -> str:
         """
         ✅ FIXED: Optimize title for YouTube
         - Gemini prompt: "50-60 chars - MOBİL UYUMLU! MAX 60 characters"
         - Eski limit: 100 karakter (çok uzun!)
-        - Yeni limit: 70 karakter (Gemini'nin 60-70 önerisine uygun)
+        - Yeni limit: 70 karakter (YouTube recommended)
         """
+        title = (title or "").strip()
         if not title:
             return "Untitled Video"
         
-        t = title.strip()
+        # ✅ Normalize Unicode
+        title = unicodedata.normalize('NFKC', title)
         
-        # ✅ Önce çok uzun başlıkları kes (70 karaktere kadar)
-        if len(t) > 70:
-            # Son kelimeyi yarım bırakma, tam kelimede kes
-            cutoff = t[:67].rfind(' ')
-            if cutoff > 50:  # En az 50 karakter kalsın
-                t = t[:cutoff] + "..."
-            else:
-                t = t[:67] + "..."
+        # ✅ 70 karakterden uzunsa akıllıca kısalt
+        if len(title) > 70:
+            # Tire veya iki nokta varsa, ilk kısmı al
+            if ':' in title and title.index(':') < 50:
+                title = title.split(':')[0].strip()
+            elif '–' in title or '—' in title:
+                parts = title.replace('—', '–').split('–')
+                title = parts[0].strip()
+            
+            # Hala uzunsa, son kelimeyi yarıda kesmeden kes
+            if len(title) > 70:
+                cutoff = title[:67].rfind(' ')
+                if cutoff > 50:  # Makul bir nokta
+                    title = title[:cutoff] + "..."
+                else:
+                    title = title[:67] + "..."
         
-        # Çok kısa başlıkları uzat (opsiyonel)
-        elif len(t) < 50:
-            t = (t + " | Complete Guide")[:70]
-        
-        return t
-
-    def _sanitize_tag(self, tag: str) -> str:
-        if not tag:
-            return ""
-        t = unicodedata.normalize("NFKD", str(tag))
-        t = t.replace(",", " ").replace("#", " ")
-        t = self._SAFE_TAG_RE.sub("", t)
-        t = re.sub(r"\s+", " ", t).strip()
-        return t[:30]
+        return title
 
     def _optimize_tags(self, tags: Optional[List[str]]) -> List[str]:
+        """Optimize and sanitize tags"""
         if not tags:
             return []
-        seen, out, total_len = set(), [], 0
-        for raw in tags:
-            t = self._sanitize_tag(raw)
-            if not t:
+        
+        clean = []
+        for t in tags:
+            if not t or not isinstance(t, str):
                 continue
-            k = t.lower()
-            if k in seen:
+            
+            t = t.strip().lower()
+            t = self._SAFE_TAG_RE.sub("", t)
+            t = " ".join(t.split())
+            
+            if not t or len(t) < 2 or len(t) > 30:
                 continue
-            if total_len + len(t) + (1 if out else 0) > 490:
-                break
-            out.append(t)
-            seen.add(k)
-            total_len += len(t) + 1
-            if len(out) >= 30:
-                break
-        return out
+            if t in {"video", "youtube", "watch", "subscribe", "like"}:
+                continue
+            
+            if t not in clean:
+                clean.append(t)
+        
+        return clean[:30]
 
     def _detect_category(self, topic: str, title: str, description: str) -> str:
-        text = f"{topic or ''} {title or ''} {description or ''}".lower()
-        patterns = {
-            "27": ["fact","learn","explain","teach","science","history","educational","education"],
-            "28": ["tech","ai","robot","future","innovation","computer","digital","technology"],
-            "24": ["story","tale","movie","entertainment","fun"],
-            "26": ["how to","tutorial","guide","tips","diy","howto"],
-            "19": ["travel","country","city","geography","world","place"],
-            "22": ["life","daily","personal","vlog","lifestyle"],
-        }
-        scores: Dict[str,int] = {cid: sum(1 for kw in kws if kw in text) for cid, kws in patterns.items()}
-        best = max(scores, key=scores.get) if scores else "27"
-        return best if scores.get(best, 0) > 0 else "27"
+        """Detect YouTube category from content"""
+        text = f"{topic} {title} {description}".lower()
+        
+        # Education indicators
+        if any(w in text for w in ["history", "science", "explain", "learn", "tutorial", "guide", "educational"]):
+            return self.CATEGORIES["education"]
+        
+        # Entertainment indicators
+        if any(w in text for w in ["fun", "funny", "entertainment", "story", "stories"]):
+            return self.CATEGORIES["entertainment"]
+        
+        # How-to indicators
+        if any(w in text for w in ["how to", "diy", "make", "create", "build"]):
+            return self.CATEGORIES["howto_style"]
+        
+        # Science & Tech indicators
+        if any(w in text for w in ["technology", "tech", "innovation", "invention", "scientific"]):
+            return self.CATEGORIES["science_tech"]
+        
+        # Default to Education
+        return self.CATEGORIES["education"]
