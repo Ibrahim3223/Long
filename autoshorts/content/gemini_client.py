@@ -319,11 +319,17 @@ class GeminiClient:
         
         self.client = genai.Client(api_key=self.api_key)
         
-        self.model_chain = [
-            "gemini-2.0-flash-exp",
-            "gemini-1.5-flash", 
-            "gemini-1.5-flash-002"
-        ]
+        # Güncel ve destekli model zinciri
+        # (İstersen GEMINI_MODEL_CHAIN env ile "m1,m2,m3" şeklinde override edebilirsin)
+        env_chain = os.getenv("GEMINI_MODEL_CHAIN", "").strip()
+        if env_chain:
+            self.model_chain = [m.strip() for m in env_chain.split(",") if m.strip()]
+        else:
+            self.model_chain = [
+                "gemini-2.5-flash",       # Önerilen varsayılan
+                "gemini-2.0-flash-exp",   # Deneysel, farklı kota olabilir
+                "gemini-1.5-flash-8b"     # Hafif fallback
+            ]
         
         self.attempts_per_model = 2
         self.total_attempts = len(self.model_chain) * self.attempts_per_model
@@ -460,6 +466,13 @@ Return JSON with: hook, script, cta, search_queries, main_visual_focus, chapters
                 except Exception as e:
                     logger.warning(f"❌ Attempt {attempt} failed: {e}")
                     if attempt < self.total_attempts:
+                        # 404/NOT_FOUND ise bekleme yapmadan sıradaki modele geç
+                        if "404" in str(e) or "NOT_FOUND" in str(e):
+                            continue
+                        # 429 için sunucunun önerdiği gecikmeyi uygula (RetryInfo / 'Please retry in Xs')
+                        delay = self._extract_retry_after_seconds(e)
+                        if delay:
+                            backoff = max(backoff, float(delay))
                         logger.info(f"⏳ Waiting {backoff:.1f}s before retry...")
                         time.sleep(backoff)
                         backoff = min(backoff * 2, self.max_backoff)
@@ -467,6 +480,28 @@ Return JSON with: hook, script, cta, search_queries, main_visual_focus, chapters
         
         raise RuntimeError("All API attempts exhausted")
     
+    @staticmethod
+    def _extract_retry_after_seconds(err: Exception) -> Optional[float]:
+        """
+        429 mesajlarından retry süresini çıkar:
+        - "... 'retryDelay': '59s' ..."
+        - "... Please retry in 59.55s."
+        """
+        s = str(err)
+        m = re.search(r"retryDelay['\":\s]*'?(?P<sec>\d+)s'?", s)
+        if m:
+            try:
+                return float(m.group("sec"))
+            except Exception:
+                pass
+        m = re.search(r"Please retry in (?P<sec>[0-9]+(?:\.[0-9]+)?)s", s)
+        if m:
+            try:
+                return float(m.group("sec"))
+            except Exception:
+                pass
+        return None
+
     def _parse_response(self, raw_json: str, topic: str) -> ContentResponse:
         """Parse JSON response from Gemini"""
         try:
