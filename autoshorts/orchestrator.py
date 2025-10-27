@@ -793,22 +793,26 @@ class ShortsOrchestrator:
         duration: float,
         sentence_type: str = "content",
     ) -> str:
-        """Render captions on video."""
+        """
+        ✅ FIXED: Render captions on video.
+        Changed from wrong parameter names (output_path, word_timings, total_duration)
+        to correct ones that CaptionRenderer.render() actually accepts.
+        """
         if not getattr(settings, "KARAOKE_CAPTIONS", True):
             return video_path
 
-        output = str(pathlib.Path(video_path).with_name(f"{pathlib.Path(video_path).stem}_captioned.mp4"))
-        
         try:
-            self.caption_renderer.render(
+            # ✅ FIX: caption_renderer.render() already returns the output path
+            # No need to pre-create output path or pass it as parameter
+            output = self.caption_renderer.render(
                 video_path=video_path,
-                output_path=output,
                 text=text,
-                word_timings=words,
-                total_duration=duration,
+                words=words,  # ✅ CORRECT: 'words' not 'word_timings'
+                duration=duration,  # ✅ CORRECT: 'duration' not 'total_duration'  
                 sentence_type=sentence_type,
             )
             return output if os.path.exists(output) else video_path
+        
         except Exception as exc:
             logger.error("Caption render failed: %s", exc)
             logger.debug("", exc_info=True)
