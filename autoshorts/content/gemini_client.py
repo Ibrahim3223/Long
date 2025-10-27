@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Gemini Client - FIXED VERSION
-✅ Başlıklar benzersiz (channel topic KULLANILMAZ)
-✅ Chapter başlıkları KISA (max 50 karakter)
-✅ SEO-optimized
-✅ Import ve class tanımları eklendi
+Gemini Client - ENHANCED VERSION with Mode & Sub-Topic Support
+✅ Kanal mode'una göre içerik üretir (country_facts, history_story, vb.)
+✅ Sub-topic rotation ile 6+ ay benzersiz içerik
+✅ Her kanal konseptine uygun prompting
 """
 
 import json
@@ -13,11 +12,9 @@ import random
 import re
 import os
 import time
-import difflib
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 
-# ✅ Gemini SDK imports
 try:
     from google import genai
     from google.genai import types
@@ -29,7 +26,6 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 
-# ✅ ContentResponse dataclass tanımı
 @dataclass
 class ContentResponse:
     """Response from Gemini content generation"""
@@ -42,123 +38,210 @@ class ContentResponse:
     chapters: List[Dict[str, Any]]
 
 
-def _ultra_seo_metadata_fixed(
-    metadata: Dict[str, Any],
+def _build_mode_specific_prompt(
+    mode: str,
     topic: str,
-    script: List[str],
-    chapters: Optional[List[Dict[str, Any]]] = None
-) -> Dict[str, Any]:
-    """
-    ✅ FIXED: ULTRA SEO enhancement
-    - Başlık UNIQUE (channel topic kullanılmaz)
-    - Chapter başlıkları KISA
-    """
-    md = dict(metadata or {})
-    
-    # ❌ ESKİ: Channel topic'i başlığa ekleme
-    # primary_kw = topic.split("—")[0].strip()
-    # title = f"{primary_kw}: {title}"
-    
-    # ✅ YENİ: Sadece Gemini'den gelen başlığı kullan
-    title = (md.get("title") or "Untitled Video").strip()
-    
-    # ✅ Başlık uzunluğu kontrolü (STRICT 60 karakter)
-    if len(title) > 60:
-        # Son kelimeyi yarım bırakma, tam kelimede kes
-        cutoff = title[:57].rfind(' ')
-        if cutoff > 45:
-            title = title[:cutoff] + "..."
-        else:
-            title = title[:57] + "..."
-    
-    # Çok kısa başlıkları uzat
-    elif len(title) < 45:
-        suffix = " Explained"
-        if len(title + suffix) <= 60:
-            title = title + suffix
-    
-    # ✅ DESCRIPTION
-    desc = (md.get("description") or "").strip()
-    
-    # ✅ TAGS
-    tags = md.get("tags") or []
-    tags = [t.strip().lower() for t in tags if t and isinstance(t, str)][:35]
-    
-    md["title"] = title.strip()
-    md["description"] = desc.strip()
-    md["tags"] = list(dict.fromkeys(tags))[:35]
-    
-    return md
-
-
-def _build_ultra_seo_prompt_fixed(
-    topic: str,
-    style: str,
+    sub_topic: str,
     target_sentences: int,
     hook: str,
     cta: str
 ) -> str:
     """
-    ✅ FIXED: Ultra SEO prompt
-    - Başlık için NET talimat: Channel topic KULLANMA
-    - Chapter başlıkları KISA
+    ✅ Mode ve sub-topic'e göre özelleştirilmiş prompt oluşturur
     """
     
-    prompt = f"""Create a HIGH-QUALITY, SEO-OPTIMIZED long-form YouTube video script about: {topic}
+    # Mode'a göre özel talimatlar
+    mode_instructions = {
+        "country_facts": f"""
+You are creating content about a COUNTRY with focus on: {sub_topic}
 
-CRITICAL REQUIREMENTS:
+SPECIFIC REQUIREMENTS:
+- Choose ONE specific country (not covered recently)
+- Focus angle: {sub_topic} (geography/culture/history/economy/technology/food/traditions/nature/urban_life/innovations)
+- Include surprising facts and lesser-known details
+- Show modern AND historical perspectives
+- Use specific examples, not generalizations
+
+AVOID: Generic statements like "this country is beautiful" or "people are friendly"
+DO: "In 1995, Country X became the first to...", "The capital city has 7 metro lines covering..."
+""",
+        
+        "history_story": f"""
+You are creating content about a HISTORICAL EVENT/PERIOD with focus on: {sub_topic}
+
+SPECIFIC REQUIREMENTS:
+- Choose ONE specific historical event, person, or period
+- Focus angle: {sub_topic} (battles/inventions/discoveries/leaders/everyday_life/art/architecture/trade/conflicts/cultural_exchange)
+- Include dates, names, specific details
+- Show cause and effect relationships
+- Connect to modern relevance
+
+AVOID: Vague generalizations
+DO: "On March 15, 44 BC...", "This invention changed X industry by..."
+""",
+        
+        "space_news": f"""
+You are creating content about SPACE/ASTRONOMY with focus on: {sub_topic}
+
+SPECIFIC REQUIREMENTS:
+- Choose ONE specific mission, discovery, or space topic
+- Focus angle: {sub_topic} (missions/discoveries/technology/planets/stars/commercial/research/telescopes/astronauts)
+- Include technical details but explain simply
+- Mention specific dates, organizations, spacecraft names
+- Show why it matters
+
+AVOID: Science fiction, speculation without basis
+DO: "NASA's James Webb Telescope...", "SpaceX Starship completed..."
+""",
+        
+        "movie_secrets": f"""
+You are creating content about FILM PRODUCTION with focus on: {sub_topic}
+
+SPECIFIC REQUIREMENTS:
+- Choose ONE specific movie or filmmaking technique
+- Focus angle: {sub_topic} (special effects/directing/cinematography/editing/sound design/stunts/production design/makeup)
+- Include specific examples from real films
+- Explain HOW techniques work
+- Show evolution of the craft
+
+AVOID: Plot spoilers, gossip about actors
+DO: "In The Matrix (1999), the bullet-time effect was achieved by..."
+""",
+        
+        "design_history": f"""
+You are creating content about an EVERYDAY OBJECT'S DESIGN HISTORY with focus on: {sub_topic}
+
+SPECIFIC REQUIREMENTS:
+- Choose ONE specific everyday object (chair, pen, cup, etc.)
+- Focus angle: {sub_topic} (origin/evolution/materials/famous designs/cultural impact/innovations/modern trends)
+- Trace from earliest form to today
+- Include specific designer names, years, movements
+- Show how design reflects culture/technology
+
+AVOID: "Things got better over time"
+DO: "In 1859, Michael Thonet revolutionized chair production with..."
+""",
+        
+        "if_lived_today": f"""
+You are creating content about HISTORICAL FIGURES IN MODERN WORLD with focus on: {sub_topic}
+
+SPECIFIC REQUIREMENTS:
+- Choose ONE specific historical figure
+- Focus angle: {sub_topic} (modern_tech/social_media/current_culture/contemporary_issues/modern_career)
+- Imagine realistic scenarios based on their personality/values
+- Show parallels between their era and today
+- Be respectful and thoughtful
+
+AVOID: Shallow comparisons, jokes at their expense
+DO: "Given Leonardo da Vinci's curiosity about human anatomy, in 2025 he might..."
+""",
+        
+        "nostalgia_story": f"""
+You are creating content about POP CULTURE NOSTALGIA (1970s-1990s) with focus on: {sub_topic}
+
+SPECIFIC REQUIREMENTS:
+- Choose ONE specific trend, technology, or cultural phenomenon
+- Focus angle: {sub_topic} (music/tv_shows/toys/fashion/technology/gaming/movies/social_trends)
+- Include specific years, brands, names
+- Evoke warm memories without being cringy
+- Explain why it mattered then and why we remember it
+
+AVOID: "Remember when life was simpler?"
+DO: "The Walkman (1979) changed how people experienced music by..."
+""",
+        
+        "cricket_women": f"""
+You are creating content about WOMEN'S CRICKET with focus on: {sub_topic}
+
+SPECIFIC REQUIREMENTS:
+- Choose ONE specific player, match, or aspect of women's cricket
+- Focus angle: {sub_topic} (skills/tactics/records/tournaments/team dynamics/training/equipment/history)
+- Include statistics, dates, specific matches
+- Celebrate achievement without condescension
+- Show technical expertise
+
+AVOID: Generic praise, comparisons to men's game
+DO: "In the 2017 World Cup Final, Anya Shrubsole's 6/46 figures..."
+"""
+    }
+    
+    # Varsayılan talimat (mode tanımlı değilse)
+    default_instruction = f"""
+You are creating educational content about: {topic}
+
+SPECIFIC REQUIREMENTS:
+- Choose ONE specific aspect within this topic
+- Focus angle: {sub_topic}
+- Include specific facts, names, dates, examples
+- Be educational but engaging
+- Show why this matters
+
+AVOID: Vague generalizations
+DO: Use specific examples and details
+"""
+    
+    mode_specific = mode_instructions.get(mode, default_instruction)
+    
+    prompt = f"""Create a HIGH-QUALITY, SEO-OPTIMIZED long-form YouTube video script.
+
+CHANNEL CONCEPT: {topic}
+CONTENT MODE: {mode}
+TODAY'S FOCUS: {sub_topic}
+
+{mode_specific}
+
+STRUCTURE REQUIREMENTS:
 - EXACTLY {target_sentences} sentences (40-70 range)
 - Each sentence: 8-12 words (clear, concise, engaging)
 - Educational but conversational tone
 - Divided into 5-7 logical chapters
 
-STRUCTURE:
+VIDEO STRUCTURE:
 1. HOOK (1-2 sentences): {hook}
-2. INTRODUCTION (5-8 sentences): Set context with intrigue
+2. INTRODUCTION (5-8 sentences): Set specific context with intrigue
 3. MAIN CONTENT (30-55 sentences): 3-5 logical sections with smooth transitions
+   - Each section should explore a different aspect
+   - Use specific examples and details
+   - Build narrative progression
 4. CONCLUSION (3-5 sentences): Strong summary + key takeaway
 5. CTA (1 sentence): {cta}
 
-✅ ULTRA SEO REQUIREMENTS (CRITICAL):
+✅ CRITICAL SEO REQUIREMENTS:
 
-**metadata.title** (STRICT 50-60 chars):
-- SPECIFIC to THIS EXACT video topic
-- DO NOT repeat channel name or channel topic
-- UNIQUE for every video (not generic!)
-- Mobile-optimized: MAXIMUM 60 characters
-- Examples:
-  ✅ GOOD: "Chair Evolution: From Throne to Modern Eames"
-  ✅ GOOD: "Coffee Discovery: Ethiopian Goat Herders Tale"
-  ✅ GOOD: "Paper Clip History: Wire Bending Innovation"
-  ❌ BAD: "Design histories of everyday objects: Chair..." (repeating channel topic!)
-  ❌ BAD: "Interesting facts about chairs" (too generic!)
+**metadata.title** (50-60 chars):
+- MUST be SPECIFIC to the exact topic you chose
+- NOT generic channel description
+- UNIQUE for THIS video
+- Include key subject + angle
+- Examples for different modes:
+  * country_facts: "Japan's Rail System: 99.9% On-Time Record"
+  * history_story: "Cleopatra's Naval Victory at Actium"
+  * space_news: "Webb Telescope Finds Water on Exoplanet K2-18b"
+  * movie_secrets: "How Inception Created Zero-G Hallway Fight"
+  * design_history: "Paper Clip: Johan Vaaler's 1899 Revolution"
 
 **chapters** (5-7 chapters):
-- TITLE: SHORT (max 50 chars) - keyword-rich but concise
-- TITLE: Use format like "Ancient Origins" or "Medieval Evolution" or "Modern Innovation"
-- TITLE: NOT "Ancient Chair Origins: Power and Status Seating – Explore the earliest..."
-- DESCRIPTION: Longer explanation (for internal use, not shown to user)
-- Examples:
-  ✅ GOOD: {{"title": "Ancient Origins", "description": "Explore earliest chair forms"}}
-  ✅ GOOD: {{"title": "Industrial Revolution", "description": "Mass production impact"}}
-  ❌ BAD: {{"title": "Ancient Chair Origins: Power and Status Seating – Explore...", ...}}
+- TITLE: SHORT (max 50 chars) - keyword-rich
+- Use format: "Ancient Origins", "Technical Breakthrough", "Modern Impact"
+- NOT: "Ancient Origins of the Thing We're Discussing Including..."
 
 **metadata.description** (400-500 words):
-- First 160 chars: Hook + primary keyword + value promise
+- First 160 chars: Hook + specific topic + value promise
 - Include compact chapter outline with keywords
 - Add 2-3 related questions viewers might have
 - End with CTA
-- NO links, NO emojis, NO hashtags in body
+- NO links, NO emojis, NO hashtags
 
 **metadata.tags** (25-35 tags):
-- Mix of broad, specific, and related terms
+- Mix of: main subject, sub-topic, related terms, broader category
 - All lowercase, no commas
-- NO generic words ("video", "youtube", "watch")
+- Include both broad ("history") and specific ("battle of actium") tags
 
 **search_queries** (30-40 queries):
-- SPECIFIC to each scene/chapter
-- Mix macro + detail shots
-- Examples: "wooden chair close up", "throne ancient egypt", "modern office chair"
+- SPECIFIC to the subject you chose
+- Match the visual needs of YOUR specific content
+- For "Japan railway": "shinkansen bullet train", "tokyo station platform", "japanese train conductor"
+- NOT generic: "train station", "people commuting"
 
 Return EXACT JSON structure:
 
@@ -169,31 +252,62 @@ Return EXACT JSON structure:
   "search_queries": ["specific term 1", "term 2", ... 30-40 terms],
   "main_visual_focus": "Primary visual theme",
   "chapters": [
-    {{"title": "Introduction", "start_sentence": 0, "end_sentence": 5, "description": "Overview"}},
-    {{"title": "Ancient Origins", "start_sentence": 6, "end_sentence": 12, "description": "Earliest forms"}},
-    {{"title": "Medieval Era", "start_sentence": 13, "end_sentence": 20, "description": "Middle Ages development"}},
-    {{"title": "Industrial Revolution", "start_sentence": 21, "end_sentence": 28, "description": "Mass production"}},
-    {{"title": "Modern Design", "start_sentence": 29, "end_sentence": 36, "description": "20th century"}},
-    {{"title": "Contemporary Trends", "start_sentence": 37, "end_sentence": 42, "description": "Current innovations"}},
-    {{"title": "Conclusion", "start_sentence": 43, "end_sentence": 47, "description": "Summary"}}
+    {{"title": "Chapter Title", "start_sentence": 0, "end_sentence": 5, "description": "What this covers"}},
+    ...
   ],
   "metadata": {{
-    "title": "Chair Evolution: From Throne to Modern Eames",
+    "title": "Your Specific Video Title",
     "description": "400-500 word description...",
-    "tags": ["chair history", "furniture design", "eames chair", ... 25-35 tags]
+    "tags": ["tag1", "tag2", ... 25-35 tags]
   }}
 }}
 
-CRITICAL REMINDERS:
-- Title must be UNIQUE for THIS video (not generic channel description)
-- Chapter titles must be SHORT (max 50 chars)
-- NO channel topic in video title
-- Quality > Quantity
+REMEMBER: 
+- Be SPECIFIC - choose ONE subject within the focus area
+- Use REAL names, dates, numbers, facts
+- NO generic content - every video must be about something SPECIFIC
+- The sub-topic "{sub_topic}" should guide your angle, not limit your subject choice
 """
+    
     return prompt
 
 
-# ✅ GeminiClient class tanımı
+def _ultra_seo_metadata_fixed(
+    metadata: Dict[str, Any],
+    topic: str,
+    script: List[str],
+    chapters: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, Any]:
+    """
+    ✅ SEO enhancement - başlık kontrolü
+    """
+    md = dict(metadata or {})
+    
+    title = (md.get("title") or "Untitled Video").strip()
+    
+    # Başlık uzunluğu kontrolü (STRICT 60 karakter)
+    if len(title) > 60:
+        cutoff = title[:57].rfind(' ')
+        if cutoff > 45:
+            title = title[:cutoff] + "..."
+        else:
+            title = title[:57] + "..."
+    elif len(title) < 45:
+        suffix = " Explained"
+        if len(title + suffix) <= 60:
+            title = title + suffix
+    
+    desc = (md.get("description") or "").strip()
+    tags = md.get("tags") or []
+    tags = [t.strip().lower() for t in tags if t and isinstance(t, str)][:35]
+    
+    md["title"] = title.strip()
+    md["description"] = desc.strip()
+    md["tags"] = list(dict.fromkeys(tags))[:35]
+    
+    return md
+
+
 class GeminiClient:
     """Gemini API client for content generation"""
     
@@ -203,17 +317,14 @@ class GeminiClient:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is required")
         
-        # Initialize Gemini client
         self.client = genai.Client(api_key=self.api_key)
         
-        # Model chain for fallback
         self.model_chain = [
             "gemini-2.0-flash-exp",
             "gemini-1.5-flash", 
             "gemini-1.5-flash-002"
         ]
         
-        # Retry configuration
         self.attempts_per_model = 2
         self.total_attempts = len(self.model_chain) * self.attempts_per_model
         self.initial_backoff = 2.0
@@ -226,64 +337,87 @@ class GeminiClient:
         topic: str,
         style: str = "educational",
         duration: int = 180,
+        mode: Optional[str] = None,
+        sub_topic: Optional[str] = None,
         additional_context: Optional[str] = None
     ) -> ContentResponse:
-        """Generate content for a topic"""
+        """
+        Generate content for a topic with mode and sub_topic support
         
-        # Calculate target sentences based on duration
-        # ~10-12 words per sentence, ~2.5 words per second
+        Args:
+            topic: Main channel topic/description
+            style: Content style
+            duration: Target duration in seconds
+            mode: Content mode (country_facts, history_story, etc.)
+            sub_topic: Specific angle to focus on
+            additional_context: Extra context for prompt
+        """
+        
+        # Calculate target sentences
         target_seconds = duration
         words_per_second = 2.5
         words_per_sentence = 10
         target_sentences = int((target_seconds * words_per_second) / words_per_sentence)
         target_sentences = max(40, min(70, target_sentences))
         
-        # Generate hooks and CTAs for LONG-FORM content
+        # Generate hooks and CTAs
         hooks = [
-            "The story behind this everyday object is more fascinating than you'd imagine.",
-            "What if I told you the origin of this common item changed the world?",
-            "This object has a hidden history that most people never learn about.",
-            "The evolution of this design reveals surprising innovations across centuries.",
-            "Behind this familiar object lies an unexpected journey of human ingenuity.",
-            "The transformation of this everyday item tells a remarkable story.",
-            "Few people know the revolutionary origins of this common design.",
-            "This object's development reveals fascinating insights into human creativity."
+            "The story behind this is more fascinating than you'd imagine.",
+            "What if I told you this changed the world?",
+            "This has a hidden history most people never learn.",
+            "The evolution reveals surprising innovations.",
+            "Behind this lies an unexpected journey of ingenuity.",
+            "The transformation tells a remarkable story.",
+            "Few people know the revolutionary origins of this.",
+            "This development reveals fascinating insights."
         ]
         hook = random.choice(hooks)
         
         ctas = [
-            "Thanks for watching! Subscribe to explore more fascinating design histories.",
-            "If you enjoyed this deep dive, hit subscribe for more untold stories.",
-            "Want to learn more hidden histories? Subscribe and join our community.",
-            "Subscribe for more in-depth explorations of everyday innovations."
+            "Thanks for watching! Subscribe to explore more fascinating stories.",
+            "If you enjoyed this, hit subscribe for more deep dives.",
+            "Want to learn more? Subscribe and join our community.",
+            "Subscribe for more in-depth explorations."
         ]
         cta = random.choice(ctas)
         
-        # Build prompt
-        prompt = _build_ultra_seo_prompt_fixed(
-            topic=topic,
-            style=style,
-            target_sentences=target_sentences,
-            hook=hook,
-            cta=cta
-        )
+        # ✅ Build mode-specific prompt
+        if mode and sub_topic:
+            logger.info(f"📝 Generating {mode} content with sub-topic: {sub_topic}")
+            prompt = _build_mode_specific_prompt(
+                mode=mode,
+                topic=topic,
+                sub_topic=sub_topic,
+                target_sentences=target_sentences,
+                hook=hook,
+                cta=cta
+            )
+        else:
+            logger.warning("⚠️ No mode/sub_topic provided, using generic prompt")
+            prompt = f"""Create a video script about: {topic}
+Target: {target_sentences} sentences
+Hook: {hook}
+CTA: {cta}
+Return JSON with: hook, script, cta, search_queries, main_visual_focus, chapters, metadata"""
         
         if additional_context:
             prompt += f"\n\nAdditional context: {additional_context}"
         
-        # Call API with fallback
+        # Call API
         raw_response = self._call_api_with_fallback(prompt)
         
         # Parse response
         content_response = self._parse_response(raw_response, topic)
         
-        # Enhance metadata with SEO
+        # Enhance metadata
         content_response.metadata = _ultra_seo_metadata_fixed(
             metadata=content_response.metadata,
             topic=topic,
             script=content_response.script,
             chapters=content_response.chapters
         )
+        
+        logger.info(f"✅ Generated: {content_response.metadata.get('title', 'Untitled')}")
         
         return content_response
     
@@ -312,211 +446,45 @@ class GeminiClient:
                         config=types.GenerateContentConfig(
                             temperature=temperature,
                             max_output_tokens=max_output_tokens,
-                            response_mime_type="text/plain",
+                            response_mime_type="application/json"
                         )
                     )
-
-                    if not response or not response.text:
-                        raise ValueError("Empty response from API")
-
-                    logger.info(f"[Gemini] ✅ Success with {model_name}")
-                    return response.text
-
+                    
+                    text = response.text.strip()
+                    if not text:
+                        raise ValueError("Empty response from Gemini")
+                    
+                    logger.info(f"✅ Success with {model_name}")
+                    return text
+                    
                 except Exception as e:
-                    error_str = str(e).lower()
-                    is_retryable = any(
-                        code in error_str for code in ["429", "500", "502", "503", "504"]
-                    ) or any(
-                        status in error_str for status in ["unavailable", "deadline", "resource"]
-                    )
-
-                    if is_retryable and attempt < self.total_attempts:
-                        logger.warning(f"[Gemini] Retry in {backoff}s: {str(e)[:100]}")
+                    logger.warning(f"❌ Attempt {attempt} failed: {e}")
+                    if attempt < self.total_attempts:
+                        logger.info(f"⏳ Waiting {backoff:.1f}s before retry...")
                         time.sleep(backoff)
-                        backoff = min(backoff * 1.5, self.max_backoff)
-                    else:
-                        logger.error(f"[Gemini] Failed with {model_name}: {str(e)[:100]}")
-                        if attempt >= self.total_attempts:
-                            raise
-
-        raise RuntimeError("All models exhausted")
-
-    def _parse_response(self, raw_text: str, topic: str) -> ContentResponse:
-        """Parse and validate response"""
-        json_str = self._extract_complete_json(raw_text)
-        if not json_str:
-            json_str = raw_text.strip()
-            if json_str.startswith("```json"):
-                json_str = json_str[7:]
-            if json_str.startswith("```"):
-                json_str = json_str[3:]
-            if json_str.endswith("```"):
-                json_str = json_str[:-3]
-            json_str = json_str.strip()
-
-        # ✅ Clean invalid control characters
-        json_str = self._clean_json_string(json_str)
-
+                        backoff = min(backoff * 2, self.max_backoff)
+                    continue
+        
+        raise RuntimeError("All API attempts exhausted")
+    
+    def _parse_response(self, raw_json: str, topic: str) -> ContentResponse:
+        """Parse JSON response from Gemini"""
         try:
-            data = json.loads(json_str)
-        except json.JSONDecodeError as e:
-            logger.error(f"[Gemini] JSON parse error: {e}")
-            logger.debug(f"[Gemini] Problematic JSON (first 500 chars): {json_str[:500]}")
-            raise ValueError(f"Invalid JSON: {e}")
-
-        required = ["hook", "script", "cta", "search_queries", "main_visual_focus", "metadata"]
-        missing = [key for key in required if key not in data]
-        if missing:
-            raise ValueError(f"Missing keys: {missing}")
-
-        if not isinstance(data["script"], list):
-            raise ValueError("Script must be a list")
-
-        # ✅ Deduplicate hook/first sentence
-        hook_text = (data.get("hook") or "").strip()
-        script_list = [s.strip() for s in data["script"] if isinstance(s, str) and s.strip()]
-        if script_list and self._is_near_duplicate(hook_text, script_list[0]) and len(script_list) > 40:
-            script_list.pop(0)
-        data["script"] = script_list
-
-        # ✅ Validate 40-70 range
-        sentence_count = len(data["script"])
-        if sentence_count < 40:
-            raise ValueError(f"Script too short: {sentence_count} (minimum 40)")
-        if sentence_count > 70:
-            logger.warning(f"[Gemini] Truncating {sentence_count} → 70")
-            data["script"] = data["script"][:70]
-
-        # ✅ Auto-generate chapters if missing
-        if "chapters" not in data or not data["chapters"]:
-            data["chapters"] = self._auto_generate_chapters(data["script"])
-
-        return ContentResponse(
-            hook=hook_text,
-            script=data["script"],
-            cta=data["cta"],
-            search_queries=data["search_queries"],
-            main_visual_focus=data["main_visual_focus"],
-            metadata=data["metadata"],
-            chapters=data["chapters"]
-        )
-
-    def _clean_json_string(self, json_str: str) -> str:
-        """
-        Clean JSON string from invalid control characters.
-        Preserves valid escape sequences but removes raw control characters.
-        """
-        # Replace problematic control characters with escaped versions
-        replacements = {
-            '\n': '\\n',   # Newline
-            '\r': '\\r',   # Carriage return
-            '\t': '\\t',   # Tab
-            '\b': '\\b',   # Backspace
-            '\f': '\\f',   # Form feed
-        }
-        
-        result = []
-        i = 0
-        in_string = False
-        escape_next = False
-        
-        while i < len(json_str):
-            char = json_str[i]
+            # Clean markdown formatting
+            raw_json = raw_json.replace("```json", "").replace("```", "").strip()
             
-            # Track if we're inside a string
-            if char == '"' and not escape_next:
-                in_string = not in_string
-                result.append(char)
-                i += 1
-                continue
+            data = json.loads(raw_json)
             
-            # Track escape sequences
-            if char == '\\' and not escape_next:
-                escape_next = True
-                result.append(char)
-                i += 1
-                continue
-            
-            # If this was escaped, just add it
-            if escape_next:
-                result.append(char)
-                escape_next = False
-                i += 1
-                continue
-            
-            # If we're in a string and hit a control character, replace it
-            if in_string and char in replacements:
-                result.append(replacements[char])
-            # Remove other control characters (ASCII 0-31 except allowed ones)
-            elif in_string and ord(char) < 32 and char not in '\n\r\t':
-                # Skip invalid control characters
-                pass
-            else:
-                result.append(char)
-            
-            i += 1
-        
-        return ''.join(result)
-
-    def _is_near_duplicate(self, a: str, b: str, thresh: float = 0.85) -> bool:
-        na = re.sub(r"[^a-z0-9]+", " ", (a or "").lower()).strip()
-        nb = re.sub(r"[^a-z0-9]+", " ", (b or "").lower()).strip()
-        if not na or not nb:
-            return False
-        return difflib.SequenceMatcher(None, na, nb).ratio() >= thresh
-
-    def _extract_complete_json(self, text: str) -> Optional[str]:
-        """Extract complete JSON with balanced braces"""
-        start = text.find('{')
-        if start == -1:
-            return None
-
-        brace_count = 0
-        in_string = False
-        escape_next = False
-
-        for i in range(start, len(text)):
-            char = text[i]
-            if escape_next:
-                escape_next = False
-                continue
-            if char == '\\':
-                escape_next = True
-                continue
-            if char == '"':
-                in_string = not in_string
-                continue
-            if not in_string:
-                if char == '{':
-                    brace_count += 1
-                elif char == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        return text[start:i+1]
-        return None
-
-    def _auto_generate_chapters(self, script: List[str]) -> List[Dict[str, Any]]:
-        """Auto-generate chapters"""
-        total = len(script)
-        if total < 30:
-            return [{"title": "Full Content", "start_sentence": 0, "end_sentence": total-1, "description": "Complete video"}]
-
-        num_chapters = min(8, max(6, total // 8))
-        chapter_size = total // num_chapters
-        chapters = []
-
-        intro_end = max(4, total // 10)
-        chapters.append({"title": "Introduction", "start_sentence": 0, "end_sentence": intro_end, "description": "Overview"})
-
-        start = intro_end + 1
-        main_chapters = num_chapters - 2
-
-        for i in range(main_chapters):
-            end = start + chapter_size - 1
-            if i == main_chapters - 1:
-                end = int(total * 0.9)
-            chapters.append({"title": f"Part {i+1}", "start_sentence": start, "end_sentence": min(end, total-5), "description": f"Section {i+1}"})
-            start = min(end, total-5) + 1
-
-        chapters.append({"title": "Conclusion", "start_sentence": chapters[-1]["end_sentence"]+1, "end_sentence": total-1, "description": "Summary"})
-        return chapters
+            return ContentResponse(
+                hook=data.get("hook", ""),
+                script=data.get("script", []),
+                cta=data.get("cta", ""),
+                search_queries=data.get("search_queries", []),
+                main_visual_focus=data.get("main_visual_focus", ""),
+                metadata=data.get("metadata", {}),
+                chapters=data.get("chapters", [])
+            )
+        except Exception as e:
+            logger.error(f"Failed to parse Gemini response: {e}")
+            logger.debug(f"Raw response: {raw_json[:500]}")
+            raise ValueError(f"Invalid JSON response from Gemini: {e}")
