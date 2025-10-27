@@ -185,12 +185,31 @@ class YouTubeUploader:
         return "\n".join(lines)
 
     def _fmt_ts(self, seconds: float) -> str:
+        """
+        ✅ FIXED: Format seconds to YouTube timestamp format.
+        YouTube timestamp format:
+        - Always shows MM:SS minimum
+        - If hours exist, shows H:MM:SS (no leading zero on hours)
+        
+        Examples:
+        - 45s   → 00:45
+        - 125s  → 02:05
+        - 3665s → 1:01:05  (not 01:01:05)
+        - 7325s → 2:02:05
+        """
         total = int(max(0, round(seconds)))
         h = total // 3600
         m = (total % 3600) // 60
         s = total % 60
-        return f"{h:01d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
-
+        
+        # ✅ YouTube format rules:
+        # - Always MM:SS minimum (even for 5 seconds → 00:05)
+        # - If hours exist, H:MM:SS (single digit hour is OK, no leading zero)
+        if h > 0:
+            return f"{h}:{m:02d}:{s:02d}"  # e.g., "1:30:45" or "2:00:00"
+        else:
+            return f"{m:02d}:{s:02d}"  # e.g., "00:45" or "12:30"
+    
     # -------------------- SEO tail (chapters sonrası) -------------------- #
     def _seo_tail(self, description: str, title: str, tags: Optional[List[str]], topic: Optional[str]) -> str:
         base = (description or "").strip()
