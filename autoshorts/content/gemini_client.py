@@ -165,14 +165,11 @@ STRUCTURE:
 
 ✅ ULTRA SEO REQUIREMENTS (CRITICAL):
 
-**metadata.title** (60-70 chars):
-- PRIMARY keyword at START (first 3-5 words)
-- Human-readable, NOT clickbait
-- Promise clear value
-- Examples:
-  * "Paper Clip History: How a Simple Twist Changed Everything"
-  * "Zipper Design Evolution: From Patent to Perfect Function"
-  * "Coffee Mug Origins: Ceramic, Handle, and Modern Comfort"
+**metadata.title** (50-60 chars - MOBİL UYUMLU!):
+- SPECIFIC object/topic in first 2-3 words
+- UNIQUE for THIS video (NOT generic channel description)
+- Mobile-optimized: MAX 60 characters  
+- Must be DIFFERENT for EVERY video!
 
 **metadata.description** (400-500 words):
 - First 160 chars: Hook + primary keyword + value promise
