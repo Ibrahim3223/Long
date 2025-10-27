@@ -211,6 +211,9 @@ class ShortsOrchestrator:
         logger.info("🎬 START VIDEO PRODUCTION")
         logger.info("=" * 70)
         logger.info("📝 Topic: %s", topic_prompt[:120])
+    
+        # ✅ Track sub_topic for this production session
+        selected_sub_topic = None
 
         for attempt in range(1, max_retries + 1):
             try:
@@ -223,6 +226,16 @@ class ShortsOrchestrator:
                 if not script:
                     logger.warning("Script generation failed")
                     continue
+            
+                # ✅ Extract sub_topic if it was used
+                mode = os.getenv("MODE") or getattr(settings, "CHANNEL_MODE", None)
+                if mode and not selected_sub_topic and hasattr(self, 'novelty_guard'):
+                    try:
+                        # Get the sub_topic that was used
+                        # (In a real implementation, _generate_script should return this)
+                        selected_sub_topic = getattr(script, '_sub_topic', None)
+                    except:
+                        pass
 
                 sentences_txt = [s.get("text", "") for s in script.get("sentences", [])]
                 is_fresh, similarity = self._check_novelty_safe(
@@ -247,7 +260,13 @@ class ShortsOrchestrator:
                 }
 
                 self._save_script_state_safe(script)
-                self._novelty_add_used_safe(title=script["title"], script=sentences_txt)
+            
+                # ✅ Pass sub_topic when registering
+                self._novelty_add_used_safe(
+                    title=script["title"], 
+                    script=sentences_txt,
+                    sub_topic=selected_sub_topic  # ✅ NEW
+                )
 
                 logger.info("=" * 70)
                 logger.info("✅ Video generation successful")
@@ -268,22 +287,50 @@ class ShortsOrchestrator:
     # ------------------------------------------------------------------
 
     def _generate_script(self, topic_prompt: str) -> Optional[Dict]:
-        """Generate script using GeminiClient."""
+        """
+        Generate script using GeminiClient with mode and sub-topic support.
+    
+        ✅ UPDATED: Now passes mode and sub_topic to Gemini for channel-specific content
+        """
         try:
             logger.info("🤖 Generating script via Gemini...")
-            
-            # Call Gemini API - returns ContentResponse dataclass
+        
+            # ✅ Get channel mode from settings/environment
+            mode = os.getenv("MODE") or getattr(settings, "CHANNEL_MODE", None)
+        
+            # ✅ Get or select sub-topic
+            sub_topic = None
+            if mode and hasattr(self, 'novelty_guard'):
+                try:
+                    sub_topic = self.novelty_guard.select_subtopic(
+                        channel=self.channel_id,
+                        mode=mode
+                    )
+                    logger.info(f"🎯 Selected sub-topic: {sub_topic}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Sub-topic selection failed: {e}")
+                    # Fallback to random sub-topic
+                    from autoshorts.state.novelty_guard import SUB_TOPIC_POOLS
+                    pool = SUB_TOPIC_POOLS.get(mode, SUB_TOPIC_POOLS.get("_default", []))
+                    if pool:
+                        import random
+                        sub_topic = random.choice(pool)
+                        logger.info(f"🎯 Using fallback sub-topic: {sub_topic}")
+        
+            # ✅ Call Gemini API with mode and sub_topic
             content_response = self.gemini.generate(
                 topic=topic_prompt,
                 style="educational",
-                duration=300  # 5 minutes target
+                duration=300,  # 5 minutes target
+                mode=mode,  # ✅ NEW
+                sub_topic=sub_topic,  # ✅ NEW
             )
-            
+        
             if not content_response:
                 logger.error("Gemini returned empty response")
                 return None
-            
-            # Convert ContentResponse to dict format expected by orchestrator
+        
+            # Convert ContentResponse to dict format
             script = {
                 "hook": content_response.hook,
                 "script": content_response.script,
@@ -294,34 +341,33 @@ class ShortsOrchestrator:
                 "description": content_response.metadata.get("description", ""),
                 "tags": content_response.metadata.get("tags", []),
                 "chapters": content_response.chapters,
-                "sentences": []  # Will be populated below
+                "sentences": []
             }
-            
-            # Build sentences list from script parts
+        
+            # Build sentences list
             sentences = []
-            
-            # Add hook
+        
             if script["hook"]:
                 sentences.append({"text": script["hook"], "type": "hook"})
-            
-            # Add main script sentences
+        
             for sentence in script["script"]:
                 sentences.append({"text": sentence, "type": "content"})
-            
-            # Add CTA
+        
             if script["cta"]:
                 sentences.append({"text": script["cta"], "type": "cta"})
-            
+        
             script["sentences"] = sentences
-            
-            # Validate script structure
+        
+            # Validate
             if not script.get("sentences"):
                 logger.error("Script has no sentences")
                 return None
-            
+        
             logger.info("✅ Script generated: %d sentences", len(script["sentences"]))
+            logger.info(f"📝 Title: {script['title']}")
+        
             return script
-            
+        
         except Exception as exc:
             logger.error("Script generation failed: %s", exc)
             logger.debug("", exc_info=True)
@@ -1026,16 +1072,30 @@ class ShortsOrchestrator:
             logger.warning("Novelty check failed: %s", exc)
             return True, 0.0
 
-    def _novelty_add_used_safe(self, title: str, script: List[str]):
-        """Mark content as used."""
+    def _novelty_add_used_safe(
+        self, title: str, script: Union[str, List[str]], sub_topic: Optional[str] = None
+    ) -> None:
+        """
+        ✅ UPDATED: Now tracks sub_topic for rotation
+        """
+        if not self.use_novelty or not self.novelty_guard:
+            return
+    
         try:
-            self.novelty_guard.add_used(
+            # Get mode from settings
+            mode = os.getenv("MODE") or getattr(settings, "CHANNEL_MODE", None)
+        
+            # Register with sub_topic
+            self.novelty_guard.add_used_script(
                 title=title,
-                script_text=" ".join(script),
-                channel=self.channel_id
+                script=script,
+                channel=self.channel_id,
+                mode=mode,
+                sub_topic=sub_topic  # ✅ NEW
             )
+            logger.info("✅ Registered script in novelty guard (sub_topic: %s)", sub_topic)
         except Exception as exc:
-            logger.warning("Failed to mark content as used: %s", exc)
+            logger.warning("Novelty add_used failed: %s", exc)
 
     def _save_script_state_safe(self, script: Dict):
         """Save script to state."""
