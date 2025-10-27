@@ -238,20 +238,24 @@ class GeminiClient:
         target_sentences = int((target_seconds * words_per_second) / words_per_sentence)
         target_sentences = max(40, min(70, target_sentences))
         
-        # Generate hooks and CTAs
+        # Generate hooks and CTAs for LONG-FORM content
         hooks = [
-            "WAIT—did you know this fascinating origin story?",
-            "STOP scrolling! You need to hear this.",
-            "97% of people don't know this surprising fact.",
-            "In 1847, something unexpected happened that changed everything.",
-            "Here's an unpopular opinion you won't believe."
+            "The story behind this everyday object is more fascinating than you'd imagine.",
+            "What if I told you the origin of this common item changed the world?",
+            "This object has a hidden history that most people never learn about.",
+            "The evolution of this design reveals surprising innovations across centuries.",
+            "Behind this familiar object lies an unexpected journey of human ingenuity.",
+            "The transformation of this everyday item tells a remarkable story.",
+            "Few people know the revolutionary origins of this common design.",
+            "This object's development reveals fascinating insights into human creativity."
         ]
         hook = random.choice(hooks)
         
         ctas = [
-            "Subscribe for more deep dives into fascinating topics!",
-            "Hit subscribe if you want to learn more hidden histories!",
-            "Follow for more surprising origin stories!"
+            "Thanks for watching! Subscribe to explore more fascinating design histories.",
+            "If you enjoyed this deep dive, hit subscribe for more untold stories.",
+            "Want to learn more hidden histories? Subscribe and join our community.",
+            "Subscribe for more in-depth explorations of everyday innovations."
         ]
         cta = random.choice(ctas)
         
