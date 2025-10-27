@@ -4,6 +4,7 @@ Gemini Client - FIXED VERSION
 ✅ Başlıklar benzersiz (channel topic KULLANILMAZ)
 ✅ Chapter başlıkları KISA (max 50 karakter)
 ✅ SEO-optimized
+✅ Import ve class tanımları eklendi
 """
 
 import json
@@ -11,9 +12,34 @@ import logging
 import random
 import re
 import os
+import time
+import difflib
 from typing import Optional, Dict, Any, List
+from dataclasses import dataclass
+
+# ✅ Gemini SDK imports
+try:
+    from google import genai
+    from google.genai import types
+except ImportError as e:
+    raise ImportError(
+        "google-genai paketi bulunamadı. Lütfen yükleyin: pip install google-genai>=0.2.0"
+    ) from e
 
 logger = logging.getLogger(__name__)
+
+
+# ✅ ContentResponse dataclass tanımı
+@dataclass
+class ContentResponse:
+    """Response from Gemini content generation"""
+    hook: str
+    script: List[str]
+    cta: str
+    search_queries: List[str]
+    main_visual_focus: str
+    metadata: Dict[str, Any]
+    chapters: List[Dict[str, Any]]
 
 
 def _ultra_seo_metadata_fixed(
@@ -166,6 +192,97 @@ CRITICAL REMINDERS:
 """
     return prompt
 
+
+# ✅ GeminiClient class tanımı
+class GeminiClient:
+    """Gemini API client for content generation"""
+    
+    def __init__(self, api_key: Optional[str] = None):
+        """Initialize Gemini client"""
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
+        if not self.api_key:
+            raise ValueError("GEMINI_API_KEY is required")
+        
+        # Initialize Gemini client
+        self.client = genai.Client(api_key=self.api_key)
+        
+        # Model chain for fallback
+        self.model_chain = [
+            "gemini-2.0-flash-exp",
+            "gemini-1.5-flash", 
+            "gemini-1.5-flash-002"
+        ]
+        
+        # Retry configuration
+        self.attempts_per_model = 2
+        self.total_attempts = len(self.model_chain) * self.attempts_per_model
+        self.initial_backoff = 2.0
+        self.max_backoff = 32.0
+        
+        logger.info(f"✅ GeminiClient initialized with {len(self.model_chain)} models")
+    
+    def generate(
+        self,
+        topic: str,
+        style: str = "educational",
+        duration: int = 180,
+        additional_context: Optional[str] = None
+    ) -> ContentResponse:
+        """Generate content for a topic"""
+        
+        # Calculate target sentences based on duration
+        # ~10-12 words per sentence, ~2.5 words per second
+        target_seconds = duration
+        words_per_second = 2.5
+        words_per_sentence = 10
+        target_sentences = int((target_seconds * words_per_second) / words_per_sentence)
+        target_sentences = max(40, min(70, target_sentences))
+        
+        # Generate hooks and CTAs
+        hooks = [
+            "WAIT—did you know this fascinating origin story?",
+            "STOP scrolling! You need to hear this.",
+            "97% of people don't know this surprising fact.",
+            "In 1847, something unexpected happened that changed everything.",
+            "Here's an unpopular opinion you won't believe."
+        ]
+        hook = random.choice(hooks)
+        
+        ctas = [
+            "Subscribe for more deep dives into fascinating topics!",
+            "Hit subscribe if you want to learn more hidden histories!",
+            "Follow for more surprising origin stories!"
+        ]
+        cta = random.choice(ctas)
+        
+        # Build prompt
+        prompt = _build_ultra_seo_prompt_fixed(
+            topic=topic,
+            style=style,
+            target_sentences=target_sentences,
+            hook=hook,
+            cta=cta
+        )
+        
+        if additional_context:
+            prompt += f"\n\nAdditional context: {additional_context}"
+        
+        # Call API with fallback
+        raw_response = self._call_api_with_fallback(prompt)
+        
+        # Parse response
+        content_response = self._parse_response(raw_response, topic)
+        
+        # Enhance metadata with SEO
+        content_response.metadata = _ultra_seo_metadata_fixed(
+            metadata=content_response.metadata,
+            topic=topic,
+            script=content_response.script,
+            chapters=content_response.chapters
+        )
+        
+        return content_response
+    
     def _call_api_with_fallback(
         self,
         prompt: str,
@@ -338,78 +455,3 @@ CRITICAL REMINDERS:
 
         chapters.append({"title": "Conclusion", "start_sentence": chapters[-1]["end_sentence"]+1, "end_sentence": total-1, "description": "Summary"})
         return chapters
-
-    def _ultra_seo_metadata(
-        self,
-        metadata: Dict[str, Any],
-        topic: str,
-        script: List[str],
-        chapters: Optional[List[Dict[str, Any]]] = None
-    ) -> Dict[str, Any]:
-        """ULTRA SEO enhancement"""
-        md = dict(metadata or {})
-        
-        # ✅ Extract primary keyword
-        primary_kw = topic.split("—")[0].strip() if "—" in topic else topic.split(":")[0].strip()
-        
-        # ✅ TITLE (60-70 chars, keyword-first)
-        title = (md.get("title") or f"{primary_kw} | Complete Guide").strip()
-        if not title.lower().startswith(primary_kw.lower()[:15]):
-            title = f"{primary_kw}: {title}"
-        title = title[:70] if len(title) > 70 else title
-        if len(title) < 60:
-            title = (title + " | Complete Explanation")[:70]
-        
-        # ✅ DESCRIPTION (400-500 words)
-        desc = (md.get("description") or "").strip()
-        
-        # Add hook if missing
-        if len(desc) < 200:
-            desc = f"Discover everything about {primary_kw}. {desc}"
-        
-        # Add chapters outline
-        if chapters and "Chapters" not in desc:
-            ch_list = "\n\n📚 Chapters:\n"
-            for ch in chapters[:8]:
-                ch_list += f"• {ch.get('title', 'Chapter')}\n"
-            desc += ch_list
-        
-        # Add related questions
-        if "?" not in desc:
-            desc += f"\n\n❓ Questions we answer:\n• What is {primary_kw}?\n• How did it evolve?\n• Why does it matter today?"
-        
-        # Add CTA
-        if "subscribe" not in desc.lower():
-            desc += "\n\n👉 Subscribe for more deep dives into fascinating topics!"
-        
-        # ✅ TAGS (25-35, specific)
-        tags = md.get("tags") or []
-        tags = [t.strip().lower() for t in tags if t and isinstance(t, str)]
-        
-        # Add primary keyword variations
-        kw_parts = primary_kw.lower().split()
-        for i in range(len(kw_parts), 0, -1):
-            variant = " ".join(kw_parts[:i])
-            if variant and variant not in tags and len(variant) > 3:
-                tags.append(variant)
-        
-        # Add script-based tags (extract nouns)
-        script_text = " ".join(script).lower()
-        common_words = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by"}
-        potential_tags = []
-        for word in script_text.split():
-            word = re.sub(r"[^a-z]", "", word)
-            if len(word) > 4 and word not in common_words and word not in tags:
-                potential_tags.append(word)
-        
-        # Add unique potential tags
-        for tag in list(dict.fromkeys(potential_tags))[:10]:
-            if len(tags) >= 35:
-                break
-            tags.append(tag)
-        
-        md["title"] = title.strip()
-        md["description"] = desc.strip()
-        md["tags"] = list(dict.fromkeys(tags))[:35]
-        
-        return md
