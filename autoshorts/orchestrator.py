@@ -159,7 +159,9 @@ class ShortsOrchestrator:
             raise ValueError("PEXELS_API_KEY required")
 
         # Runtime caches
-        self._clip_cache = _ClipCache(self.temp_dir)
+        # ✅ Disable clip cache to save disk space
+        # self._clip_cache = _ClipCache(self.temp_dir)
+        self._clip_cache = None
         self._video_candidates: Dict[str, List[ClipCandidate]] = {}
         self._video_url_cache: Dict[str, List[str]] = {}
         self._used_video_ids: Set[str] = set()
@@ -456,6 +458,21 @@ class ShortsOrchestrator:
             if final_scene:
                 scene_paths.append(final_scene)
                 logger.info("✅ Scene %d/%d complete", idx + 1, len(sentences))
+                
+                # ✅ Clean up intermediate files to save disk space
+                try:
+                    # Remove TTS audio file
+                    if os.path.exists(audio_path):
+                        os.remove(audio_path)
+                    # Remove scene video (before caption)
+                    if scene_path and os.path.exists(scene_path):
+                        os.remove(scene_path)
+                    # Remove captioned video (before mux)
+                    if captioned != scene_path and os.path.exists(captioned):
+                        os.remove(captioned)
+                    logger.debug(f"Cleaned up intermediate files for scene {idx}")
+                except Exception as cleanup_exc:
+                    logger.debug(f"Cleanup warning: {cleanup_exc}")
 
         # ✅ Collect audio durations for YouTube chapters
         audio_durations = []
@@ -492,6 +509,15 @@ class ShortsOrchestrator:
         if not os.path.exists(concat_out):
             logger.error("Concatenation failed")
             return None
+        
+        # ✅ Clean up scene files after concatenation
+        try:
+            for scene_path in scene_paths:
+                if os.path.exists(scene_path):
+                    os.remove(scene_path)
+            logger.debug(f"Cleaned up {len(scene_paths)} scene files")
+        except Exception as cleanup_exc:
+            logger.debug(f"Scene cleanup warning: {cleanup_exc}")
 
         # Add background music if enabled
         final_out = str(self.temp_dir / "final.mp4")
@@ -504,6 +530,14 @@ class ShortsOrchestrator:
                 shutil.copy2(concat_out, final_out)
         else:
             shutil.copy2(concat_out, final_out)
+        
+        # ✅ Clean up concat file
+        try:
+            if os.path.exists(concat_out):
+                os.remove(concat_out)
+            logger.debug("Cleaned up concat file")
+        except Exception as cleanup_exc:
+            logger.debug(f"Concat cleanup warning: {cleanup_exc}")
 
         # ✅ Generate thumbnail
         thumbnail_path = self._generate_thumbnail(script, final_out)
@@ -707,14 +741,20 @@ class ShortsOrchestrator:
 
         logger.info(f"🔍 Scene {index}: searching '{query}'")
 
-        # Get video candidates
+        # Get video candidates (metadata only)
         candidates = self._get_video_candidates(query, duration)
         if not candidates:
             logger.warning(f"No video candidates for query: {query}")
             return None
 
-        # Select best candidate
+        # ✅ Download only the selected clip
         candidate = random.choice(candidates[:3])  # Pick from top 3
+        
+        # Download on-demand
+        clip_path = self._download_clip_on_demand(candidate)
+        if not clip_path:
+            logger.warning(f"Failed to download selected clip")
+            return None
         
         # Mark as used
         self._used_video_ids.add(candidate.pexels_id)
@@ -724,10 +764,18 @@ class ShortsOrchestrator:
         output_path = sanitize_path(output_path)
         
         self._process_video_clip(
-            input_path=candidate.path,
+            input_path=clip_path,
             output_path=output_path,
             target_duration=duration
         )
+        
+        # ✅ Clean up downloaded clip to save space
+        try:
+            if os.path.exists(clip_path):
+                os.remove(clip_path)
+                logger.debug(f"Cleaned up: {clip_path}")
+        except Exception as exc:
+            logger.debug(f"Cleanup failed: {exc}")
 
         return output_path if os.path.exists(output_path) else None
 
@@ -736,7 +784,7 @@ class ShortsOrchestrator:
         query: str,
         min_duration: float
     ) -> List[ClipCandidate]:
-        """Get video candidates from Pexels."""
+        """Get video candidates from Pexels (metadata only, lazy download)."""
         
         # Check cache first
         if query in self._video_candidates:
@@ -752,7 +800,7 @@ class ShortsOrchestrator:
             params = {
                 "query": query,
                 "per_page": 15,
-                "orientation": "portrait"  # Long-form is typically 16:9, but portrait works for shorts
+                "orientation": "portrait"
             }
             
             response = self._http.get(PEXELS_SEARCH_ENDPOINT, params=params, timeout=15)
@@ -786,32 +834,11 @@ class ShortsOrchestrator:
                 if not video_url:
                     continue
                 
-                # Check cache or download
-                cached_path = self._clip_cache.get(video_url)
-                if not cached_path:
-                    # Download video
-                    local_path = str(self.temp_dir / f"clip_{video_id}.mp4")
-                    local_path = sanitize_path(local_path)
-                    
-                    try:
-                        logger.debug(f"Downloading clip: {video_url}")
-                        video_response = self._http.get(video_url, timeout=30)
-                        video_response.raise_for_status()
-                        
-                        with open(local_path, "wb") as f:
-                            f.write(video_response.content)
-                        
-                        self._clip_cache.put(video_url, local_path)
-                        cached_path = local_path
-                        
-                    except Exception as exc:
-                        logger.warning(f"Failed to download clip: {exc}")
-                        continue
-                
-                # Create candidate
+                # ✅ DON'T DOWNLOAD YET - just store metadata
+                # Download will happen on-demand when clip is actually needed
                 candidate = ClipCandidate(
                     pexels_id=video_id,
-                    path=cached_path,
+                    path="",  # Empty - will download on demand
                     duration=video_duration,
                     url=video_url
                 )
@@ -828,6 +855,26 @@ class ShortsOrchestrator:
             logger.debug("", exc_info=True)
         
         return candidates
+    
+    def _download_clip_on_demand(self, candidate: ClipCandidate) -> Optional[str]:
+        """Download video clip only when needed."""
+        # ✅ No cache - always download fresh to save disk space
+        local_path = str(self.temp_dir / f"clip_{candidate.pexels_id}.mp4")
+        local_path = sanitize_path(local_path)
+        
+        try:
+            logger.debug(f"Downloading clip on-demand: {candidate.url}")
+            video_response = self._http.get(candidate.url, timeout=30)
+            video_response.raise_for_status()
+            
+            with open(local_path, "wb") as f:
+                f.write(video_response.content)
+            
+            return local_path
+            
+        except Exception as exc:
+            logger.warning(f"Failed to download clip: {exc}")
+            return None
 
     def _process_video_clip(
         self,
