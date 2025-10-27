@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-YouTube Uploader - LONG-FORM with CHAPTER SUPPORT - FIXED VERSION
+YouTube Uploader - LONG-FORM with CHAPTER & THUMBNAIL SUPPORT - FIXED VERSION
 ✅ Timestamp hesaplama düzeltildi
 ✅ Başlık kesme limiti düzeltildi (60-70 karakter)
 ✅ Indent hataları düzeltildi
+✅ THUMBNAIL UPLOAD SUPPORT ADDED
 """
 
 import logging
 import re
+import os
 import unicodedata
 from typing import Dict, Any, List, Optional, Tuple
 from autoshorts.config import settings
@@ -43,6 +45,7 @@ class YouTubeUploader:
         topic: Optional[str] = None,
         chapters: Optional[List[Dict[str, Any]]] = None,
         audio_durations: Optional[List[float]] = None,
+        thumbnail_path: Optional[str] = None,  # ✅ YENİ PARAMETRE
     ) -> str:
         try:
             from google.oauth2.credentials import Credentials
@@ -105,6 +108,28 @@ class YouTubeUploader:
             vid = response.get("id", "")
             if not vid:
                 raise ValueError("No video ID returned from YouTube")
+            
+            # ✅ Upload thumbnail if provided
+            if thumbnail_path and os.path.exists(thumbnail_path):
+                try:
+                    logger.info(f"[YouTube] Uploading thumbnail...")
+                    
+                    thumbnail_media = MediaFileUpload(
+                        thumbnail_path,
+                        mimetype="image/jpeg",
+                        resumable=False
+                    )
+                    
+                    youtube.thumbnails().set(
+                        videoId=vid,
+                        media_body=thumbnail_media
+                    ).execute()
+                    
+                    logger.info(f"[YouTube] ✅ Thumbnail uploaded successfully")
+                except Exception as thumb_err:
+                    logger.warning(f"[YouTube] ⚠️ Thumbnail upload failed: {thumb_err}")
+                    # Don't fail the whole upload if thumbnail fails
+            
             logger.info(f"[YouTube] ✅ Uploaded: https://youtube.com/watch?v={vid}")
             return vid
 
