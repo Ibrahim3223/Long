@@ -266,7 +266,12 @@ class ShortsOrchestrator:
                     "script": script,
                 }
 
-                self._save_script_state_safe(script)
+                # ✅ DÜZELTME: Doğru parametrelerle çağır
+                self._save_script_state_safe(
+                    title=script.get("title", ""),
+                    script=sentences_txt,
+                    sub_topic=selected_sub_topic
+                )
            
                 # ✅ Pass sub_topic when registering
                 self._novelty_add_used_safe(
