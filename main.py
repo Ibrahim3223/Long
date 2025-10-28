@@ -226,7 +226,7 @@ def main():
                             description=metadata.get("description", ""),
                             tags=metadata.get("tags", []),
                             category_id="22",  # People & Blogs
-                            privacy_status=os.environ.get("YOUTUBE_PRIVACY", "private"),
+                            privacy_status=os.environ.get("YOUTUBE_PRIVACY", "public"),  # ✅ DEĞIŞTI: "private" -> "public"
                             topic=channel_settings.get("CHANNEL_TOPIC", ""),
                             chapters=script_data.get("chapters", []),
                             audio_durations=script_data.get("audio_durations", []),
