@@ -169,8 +169,8 @@ class ShortsOrchestrator:
         self._video_url_cache: Dict[str, List[str]] = {}
         self._used_video_ids: Set[str] = set()
         
-        # ✅ Rate limiter for Pexels API (0.4s between calls for faster downloads)
-        self._pexels_rate_limiter = RateLimiter(min_interval=0.4)
+        # ✅ Rate limiter for Pexels API (0.3s between calls = max 200/min)
+        self._pexels_rate_limiter = RateLimiter(min_interval=0.3)
 
         # Pexels client & HTTP session
         self.pexels = PexelsClient(api_key=self.pexels_key)
@@ -551,7 +551,7 @@ class ShortsOrchestrator:
         script["audio_durations"] = audio_durations
         logger.info(f"📊 Collected {len(audio_durations)} audio durations for chapters")
 
-        # ✅ Accept video if we have at least 40% of scenes
+        # ✅ Accept video if we have at least 30% of scenes (was 40%)
         if not scene_paths:
             logger.error("No scenes rendered successfully")
             return None
@@ -560,9 +560,12 @@ class ShortsOrchestrator:
             success_rate = len(scene_paths) / len(sentences) * 100
             logger.warning(f"⚠️ Skipped {skipped_scenes} scenes - {success_rate:.1f}% success rate")
             
-            if success_rate < 40:
-                logger.error(f"❌ Too many skipped scenes ({success_rate:.1f}% < 40%)")
+            # ✅ More tolerant: Allow video if we have at least 30% of scenes
+            if success_rate < 30:
+                logger.error(f"❌ Too many skipped scenes ({success_rate:.1f}% < 30%)")
                 return None
+            
+            logger.info(f"✅ Accepting video with {success_rate:.1f}% scene coverage")
 
         # Concatenate all scenes
         concat_out = str(self.temp_dir / "concat.mp4")
@@ -715,8 +718,45 @@ class ShortsOrchestrator:
             duration=duration,
             search_queries=search_queries,
             chapter_title=chapter_title,
-            timeout=10  # ✅ Reduced from 15s to 10s
+            timeout=8  # ✅ Reduced from 10s to 8s
         )
+        
+        # ✅ NEW: Generic fallback if no video found
+        if not candidate:
+            mode = os.getenv("MODE") or "general"
+            fallback_terms = {
+                "country_facts": ["nature", "landscape", "city", "culture"],
+                "history_story": ["history", "ancient", "heritage"],
+                "science": ["technology", "innovation", "research"],
+                "_default": ["world", "people", "life"]
+            }
+            
+            fallback = fallback_terms.get(mode, fallback_terms["_default"])
+            logger.info(f"🔄 Trying generic fallback: {fallback[0]}")
+            
+            self._pexels_rate_limiter.wait()
+            try:
+                result = self.pexels.search_videos(fallback[0], per_page=3)
+                videos = result.get("videos", []) if isinstance(result, dict) else result
+                
+                if videos:
+                    video = videos[0]
+                    video_id = str(video.get("id", ""))
+                    video_files = video.get("video_files", [])
+                    
+                    for vf in video_files:
+                        if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
+                            candidate = ClipCandidate(
+                                pexels_id=video_id,
+                                path="",
+                                duration=video.get("duration", 0),
+                                url=vf.get("link", "")
+                            )
+                            self._used_video_ids.add(video_id)
+                            logger.info(f"✅ Using fallback video: {fallback[0]}")
+                            break
+            except Exception as e:
+                logger.debug(f"Fallback search failed: {e}")
         
         if not candidate:
             return None
@@ -754,16 +794,19 @@ class ShortsOrchestrator:
         """Find best matching video clip from Pexels."""
         queries = []
         
-        # Add search queries if provided
+        # ✅ OPTIMIZATION: Only use most relevant queries
         if search_queries:
-            queries.extend(search_queries[:2])  # ✅ Only use top 2 queries
+            queries.append(search_queries[0])  # ✅ Only use first query (was using 2)
         
-        # Add chapter title
-        if chapter_title:
+        if chapter_title and not queries:  # ✅ Only if no search queries
             queries.append(chapter_title)
         
-        # Add keywords
-        queries.extend(keywords[:3])  # ✅ Only use top 3 keywords
+        # ✅ Only use top 2 keywords as fallback (was 3)
+        if not queries:
+            queries.extend(keywords[:2])
+        
+        # ✅ CRITICAL: Limit to 2 queries max (reduce API calls by 50%)
+        queries = queries[:2]
         
         for query in queries:
             query = simplify_query(query)
@@ -774,32 +817,59 @@ class ShortsOrchestrator:
             self._pexels_rate_limiter.wait()
             
             try:
-                # ✅ PERFORMANCE: Reduced per_page from 15 to 10
-                videos = self.pexels.search_videos(query, per_page=10)
+                # ✅ PERFORMANCE: Reduced per_page from 10 to 5 (faster response)
+                result = self.pexels.search_videos(query, per_page=5)
+                
+                # ✅ FIX: Handle both dict and direct videos list
+                if isinstance(result, dict):
+                    videos = result.get("videos", [])
+                elif isinstance(result, list):
+                    videos = result
+                else:
+                    logger.warning(f"Unexpected Pexels response type: {type(result)}")
+                    continue
                 
                 if not videos:
                     continue
                 
                 # Find suitable clip
                 for video in videos:
-                    video_id = str(video.get("id", ""))
+                    # ✅ FIX: Handle both dict and object
+                    if isinstance(video, dict):
+                        video_id = str(video.get("id", ""))
+                        video_files = video.get("video_files", [])
+                        vid_duration = video.get("duration", 0)
+                    else:
+                        video_id = str(getattr(video, "id", ""))
+                        video_files = getattr(video, "video_files", [])
+                        vid_duration = getattr(video, "duration", 0)
+                    
                     if video_id in self._used_video_ids:
                         continue
                     
-                    video_files = video.get("video_files", [])
                     if not video_files:
                         continue
                     
                     # Get HD video file
                     for vf in video_files:
-                        if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
-                            vid_duration = video.get("duration", 0)
-                            if vid_duration >= duration * 0.8:  # ✅ Accept videos 80% of target duration
+                        if isinstance(vf, dict):
+                            quality = vf.get("quality")
+                            width = vf.get("width", 0)
+                            link = vf.get("link", "")
+                        else:
+                            quality = getattr(vf, "quality", None)
+                            width = getattr(vf, "width", 0)
+                            link = getattr(vf, "link", "")
+                        
+                        # ✅ Accept any video with width >= 1080 (more flexible)
+                        if quality == "hd" and width >= 1080:
+                            # ✅ More flexible duration check (50% instead of 80%)
+                            if vid_duration >= duration * 0.5:
                                 candidate = ClipCandidate(
                                     pexels_id=video_id,
                                     path="",
                                     duration=vid_duration,
-                                    url=vf.get("link", "")
+                                    url=link
                                 )
                                 self._used_video_ids.add(video_id)
                                 logger.info(f"✅ Found video: {query} (ID: {video_id}, {vid_duration:.1f}s)")
@@ -809,7 +879,7 @@ class ShortsOrchestrator:
                 logger.warning(f"Video search failed for '{query}': {exc}")
                 continue
         
-        logger.warning(f"No suitable video found for keywords: {keywords[:3]}")
+        logger.warning(f"No suitable video found for keywords: {keywords[:2]}")
         return None
 
     def _download_clip(self, candidate: ClipCandidate) -> Optional[str]:
