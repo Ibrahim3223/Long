@@ -1082,22 +1082,22 @@ class ShortsOrchestrator:
 
     def _save_script_state_safe(self, title: str, script: List[str], sub_topic: Optional[str] = None):
         """Safely save script to state."""
-        if not hasattr(self, 'novelty_guard') or self.novelty_guard is None:
+        if not hasattr(self, 'state_guard') or self.state_guard is None:
             return
         
         try:
             entity = sub_topic if sub_topic else title
             script_text = " ".join(script)
             
-            # Generate content hash (hex string)
-            content_hash = self.novelty_guard.make_content_hash(
+            # ✅ DÜZELTME: state_guard kullan (novelty_guard değil)
+            content_hash = self.state_guard.make_content_hash(
                 script_text=script_text,
                 video_paths=[],
                 audio_path=None
             )
             
             # ✅ Use mark_uploaded instead of save_script
-            self.novelty_guard.mark_uploaded(
+            self.state_guard.mark_uploaded(
                 entity=entity,
                 script_text=script_text,
                 content_hash=content_hash,
