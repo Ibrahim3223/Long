@@ -21,7 +21,7 @@ concurrency:
 jobs:
   build-upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30  # ✅ REDUCED from 90 to 30 minutes
     environment: ${{ inputs.environment }}
 
     steps:
@@ -71,208 +71,85 @@ jobs:
           else:
               raise SystemExit("No channels configuration file found (tried channels_long.yml, channels.yml)")
 
-          if cfg_path.suffix.lower() == ".json":
-              data = json.loads(cfg_path.read_text(encoding="utf-8"))
-          else:
-              try:
-                  import yaml  # type: ignore
-              except ModuleNotFoundError:
-                  subprocess.check_call([sys.executable, "-m", "pip", "install", "pyyaml"])
-                  import yaml  # type: ignore
-
-              data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-
-          target = None
-          for ch in data.get("channels", []):
-              names = {str(ch.get("env", "")).strip(), str(ch.get("name", "")).strip()}
-              if input_env in names:
-                  target = ch
+          print(f"Using channels config: {cfg_path}")
+          
+          import yaml
+          data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+          
+          ch = None
+          for c in data.get("channels", []):
+              c_name = c.get("name", "").strip()
+              c_env = c.get("env", c_name).strip()
+              if c_env == input_env or c_name == input_env:
+                  ch = c
                   break
-
-          if target is None:
-              available = ", ".join(sorted(filter(None, {
-                  str(ch.get("env", "")).strip() or str(ch.get("name", "")).strip()
-                  for ch in data.get("channels", [])
-              })))
-              raise SystemExit(f"Channel '{input_env}' not found in {cfg_path}; available entries: {available}")
-
-          print(f"Using channels config: {cfg_path} (matched entry: {target.get('name')!r})")
-
-          lang = str(target.get("lang", ""))
-          mode = str(target.get("mode", ""))
-          visibility = str(target.get("visibility", ""))
-          seed = str(target.get("seed", ""))
-          topic = str(target.get("topic", ""))
-          search_terms = "\n".join(str(term) for term in target.get("search_terms", []) if term)
-
-          output_path = Path(os.environ["GITHUB_OUTPUT"])
-          with output_path.open("a", encoding="utf-8") as fh:
-              fh.write(f"lang={lang}\n")
-              fh.write(f"mode={mode}\n")
-              fh.write(f"visibility={visibility}\n")
-              fh.write(f"seed={seed}\n")
-              fh.write(f"config_path={cfg_path.as_posix()}\n")
-
-              topic_delim = f"EOF_TOPIC_{os.getpid()}"
-              fh.write(f"topic<<{topic_delim}\n{topic}\n{topic_delim}\n")
-
-              terms_delim = f"EOF_TERMS_{os.getpid()}"
-              fh.write(f"search_terms<<{terms_delim}\n{search_terms}\n{terms_delim}\n")
+          
+          if ch is None:
+              raise SystemExit(f"No channel found for environment '{input_env}'")
+          
+          CHANNEL_NAME = ch.get("name", input_env)
+          LANG = ch.get("lang", "en")
+          MODE = ch.get("mode", "educational")
+          VISIBILITY = ch.get("visibility", "public")
+          SEED = str(ch.get("seed", "0"))
+          TOPIC = ch.get("topic", "")
+          
+          env_file = os.getenv("GITHUB_ENV")
+          with open(env_file, "a", encoding="utf-8") as f:
+              f.write(f"CHANNEL_NAME={CHANNEL_NAME}\n")
+              f.write(f"LANG={LANG}\n")
+              f.write(f"MODE={MODE}\n")
+              f.write(f"VISIBILITY={VISIBILITY}\n")
+              f.write(f"SEED={SEED}\n")
+              f.write(f"TOPIC={TOPIC}\n")
+          
+          print(f"📋 Channel: {CHANNEL_NAME} | Mode: {MODE} | Lang: {LANG}")
           PY
 
-      # ---------- Kanal ENV'leri ----------
-      - name: Export channel variables (safe)
-        shell: bash
-        env:
-          INPUT_ENV:            ${{ inputs.environment }}
-
-          DEFAULT_LANG:         ${{ steps.cfg.outputs.lang }}
-          DEFAULT_MODE:         ${{ steps.cfg.outputs.mode }}
-          DEFAULT_VISIBILITY:   ${{ steps.cfg.outputs.visibility }}
-          DEFAULT_SEED:         ${{ steps.cfg.outputs.seed }}
-          DEFAULT_TOPIC:        ${{ steps.cfg.outputs.topic }}
-          DEFAULT_SEARCH_TERMS: ${{ steps.cfg.outputs.search_terms }}
-          CHANNELS_CONFIG_PATH: ${{ steps.cfg.outputs.config_path }}
-
-          VARS_TOPIC:           ${{ vars.TOPIC }}
-          VARS_LANG:            ${{ vars.LANG }}
-          VARS_MODE:            ${{ vars.MODE }}
-          VARS_VISIBILITY:      ${{ vars.VISIBILITY }}
-          VARS_ROTATION_SEED:   ${{ vars.ROTATION_SEED }}
-          VARS_SEARCH_TERMS:    ${{ vars.SEARCH_TERMS }}
-          VARS_GEMINI_PROMPT:   ${{ vars.GEMINI_PROMPT }}
-          VARS_TTS_RATE:        ${{ vars.TTS_RATE }}
-          VARS_TTS_VOICE:       ${{ vars.TTS_VOICE }}
-          VARS_BGM_URLS:        ${{ vars.BGM_URLS }}
-        run: |
-          set -euo pipefail
-
-          CHANNEL_NAME="$INPUT_ENV"
-          LANG_VAL="${VARS_LANG:-${DEFAULT_LANG:-}}"
-          MODE_VAL="${VARS_MODE:-${DEFAULT_MODE:-}}"
-          VIS_VAL="${VARS_VISIBILITY:-${DEFAULT_VISIBILITY:-public}}"
-          SEED_VAL="${VARS_ROTATION_SEED:-${DEFAULT_SEED:-0}}"
-
-          # TTS voice boşsa hızlı ve stabil default atıyoruz (Edge-TTS default)
-          if [ -z "${VARS_TTS_VOICE:-}" ]; then
-            DEF_VOICE="en-US-GuyNeural"
-          else
-            DEF_VOICE="${VARS_TTS_VOICE}"
-          fi
-
-          wenv () {
-            local __name="$1"; shift
-            local __val="$*"
-            local __delim="EOF_${__name}_$$"
-            {
-              echo "${__name}<<${__delim}"
-              printf '%s\n' "${__val}"
-              echo "${__delim}"
-            } >> "$GITHUB_ENV"
-          }
-
-          TOPIC_VAL="${VARS_TOPIC:-${DEFAULT_TOPIC:-}}"
-          SEARCH_VAL="${VARS_SEARCH_TERMS:-${DEFAULT_SEARCH_TERMS:-}}"
-
-          wenv CHANNEL_NAME        "${CHANNEL_NAME}"
-          wenv TOPIC               "${TOPIC_VAL}"
-          wenv LANG                "${LANG_VAL}"
-          wenv MODE                "${MODE_VAL}"
-          wenv VISIBILITY          "${VIS_VAL:-public}"
-          wenv ROTATION_SEED       "${SEED_VAL}"
-          wenv SEARCH_TERMS        "${SEARCH_VAL}"
-          wenv GEMINI_PROMPT       "${VARS_GEMINI_PROMPT}"
-          wenv TTS_RATE            "${VARS_TTS_RATE:-+5%}"
-          wenv TTS_VOICE           "${DEF_VOICE}"
-          wenv BGM_URLS            "${VARS_BGM_URLS}"
-          wenv UPLOAD_TO_YT        "1"
-          if [ -n "${CHANNELS_CONFIG_PATH:-}" ]; then
-            wenv CHANNELS_CONFIG_PATH "${CHANNELS_CONFIG_PATH}"
-          fi
-
-      - name: Restore state from cache
+      - name: Restore state cache
         uses: actions/cache/restore@v4
         with:
           path: .state
           key: state-long-${{ inputs.environment }}-${{ github.run_id }}
           restore-keys: |
             state-long-${{ inputs.environment }}-
-            state-long-
 
-      # 🔥 Model ağırlıklarını cache'le — SentenceTransformer, torch, HF vb.
-      - name: Cache model weights (HF/torch/ST)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/torch
-            ~/.cache/huggingface
-            ~/.cache/sentence_transformers
-          key: models-${{ inputs.environment }}-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            models-${{ inputs.environment }}-${{ runner.os }}-
-            models-
-
-      - name: Install Python dependencies
-        env:
-          PIP_DISABLE_PIP_VERSION_CHECK: "1"
-          PIP_NO_WARN_SCRIPT_LOCATION: "1"
+      - name: Install dependencies
         run: |
-          echo "📦 Installing Python packages..."
-          python -m pip install -U pip setuptools wheel
+          echo "📦 Installing Python dependencies..."
+          pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
-          echo "✅ Python dependencies installed"
+          pip show google-generativeai
+          echo "✅ Dependencies installed"
 
-      # ============================================================
-      # stable-ts (phoneme-level align) — Edge-TTS marker varsa çoğunlukla gerekmez,
-      # ama yüklü dursun (fallback olduğunda kırılmasın).
-      # ============================================================
       - name: Install stable-ts (milisecond-perfect captions)
         run: |
           echo "🎯 Installing stable-ts for phoneme-level caption alignment..."
-          pip install "stable-ts>=2.14.0"
-          echo "✅ stable-ts installed"
+          pip install stable-ts>=2.14.0
+          echo "✅ stable-ts installed - milisecond caption sync enabled!"
 
-      - name: Build long-form video
+      - name: Run video generation
         env:
-          GEMINI_API_KEY:   ${{ secrets.GEMINI_API_KEY }}
-          PEXELS_API_KEY:   ${{ secrets.PEXELS_API_KEY }}
-          PIXABAY_API_KEY:  ${{ secrets.PIXABAY_API_KEY }}
-          YT_CLIENT_ID:     ${{ secrets.YT_CLIENT_ID }}
+          # ===== API KEYS =====
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
 
-          # ===== LONG-FORM VIDEO SETTINGS =====
-          VIDEO_WIDTH: "1920"
-          VIDEO_HEIGHT: "1080"
-          ASPECT_RATIO: "16:9"
-          TARGET_DURATION: "240"
-          TARGET_MIN_SEC: "180"
-          TARGET_MAX_SEC: "600"
-          MIN_SENTENCES: "20"
-          MAX_SENTENCES: "35"
-          TARGET_SENTENCES: "25"
+          # ===== PERFORMANCE (Faster Rendering) =====
+          FAST_MODE: "1"
+          FFMPEG_PRESET: "veryfast"
+          PARALLEL_SCENES: "1"
+          MAX_WORKERS: "4"
 
-          # ===== TTS (Natural Pacing) =====
-          TTS_SSML: "0"
-          # TTS_RATE export adımından geliyor, burada override etmiyoruz
-
-          # ===== CAPTIONS (Bottom Positioned) =====
-          REQUIRE_CAPTIONS: "1"
-          KARAOKE_CAPTIONS: "0"
-          CAPTIONS_UPPER: "1"
+          # ===== CAPTIONS (Karaoke OFF for speed) =====
+          KARAOKE_CAPTIONS: "1"
           CAPTION_POSITION: "bottom"
-          CAPTION_FONT_SIZE: "48"
-          CAPTION_MAX_LINES: "2"
-          CAPTION_MARGIN_V: "100"
-          KARAOKE_INACTIVE: "#FFD700"
-          KARAOKE_ACTIVE: "#3EA6FF"
-          KARAOKE_OUTLINE: "#000000"
-          KARAOKE_OFFSET_MS: "0"
-          KARAOKE_SPEED: "1.0"
-          KARAOKE_SPEEDUP_PCT: "0.0"
-          KARAOKE_RAMP_PCT: "0.0"
-          KARAOKE_EARLY_END_MS: "0"
-          CAPTION_LEAD_MS: "0"
+          CAPTION_STYLE: "modern"
+          CAPTION_FONT_SIZE: "72"
+          CAPTION_MAX_WORDS: "6"
+          USE_STABLE_TS: "0"
 
           # ===== VIDEO EFFECTS (Subtle) =====
           KARAOKE_EFFECTS: "0"
@@ -291,7 +168,7 @@ jobs:
           NOVELTY_ENFORCE: "1"
           NOVELTY_WINDOW: "30"
           NOVELTY_JACCARD_MAX: "0.60"
-          NOVELTY_RETRIES: "5"
+          NOVELTY_RETRIES: "3"  # ✅ REDUCED from 5 to 3
           ENTITY_COOLDOWN_DAYS: "45"
           SIM_TH_SCRIPT: "0.90"
           SIM_TH_ENTITY: "0.92"
@@ -303,15 +180,14 @@ jobs:
           PEXELS_STRICT_VERTICAL: "0"
           PEXELS_ALLOW_LANDSCAPE: "1"
           PEXELS_MIN_HEIGHT: "720"
-          PEXELS_PER_PAGE: "60"          # 80 -> 60 (daha hızlı)
+          PEXELS_PER_PAGE: "40"  # ✅ REDUCED from 60 to 40
           PEXELS_ALLOW_REUSE: "1"
-          PEXELS_MAX_USES_PER_CLIP: "3"  # 2 -> 3 (daha az indirme)
-          PEXELS_MAX_PAGES: "8"          # 15 -> 8 (arama derinliği kısaldı)
+          PEXELS_MAX_USES_PER_CLIP: "3"
+          PEXELS_MAX_PAGES: "5"  # ✅ REDUCED from 8 to 5
           ALLOW_PIXABAY_FALLBACK: "1"
           STRICT_ENTITY_FILTER: "0"
 
           # ===== BGM =====
-          # Geçici olarak kapalı (BGMManager alias fix gelene kadar)
           BGM_ENABLE: "0"
           BGM_DIR: "bgm"
           BGM_FADE: "1.5"
