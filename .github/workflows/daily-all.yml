@@ -75,7 +75,7 @@ jobs:
   build-upload:
     needs: make-matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30  # ✅ REDUCED from 90 to 30 minutes
     
     strategy:
       fail-fast: false
@@ -116,79 +116,36 @@ jobs:
           DEFAULT_TOPIC:      ${{ matrix.topic }}
         run: |
           set -euo pipefail
+          echo "CHANNEL_NAME=${CHANNEL_NAME}" >> "$GITHUB_ENV"
+          echo "ENV=${CHANNEL_ENV}" >> "$GITHUB_ENV"
+          echo "LANG=${DEFAULT_LANG}" >> "$GITHUB_ENV"
+          echo "MODE=${DEFAULT_MODE}" >> "$GITHUB_ENV"
+          echo "VISIBILITY=${DEFAULT_VISIBILITY}" >> "$GITHUB_ENV"
+          echo "SEED=${DEFAULT_SEED}" >> "$GITHUB_ENV"
+          echo "TOPIC=${DEFAULT_TOPIC}" >> "$GITHUB_ENV"
+          
+          echo "📋 Channel: ${CHANNEL_NAME} | Mode: ${DEFAULT_MODE} | Lang: ${DEFAULT_LANG}"
 
-          # TTS voice boşsa hızlı ve stabil default atıyoruz (Edge-TTS default)
-          if [ -z "${VARS_TTS_VOICE:-}" ]; then
-            DEF_VOICE="en-US-GuyNeural"
-          else
-            DEF_VOICE="${VARS_TTS_VOICE}"
-          fi
-
-          wenv () {
-            local __name="$1"; shift
-            local __val="$*"
-            local __delim="EOF_${__name}_$$"
-            {
-              echo "${__name}<<${__delim}"
-              printf '%s\n' "${__val}"
-              echo "${__delim}"
-            } >> "$GITHUB_ENV"
-          }
-
-          LANG_VAL="${DEFAULT_LANG:-en}"
-          MODE_VAL="${DEFAULT_MODE:-educational}"
-          VIS_VAL="${DEFAULT_VISIBILITY:-public}"
-          SEED_VAL="${DEFAULT_SEED:-0}"
-          TOPIC_VAL="${DEFAULT_TOPIC:-}"
-
-          wenv CHANNEL_NAME        "${CHANNEL_NAME}"
-          wenv TOPIC               "${TOPIC_VAL}"
-          wenv LANG                "${LANG_VAL}"
-          wenv MODE                "${MODE_VAL}"
-          wenv VISIBILITY          "${VIS_VAL}"
-          wenv ROTATION_SEED       "${SEED_VAL}"
-          wenv SEARCH_TERMS        ""
-          wenv GEMINI_PROMPT       ""
-          wenv TTS_RATE            "+5%"
-          wenv TTS_VOICE           "${DEF_VOICE}"
-          wenv BGM_URLS            ""
-          wenv UPLOAD_TO_YT        "1"
-
-      - name: Restore state from cache
+      # ---------- Restore state cache ----------
+      - name: Restore state cache
         uses: actions/cache/restore@v4
         with:
           path: .state
           key: state-long-${{ matrix.env }}-${{ github.run_id }}
           restore-keys: |
             state-long-${{ matrix.env }}-
-            state-long-
 
-      # 🔥 Model ağırlıklarını cache'le — SentenceTransformer, torch, HF vb.
-      - name: Cache model weights (HF/torch/ST)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/torch
-            ~/.cache/huggingface
-            ~/.cache/sentence_transformers
-          key: models-${{ matrix.env }}-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            models-${{ matrix.env }}-${{ runner.os }}-
-            models-
-
-      - name: Install Python dependencies
-        env:
-          PIP_DISABLE_PIP_VERSION_CHECK: "1"
-          PIP_NO_WARN_SCRIPT_LOCATION: "1"
+      # ---------- Install deps ----------
+      - name: Install dependencies
         run: |
-          echo "📦 Installing Python packages..."
-          python -m pip install -U pip setuptools wheel
+          echo "📦 Installing Python dependencies..."
+          pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
-          echo "✅ Python dependencies installed"
+          pip show google-generativeai
+          echo "✅ Dependencies installed"
 
       # ============================================================
-      # stable-ts (phoneme-level align) — Edge-TTS marker varsa çoğunlukla gerekmez,
-      # ama yüklü dursun (fallback olduğunda kırılmasın).
+      # ✅ PERFORMANCE FIX: Install stable-ts for caption alignment
       # ============================================================
       - name: Install stable-ts (milisecond-perfect captions)
         run: |
@@ -236,7 +193,7 @@ jobs:
           NOVELTY_ENFORCE: "1"
           NOVELTY_WINDOW: "30"
           NOVELTY_JACCARD_MAX: "0.60"
-          NOVELTY_RETRIES: "5"
+          NOVELTY_RETRIES: "3"  # ✅ REDUCED from 5 to 3
           ENTITY_COOLDOWN_DAYS: "45"
           SIM_TH_SCRIPT: "0.90"
           SIM_TH_ENTITY: "0.92"
@@ -248,15 +205,14 @@ jobs:
           PEXELS_STRICT_VERTICAL: "0"
           PEXELS_ALLOW_LANDSCAPE: "1"
           PEXELS_MIN_HEIGHT: "720"
-          PEXELS_PER_PAGE: "60"          # 80 -> 60 (daha hızlı)
+          PEXELS_PER_PAGE: "40"  # ✅ REDUCED from 60 to 40 (faster)
           PEXELS_ALLOW_REUSE: "1"
-          PEXELS_MAX_USES_PER_CLIP: "3"  # 2 -> 3 (daha az indirme)
-          PEXELS_MAX_PAGES: "8"          # 15 -> 8 (arama derinliği kısaldı)
+          PEXELS_MAX_USES_PER_CLIP: "3"
+          PEXELS_MAX_PAGES: "5"  # ✅ REDUCED from 8 to 5 (faster search)
           ALLOW_PIXABAY_FALLBACK: "1"
           STRICT_ENTITY_FILTER: "0"
 
           # ===== BGM =====
-          # Geçici olarak kapalı (BGMManager alias fix gelene kadar)
           BGM_ENABLE: "0"
           BGM_DIR: "bgm"
           BGM_FADE: "1.5"
