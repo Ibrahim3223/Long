@@ -1075,9 +1075,32 @@ class ShortsOrchestrator:
         except Exception as exc:
             logger.warning("Novelty add_used failed: %s", exc)
 
-    def _save_script_state_safe(self, script: Dict):
-        """Save script to state."""
+    def _save_script_state_safe(self, title: str, script: List[str], sub_topic: Optional[str] = None):
+        """Safely save script to state."""
+        if not hasattr(self, 'novelty_guard') or self.novelty_guard is None:
+            return
+        
         try:
-            self.state_guard.save_script(script)
+            entity = sub_topic if sub_topic else title
+            script_text = " ".join(script)
+            
+            # Generate content hash (hex string)
+            content_hash = self.novelty_guard.make_content_hash(
+                script_text=script_text,
+                video_paths=[],
+                audio_path=None
+            )
+            
+            # ✅ Use mark_uploaded instead of save_script
+            self.novelty_guard.mark_uploaded(
+                entity=entity,
+                script_text=script_text,
+                content_hash=content_hash,
+                video_path="pending",
+                title=title
+            )
+            
+            logger.info("Script state saved successfully")
+            
         except Exception as exc:
-            logger.warning("State save failed: %s", exc)
+            logger.warning(f"State save failed: {exc}")
