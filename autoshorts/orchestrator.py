@@ -378,9 +378,18 @@ class ShortsOrchestrator:
                     
                 sentences.append({"text": sentence, "type": "content"})
             
-            # ✅ Add CTA if exists
+            # ✅ DÜZELTME: CTA son cümle ile aynıysa ekleme
             if script["cta"]:
-                sentences.append({"text": script["cta"], "type": "cta"})
+                normalized_cta = script["cta"].strip().lower()
+                
+                # Check if last sentence is the same as CTA
+                if sentences and sentences[-1]["text"].strip().lower() == normalized_cta:
+                    logger.info("⚠️ Skipping duplicate CTA (same as last sentence)")
+                    # Replace last sentence type to 'cta' instead of adding duplicate
+                    sentences[-1]["type"] = "cta"
+                else:
+                    # CTA is different, add it
+                    sentences.append({"text": script["cta"], "type": "cta"})
             
             script["sentences"] = sentences
             
