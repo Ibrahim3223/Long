@@ -360,12 +360,25 @@ class ShortsOrchestrator:
             
             # Build sentences list
             sentences = []
+            
+            # ✅ Add hook if exists
             if script["hook"]:
                 sentences.append({"text": script["hook"], "type": "hook"})
             
+            # ✅ DÜZELTME: İlk cümle hook ile aynıysa ekleme
             for sentence in script["script"]:
+                # Normalize both for comparison
+                normalized_sentence = sentence.strip().lower()
+                normalized_hook = script["hook"].strip().lower() if script["hook"] else ""
+                
+                # Skip if this sentence is the same as hook
+                if normalized_sentence == normalized_hook:
+                    logger.info("⚠️ Skipping duplicate first sentence (same as hook)")
+                    continue
+                    
                 sentences.append({"text": sentence, "type": "content"})
             
+            # ✅ Add CTA if exists
             if script["cta"]:
                 sentences.append({"text": script["cta"], "type": "cta"})
             
@@ -717,51 +730,80 @@ class ShortsOrchestrator:
         chapter_title: Optional[str] = None,
     ) -> Optional[str]:
         """Prepare video clip for a scene."""
+        
         # ✅ PERFORMANCE: Reduce video search timeout
         candidate = self._find_best_video(
             keywords=keywords,
             duration=duration,
             search_queries=search_queries,
             chapter_title=chapter_title,
-            timeout=8  # ✅ Reduced from 10s to 8s
+            timeout=8
         )
         
-        # ✅ NEW: Generic fallback if no video found
+        # ✅ IMPROVED: Better fallback with variety
         if not candidate:
             mode = os.getenv("MODE") or "general"
             fallback_terms = {
-                "country_facts": ["nature", "landscape", "city", "culture"],
-                "history_story": ["history", "ancient", "heritage"],
-                "science": ["technology", "innovation", "research"],
-                "_default": ["world", "people", "life"]
+                "country_facts": ["nature landscape", "city skyline", "cultural heritage", "world travel", "countryside"],
+                "history_story": ["ancient ruins", "historical", "heritage site", "old architecture"],
+                "science": ["technology", "laboratory", "innovation", "research center"],
+                "_default": ["world", "people working", "nature beauty", "urban life", "travel destinations"]
             }
             
-            fallback = fallback_terms.get(mode, fallback_terms["_default"])
-            logger.info(f"🔄 Trying generic fallback: {fallback[0]}")
+            # ✅ Get fallback terms for mode
+            terms = fallback_terms.get(mode, fallback_terms["_default"])
             
-            self._pexels_rate_limiter.wait()
-            try:
-                result = self.pexels.search_videos(fallback[0], per_page=3)
-                videos = result.get("videos", []) if isinstance(result, dict) else result
+            # ✅ Try multiple fallback terms with random selection
+            import random
+            random.shuffle(terms)
+            
+            for fallback_term in terms[:3]:  # Try up to 3 different fallback terms
+                logger.info(f"🔄 Trying generic fallback: {fallback_term}")
                 
-                if videos:
-                    video = videos[0]
-                    video_id = str(video.get("id", ""))
-                    video_files = video.get("video_files", [])
+                self._pexels_rate_limiter.wait()
+                try:
+                    # ✅ Use random page for more variety
+                    random_page = random.randint(1, 3)
+                    result = self.pexels.search_videos(fallback_term, per_page=10, page=random_page)
+                    videos = result.get("videos", []) if isinstance(result, dict) else result
                     
-                    for vf in video_files:
-                        if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
-                            candidate = ClipCandidate(
-                                pexels_id=video_id,
-                                path="",
-                                duration=video.get("duration", 0),
-                                url=vf.get("link", "")
-                            )
-                            self._used_video_ids.add(video_id)
-                            logger.info(f"✅ Using fallback video: {fallback[0]}")
-                            break
-            except Exception as e:
-                logger.debug(f"Fallback search failed: {e}")
+                    if videos:
+                        # ✅ Shuffle videos for variety
+                        random.shuffle(videos)
+                        
+                        for video in videos:
+                            video_id = str(video.get("id", ""))
+                            
+                            # ✅ Skip if already used
+                            if video_id in self._used_video_ids:
+                                continue
+                            
+                            video_files = video.get("video_files", [])
+                            
+                            for vf in video_files:
+                                if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
+                                    candidate = ClipCandidate(
+                                        pexels_id=video_id,
+                                        path="",
+                                        duration=video.get("duration", 0),
+                                        url=vf.get("link", "")
+                                    )
+                                    self._used_video_ids.add(video_id)
+                                    logger.info(f"✅ Using fallback video: {fallback_term} (ID: {video_id})")
+                                    break
+                            
+                            if candidate:
+                                break
+                    
+                    if candidate:
+                        break
+                        
+                except Exception as e:
+                    logger.debug(f"Fallback search failed for '{fallback_term}': {e}")
+                    continue
+            
+            if not candidate:
+                logger.warning("❌ All fallback attempts failed")
         
         if not candidate:
             return None
@@ -801,92 +843,70 @@ class ShortsOrchestrator:
         
         # ✅ OPTIMIZATION: Only use most relevant queries
         if search_queries:
-            queries.append(search_queries[0])  # ✅ Only use first query (was using 2)
+            queries.append(search_queries[0])
         
-        if chapter_title and not queries:  # ✅ Only if no search queries
+        if chapter_title and not queries:
             queries.append(chapter_title)
         
-        # ✅ Only use top 2 keywords as fallback (was 3)
         if not queries:
             queries.extend(keywords[:2])
         
-        # ✅ CRITICAL: Limit to 2 queries max (reduce API calls by 50%)
         queries = queries[:2]
         
-        for query in queries:
-            query = simplify_query(query)
-            if not query:
-                continue
-                
-            # ✅ Rate limit before API call
-            self._pexels_rate_limiter.wait()
-            
-            try:
-                # ✅ PERFORMANCE: Reduced per_page from 10 to 5 (faster response)
-                result = self.pexels.search_videos(query, per_page=5)
-                
-                # ✅ FIX: Handle both dict and direct videos list
-                if isinstance(result, dict):
-                    videos = result.get("videos", [])
-                elif isinstance(result, list):
-                    videos = result
-                else:
-                    logger.warning(f"Unexpected Pexels response type: {type(result)}")
+        # ✅ Try multiple pages to get more variety
+        for page_num in [1, 2]:  # Try first 2 pages
+            for query in queries:
+                query = simplify_query(query)
+                if not query:
                     continue
+                    
+                self._pexels_rate_limiter.wait()
                 
-                if not videos:
-                    continue
-                
-                # Find suitable clip
-                for video in videos:
-                    # ✅ FIX: Handle both dict and object
-                    if isinstance(video, dict):
-                        video_id = str(video.get("id", ""))
-                        video_files = video.get("video_files", [])
-                        vid_duration = video.get("duration", 0)
+                try:
+                    # ✅ Search with page parameter for variety
+                    result = self.pexels.search_videos(query, per_page=10, page=page_num)
+                    
+                    if isinstance(result, dict):
+                        videos = result.get("videos", [])
+                    elif isinstance(result, list):
+                        videos = result
                     else:
-                        video_id = str(getattr(video, "id", ""))
-                        video_files = getattr(video, "video_files", [])
-                        vid_duration = getattr(video, "duration", 0)
-                    
-                    if video_id in self._used_video_ids:
+                        logger.warning(f"Unexpected Pexels response type: {type(result)}")
                         continue
                     
-                    if not video_files:
+                    if not videos:
+                        logger.debug(f"No videos found for '{query}' (page {page_num})")
                         continue
                     
-                    # Get HD video file
-                    for vf in video_files:
-                        if isinstance(vf, dict):
-                            quality = vf.get("quality")
-                            width = vf.get("width", 0)
-                            link = vf.get("link", "")
-                        else:
-                            quality = getattr(vf, "quality", None)
-                            width = getattr(vf, "width", 0)
-                            link = getattr(vf, "link", "")
+                    logger.info(f"🔍 Found {len(videos)} videos for '{query}' (page {page_num})")
+                    
+                    # ✅ Try to find unused video
+                    for video in videos:
+                        video_id = str(video.get("id", ""))
                         
-                        # ✅ Accept any video with width >= 1080 (more flexible)
-                        if quality == "hd" and width >= 1080:
-                            # ✅ More flexible duration check (50% instead of 80%)
-                            if vid_duration >= duration * 0.5:
+                        # ✅ Skip if already used
+                        if video_id in self._used_video_ids:
+                            continue
+                        
+                        video_files = video.get("video_files", [])
+                        for vf in video_files:
+                            if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
                                 candidate = ClipCandidate(
                                     pexels_id=video_id,
                                     path="",
-                                    duration=vid_duration,
-                                    url=link
+                                    duration=video.get("duration", 0),
+                                    url=vf.get("link", "")
                                 )
                                 self._used_video_ids.add(video_id)
-                                logger.info(f"✅ Found video: {query} (ID: {video_id}, {vid_duration:.1f}s)")
+                                logger.info(f"✅ Selected video: {video_id} from '{query}'")
                                 return candidate
-                
-            except Exception as exc:
-                logger.warning(f"Video search failed for '{query}': {exc}")
-                continue
+                    
+                except Exception as exc:
+                    logger.debug(f"Search error for '{query}': {exc}")
+                    continue
         
-        logger.warning(f"No suitable video found for keywords: {keywords[:2]}")
         return None
-
+        
     def _download_clip(self, candidate: ClipCandidate) -> Optional[str]:
         """Download video clip."""
         # ✅ No cache - always download fresh to save disk space
