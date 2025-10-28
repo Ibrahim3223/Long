@@ -374,9 +374,18 @@ class ShortsOrchestrator:
             logger.info("✅ Script generated: %d sentences", len(script["sentences"]))
             logger.info(f"📝 Title: {script['title']}")
             
-            # Score
-            if self.quality_scorer:
-                script = self.quality_scorer.score_script(script)
+            # ✅ Score script quality
+            if self.quality_scorer and sentences:
+                try:
+                    sentence_texts = [s["text"] for s in sentences if s.get("text")]
+                    quality_scores = self.quality_scorer.score(
+                        sentences=sentence_texts,
+                        title=script["title"]
+                    )
+                    script["quality_scores"] = quality_scores
+                    logger.info(f"📊 Quality scores - Overall: {quality_scores.get('overall', 0):.1f}/10")
+                except Exception as e:
+                    logger.warning(f"Quality scoring failed: {e}")
 
             return script
         except Exception as exc:
