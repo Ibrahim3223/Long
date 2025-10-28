@@ -5,6 +5,7 @@ Main entry point for autoshorts.
 Run this file to generate a YouTube Video.
 ✅ WITH THUMBNAIL SUPPORT
 ✅ WITH MODE ENV VAR SETUP
+✅ WITH OUTPUT DIRECTORY COPY
 """
 import sys
 import os
@@ -169,9 +170,37 @@ def main():
         video_path, metadata = orchestrator.produce_video(topic_prompt)
         
         if video_path and metadata:
+            # ✅ Create output directory
+            out_dir = os.path.join(project_root, "out")
+            os.makedirs(out_dir, exist_ok=True)
+            
+            # ✅ Generate output filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            slug = _safe_slug(metadata.get('title', 'video'))[:50]
+            output_filename = f"{channel_name}_{slug}_{timestamp}.mp4"
+            output_path = os.path.join(out_dir, output_filename)
+            
+            # ✅ Copy video to output directory
+            print(f"\n📦 Copying video to output directory...")
+            shutil.copy2(video_path, output_path)
+            print(f"✅ Video copied to: {output_path}")
+            
+            # ✅ Copy thumbnail if exists
+            thumbnail_src = metadata.get('script', {}).get('thumbnail_path')
+            if thumbnail_src and os.path.exists(thumbnail_src):
+                thumbnail_dest = output_path.replace('.mp4', '_thumbnail.jpg')
+                shutil.copy2(thumbnail_src, thumbnail_dest)
+                print(f"✅ Thumbnail copied to: {thumbnail_dest}")
+            
+            # ✅ Save metadata
+            metadata_path = output_path.replace('.mp4', '_metadata.json')
+            with open(metadata_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
+            print(f"✅ Metadata saved to: {metadata_path}")
+            
             print("\n" + "=" * 60)
             print(f"✅ SUCCESS!")
-            print(f"📹 Video: {video_path}")
+            print(f"📹 Video: {output_path}")
             print(f"📝 Title: {metadata.get('title', 'N/A')}")
             print(f"🏷️ Tags: {len(metadata.get('tags', []))} tags")
             print("=" * 60)
@@ -179,9 +208,10 @@ def main():
             # Set output for GitHub Actions
             if os.getenv("GITHUB_OUTPUT"):
                 with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-                    f.write(f"video_path={video_path}\n")
+                    f.write(f"video_path={output_path}\n")
                     f.write(f"title={metadata.get('title', '')}\n")
-                    f.write(f"description={metadata.get('description', '')}\n")
+                    description = metadata.get('description', '').replace('\n', ' ')
+                    f.write(f"description={description}\n")
                     tags_str = ",".join(metadata.get("tags", []))
                     f.write(f"tags={tags_str}\n")
             
