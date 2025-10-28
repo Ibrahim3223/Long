@@ -309,7 +309,7 @@ class ShortsOrchestrator:
             sub_topic = None
             if mode and hasattr(self, 'novelty_guard') and self.use_novelty:
                 try:
-                    sub_topic = self.novelty_guard.select_subtopic(
+                    sub_topic = self.novelty_guard.pick_sub_topic(
                         channel=self.channel_id,
                         mode=mode
                     )
@@ -325,18 +325,54 @@ class ShortsOrchestrator:
                         logger.info(f"🎯 Using fallback sub-topic: {sub_topic}")
         
             # ✅ Pass mode and sub_topic to Gemini
-            script = self.gemini.generate_script(
+            content_response = self.gemini.generate(
                 topic=topic_prompt,
                 mode=mode,
                 sub_topic=sub_topic
             )
         
-            if not script:
+            if not content_response:
                 return None
             
             # ✅ Store sub_topic in script for later use
             if sub_topic:
-                script['_sub_topic'] = sub_topic
+                content_response._sub_topic = sub_topic
+            
+            # Convert ContentResponse to dict format
+            script = {
+                "hook": content_response.hook,
+                "script": content_response.script,
+                "cta": content_response.cta,
+                "search_queries": content_response.search_queries,
+                "main_visual_focus": content_response.main_visual_focus,
+                "title": content_response.metadata.get("title", "Untitled"),
+                "description": content_response.metadata.get("description", ""),
+                "tags": content_response.metadata.get("tags", []),
+                "chapters": content_response.chapters,
+                "sentences": [],
+                "_sub_topic": sub_topic  # Store for later
+            }
+            
+            # Build sentences list
+            sentences = []
+            if script["hook"]:
+                sentences.append({"text": script["hook"], "type": "hook"})
+            
+            for sentence in script["script"]:
+                sentences.append({"text": sentence, "type": "content"})
+            
+            if script["cta"]:
+                sentences.append({"text": script["cta"], "type": "cta"})
+            
+            script["sentences"] = sentences
+            
+            # Validate
+            if not script.get("sentences"):
+                logger.error("Script has no sentences")
+                return None
+            
+            logger.info("✅ Script generated: %d sentences", len(script["sentences"]))
+            logger.info(f"📝 Title: {script['title']}")
             
             # Score
             if self.quality_scorer:
