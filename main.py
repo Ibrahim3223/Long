@@ -6,6 +6,7 @@ Run this file to generate a YouTube Video.
 ✅ WITH THUMBNAIL SUPPORT
 ✅ WITH MODE ENV VAR SETUP
 ✅ WITH OUTPUT DIRECTORY COPY
+✅ WITH YOUTUBE UPLOAD
 """
 import sys
 import os
@@ -95,23 +96,19 @@ def _safe_slug(value: str) -> str:
     return value.strip("-") or "channel"
 
 
-def _import_long_uploader():
-    """Import YouTube long-form uploader with fallbacks."""
-    # 1) Eski yol (bazı repolarda mevcut olabilir)
+def _import_youtube_uploader():
+    """Import YouTube uploader with fallbacks."""
     try:
-        from autoshorts.uploader.youtube_long import YouTubeUploader as LongUploader
-        return LongUploader, "autoshorts.uploader.youtube_long"
+        from autoshorts.upload.youtube_uploader import YouTubeUploader
+        return YouTubeUploader
     except Exception as e1:
-        print(f"[YouTube] Long-form uploader not at 'autoshorts.uploader.youtube_long': {e1}")
-
-    # 2) Senin dosyan: autoshorts/upload/youtube_uploader.py
-    try:
-        from autoshorts.upload.youtube_uploader import YouTubeUploader as LongUploader
-        return LongUploader, "autoshorts.upload.youtube_uploader"
-    except Exception as e2:
-        print(f"[YouTube] Long-form uploader not at 'autoshorts.upload.youtube_uploader': {e2}")
-
-    return None, None
+        print(f"[YouTube] Uploader not at 'autoshorts.upload.youtube_uploader': {e1}")
+        try:
+            from autoshorts.uploader.youtube_long import YouTubeUploader
+            return YouTubeUploader
+        except Exception as e2:
+            print(f"[YouTube] Uploader not at 'autoshorts.uploader.youtube_long': {e2}")
+            return None
 
 
 def main():
@@ -187,6 +184,7 @@ def main():
             
             # ✅ Copy thumbnail if exists
             thumbnail_src = metadata.get('script', {}).get('thumbnail_path')
+            thumbnail_dest = None
             if thumbnail_src and os.path.exists(thumbnail_src):
                 thumbnail_dest = output_path.replace('.mp4', '_thumbnail.jpg')
                 shutil.copy2(thumbnail_src, thumbnail_dest)
@@ -204,6 +202,51 @@ def main():
             print(f"📝 Title: {metadata.get('title', 'N/A')}")
             print(f"🏷️ Tags: {len(metadata.get('tags', []))} tags")
             print("=" * 60)
+            
+            # ✅ YouTube Upload
+            upload_enabled = os.environ.get("YOUTUBE_UPLOAD", "true").lower() == "true"
+            if upload_enabled:
+                print("\n🎥 Starting YouTube upload...")
+                
+                YouTubeUploader = _import_youtube_uploader()
+                if YouTubeUploader is None:
+                    print("⚠️ YouTube uploader not available, skipping upload")
+                else:
+                    try:
+                        uploader = YouTubeUploader(channel_name=channel_name)
+                        
+                        # Prepare upload data
+                        upload_data = {
+                            "title": metadata.get("title", ""),
+                            "description": metadata.get("description", ""),
+                            "tags": metadata.get("tags", []),
+                            "category": "22",  # People & Blogs
+                            "privacy": os.environ.get("YOUTUBE_PRIVACY", "private"),
+                        }
+                        
+                        # Upload video
+                        video_id = uploader.upload(
+                            video_path=output_path,
+                            metadata=upload_data,
+                            thumbnail_path=thumbnail_dest
+                        )
+                        
+                        if video_id:
+                            print(f"✅ Uploaded to YouTube: https://youtube.com/watch?v={video_id}")
+                            
+                            # Set output for GitHub Actions
+                            if os.getenv("GITHUB_OUTPUT"):
+                                with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                                    f.write(f"youtube_id={video_id}\n")
+                                    f.write(f"youtube_url=https://youtube.com/watch?v={video_id}\n")
+                        else:
+                            print("⚠️ YouTube upload failed")
+                            
+                    except Exception as upload_exc:
+                        print(f"⚠️ YouTube upload error: {upload_exc}")
+                        logging.exception("YouTube upload failed")
+            else:
+                print("\n⚠️ YouTube upload disabled (YOUTUBE_UPLOAD=false)")
             
             # Set output for GitHub Actions
             if os.getenv("GITHUB_OUTPUT"):
