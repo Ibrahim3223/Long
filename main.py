@@ -6,7 +6,7 @@ Run this file to generate a YouTube Video.
 ✅ WITH THUMBNAIL SUPPORT
 ✅ WITH MODE ENV VAR SETUP
 ✅ WITH OUTPUT DIRECTORY COPY
-✅ WITH YOUTUBE UPLOAD
+✅ WITH YOUTUBE UPLOAD - FIXED
 """
 import sys
 import os
@@ -213,21 +213,23 @@ def main():
                     print("⚠️ YouTube uploader not available, skipping upload")
                 else:
                     try:
-                        uploader = YouTubeUploader(channel_name=channel_name)
+                        # ✅ Initialize uploader WITHOUT channel_name parameter
+                        uploader = YouTubeUploader()
                         
-                        # Prepare upload data
-                        upload_data = {
-                            "title": metadata.get("title", ""),
-                            "description": metadata.get("description", ""),
-                            "tags": metadata.get("tags", []),
-                            "category": "22",  # People & Blogs
-                            "privacy": os.environ.get("YOUTUBE_PRIVACY", "private"),
-                        }
+                        # ✅ Extract data from metadata
+                        script_data = metadata.get("script", {})
                         
-                        # Upload video
+                        # ✅ Upload video with correct parameters
                         video_id = uploader.upload(
                             video_path=output_path,
-                            metadata=upload_data,
+                            title=metadata.get("title", ""),
+                            description=metadata.get("description", ""),
+                            tags=metadata.get("tags", []),
+                            category_id="22",  # People & Blogs
+                            privacy_status=os.environ.get("YOUTUBE_PRIVACY", "private"),
+                            topic=channel_settings.get("CHANNEL_TOPIC", ""),
+                            chapters=script_data.get("chapters", []),
+                            audio_durations=script_data.get("audio_durations", []),
                             thumbnail_path=thumbnail_dest
                         )
                         
@@ -240,7 +242,7 @@ def main():
                                     f.write(f"youtube_id={video_id}\n")
                                     f.write(f"youtube_url=https://youtube.com/watch?v={video_id}\n")
                         else:
-                            print("⚠️ YouTube upload failed")
+                            print("⚠️ YouTube upload failed - no video ID returned")
                             
                     except Exception as upload_exc:
                         print(f"⚠️ YouTube upload error: {upload_exc}")
