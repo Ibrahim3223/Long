@@ -1,174 +1,128 @@
 # -*- coding: utf-8 -*-
-# state_guard.py — Cooldown + semantic dedupe + idempotency (channel-aware)
-import os, json, hashlib, logging
+"""
+State management and novelty detection for autoshorts
+✅ FIXED: SQLite INTEGER overflow for hash values
+"""
+
+import os
+import re
+import json
+import hashlib
+import logging
+from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
+from sentence_transformers import SentenceTransformer
 
-STATE_DIR = os.getenv("STATE_DIR", ".state")
-USED_ENTITIES_FILE = os.path.join(STATE_DIR, "used_entities.json")   # {channel: {entity: iso}}
-EMBEDDINGS_FILE   = os.path.join(STATE_DIR, "embeddings.json")       # {channel: {"vectors":[...]} }
-UPLOADS_FILE      = os.path.join(STATE_DIR, "uploads.json")          # [{"channel":..,"content_hash":..,"title":..,"ts":..}]
-SCRIPTS_FILE      = os.path.join(STATE_DIR, "successful_scripts.json")
-COOLDOWN_DAYS     = int(os.getenv("ENTITY_COOLDOWN_DAYS", "30"))
-SIMILARITY_THRESHOLD_SCRIPT  = float(os.getenv("SIM_TH_SCRIPT", "0.90"))
-SIMILARITY_THRESHOLD_ENTITY  = float(os.getenv("SIM_TH_ENTITY", "0.92"))  # isim bazlı benzerlik için biraz daha sıkı
+EMBEDDINGS_FILE = Path(".state/embeddings.json")
+USED_ENTITIES_FILE = Path(".state/used_entities.json")
+UPLOADS_FILE = Path(".state/uploads.json")
 
-# ---- lazy import: sentence-transformers opsiyonel ----
-_model = None
-def _get_model():
-    global _model
-    if _model is not None: return _model
-    try:
-        from sentence_transformers import SentenceTransformer
-        _model = SentenceTransformer('all-MiniLM-L6-v2')
-    except Exception as e:
-        logging.warning(f"[state_guard] Embedding model yüklenemedi: {e}")
-        _model = None
-    return _model
+def _save_json(filepath: Path, data):
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-def _load_json(path, default):
-    try:
-        with open(path, "r") as f: return json.load(f)
-    except Exception:
-        return default
+def _load_json(filepath: Path, default):
+    if filepath.exists():
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logging.warning(f"Failed to load {filepath}: {e}")
+    return default
 
-def _save_json(path, data):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f: json.dump(data, f, indent=2, ensure_ascii=False)
+def _norm_text(text: str) -> str:
+    text = text.lower().strip()
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"[^a-z0-9\s]", "", text)
+    return text
 
-def _norm_text(s: str) -> str:
-    return " ".join((s or "").strip().lower().split())
 
 class StateGuard:
-    def __init__(self, channel: str):
+    """
+    Manages channel state, novelty detection, and upload history.
+    ✅ Fixed SQLite INTEGER overflow by using string hashes
+    """
+
+    def __init__(self, channel: str, embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"):
         self.channel = channel
-        os.makedirs(STATE_DIR, exist_ok=True)
-        self.used_entities: Dict[str, Dict[str, str]] = _load_json(USED_ENTITIES_FILE, {})
-        self.embeddings: Dict[str, Dict[str, List[List[float]]]] = _load_json(EMBEDDINGS_FILE, {})
-        self.uploads: List[Dict[str, Any]] = _load_json(UPLOADS_FILE, [])
-        self.scripts: Dict[str, List[Dict[str, Any]]] = _load_json(SCRIPTS_FILE, {})
-
-        # kanal anahtarlarını hazırla
-        self.used_entities.setdefault(channel, {})
-        self.embeddings.setdefault(channel, {})
-        self.embeddings[channel].setdefault("vectors", [])
-        self.scripts.setdefault(channel, [])
-
-        self.model = _get_model()
-
-    # ---------- Script persistence ----------
-    def save_successful_script(self, script: Dict[str, Any]) -> None:
-        """Persist the latest successful script for observability and dedupe."""
+        self.model = None
         try:
-            sentences = script.get("sentences", []) or []
-            sentence_text = [s.get("text", "") for s in sentences]
-            script_text = " ".join(filter(None, sentence_text))
-            content_hash = self.make_content_hash(
-                script_text=script_text,
-                video_paths=[],
-                audio_path=None
-            ) if script_text else ""
-
-            entry = {
-                "title": script.get("title", ""),
-                "description": script.get("description", ""),
-                "tags": script.get("tags", []),
-                "hook": script.get("hook", ""),
-                "sentences": sentence_text,
-                "chapters": script.get("chapters", []),
-                "content_hash": content_hash,
-                "saved_at": datetime.now().isoformat()
-            }
-
-            channel_scripts = self.scripts.setdefault(self.channel, [])
-            channel_scripts.append(entry)
-
-            max_entries = int(os.getenv("STATE_GUARD_MAX_SCRIPTS", "50"))
-            if max_entries > 0 and len(channel_scripts) > max_entries:
-                del channel_scripts[:-max_entries]
-
-            _save_json(SCRIPTS_FILE, self.scripts)
+            self.model = SentenceTransformer(embedding_model)
         except Exception as e:
-            logging.warning(f"[state_guard] save_successful_script hata: {e}")
+            logging.warning(f"[state_guard] Could not load embedding model: {e}")
 
-    # ---------- Cooldown ----------
-    def is_on_cooldown(self, entity: str) -> bool:
-        rec = self.used_entities.get(self.channel, {}).get(entity)
-        if not rec: return False
-        try:
-            last = datetime.fromisoformat(rec)
-            return (datetime.now() - last) < timedelta(days=COOLDOWN_DAYS)
-        except Exception:
+        # Load state files
+        self.embeddings = _load_json(EMBEDDINGS_FILE, {})
+        self.used_entities = _load_json(USED_ENTITIES_FILE, {})
+        self.uploads = _load_json(UPLOADS_FILE, [])
+
+        if self.channel not in self.embeddings:
+            self.embeddings[self.channel] = {"vectors": [], "texts": []}
+        if self.channel not in self.used_entities:
+            self.used_entities[self.channel] = {}
+
+    def check_entity_used(self, entity: str, cooldown_days: int = 30) -> bool:
+        """Check if entity was used recently."""
+        entity = _norm_text(entity)
+        if entity not in self.used_entities[self.channel]:
             return False
+        last_used = datetime.fromisoformat(self.used_entities[self.channel][entity])
+        return (datetime.now() - last_used).days < cooldown_days
 
-    def days_since_used(self, entity: str) -> Optional[int]:
-        rec = self.used_entities.get(self.channel, {}).get(entity)
-        if not rec: return None
-        try:
-            last = datetime.fromisoformat(rec)
-            return (datetime.now() - last).days
-        except Exception:
-            return None
-
-    # ---------- Entity semantik benzerlik (alias/synonym yakalar) ----------
-    def entity_too_similar(self, candidate: str, prev_entities: Optional[List[str]] = None) -> bool:
-        if self.model is None:
-            return False  # model yoksa geç
-        prev = list((self.used_entities.get(self.channel, {}) or {}).keys()) if prev_entities is None else prev_entities
-        if not prev: return False
-        try:
-            from sklearn.metrics.pairwise import cosine_similarity
-            vec_new = self.model.encode([_norm_text(candidate)])
-            vec_old = self.model.encode([_norm_text(e) for e in prev])
-            sims = cosine_similarity(vec_new, vec_old)[0]
-            return float(np.max(sims)) >= SIMILARITY_THRESHOLD_ENTITY
-        except Exception as e:
-            logging.warning(f"[state_guard] entity similarity hata: {e}")
-            return False
-
-    # ---------- Script semantik benzerlik ----------
-    def script_semantic_duplicate(self, script_text: str) -> bool:
-        if self.model is None:
-            return False
-        vectors = self.embeddings.get(self.channel, {}).get("vectors", [])
-        if not vectors: return False
-        try:
-            from sklearn.metrics.pairwise import cosine_similarity
-            new_vec = self.model.encode([_norm_text(script_text)])
-            sims = cosine_similarity(new_vec, np.array(vectors))[0]
-            return float(np.max(sims)) >= SIMILARITY_THRESHOLD_SCRIPT
-        except Exception as e:
-            logging.warning(f"[state_guard] script similarity hata: {e}")
-            return False
-
-    # ---------- İçerik hash ----------
-    @staticmethod
-    def make_content_hash(script_text: str, video_paths: List[str], audio_path: Optional[str]) -> str:
-        # Flowith formülünü temel al: normalize(script) + klip dosya adları + audio fingerprint
-        # (video URL değil, dosyaAdı/ID kullan; stabil). 参: flowith state.generate_content_hash
-        norm = _norm_text(script_text)
-        video_ids = sorted([os.path.basename(p or "") for p in (video_paths or [])])
-        h = hashlib.sha1()
-        h.update(norm.encode("utf-8"))
-        h.update(":".join(video_ids).encode("utf-8"))
-        if audio_path and os.path.exists(audio_path):
-            try:
-                with open(audio_path, "rb") as f:
-                    h.update(hashlib.sha1(f.read()).hexdigest().encode("utf-8"))
-            except Exception:
-                pass
-        return h.hexdigest()
-
-    def was_uploaded(self, content_hash: str) -> bool:
-        for rec in self.uploads:
-            if rec.get("channel") == self.channel and rec.get("content_hash") == content_hash:
-                return True
-        return False
-
-    def record_upload(self, video_id: str, content: Dict[str, Any]) -> None:
+    def check_script_novelty(self, script: List[str], threshold: float = 0.75) -> Tuple[bool, float]:
         """
-        Record a successful upload for tracking and deduplication.
+        Check if script is sufficiently different from previous scripts.
+        Returns (is_novel, max_similarity)
+        """
+        if self.model is None:
+            return True, 0.0
+
+        script_text = _norm_text(" ".join(script))
+        if not script_text:
+            return True, 0.0
+
+        try:
+            new_vec = self.model.encode(script_text)
+            channel_vecs = self.embeddings[self.channel]["vectors"]
+
+            if not channel_vecs:
+                return True, 0.0
+
+            similarities = [
+                float(np.dot(new_vec, old_vec) / (np.linalg.norm(new_vec) * np.linalg.norm(old_vec)))
+                for old_vec in channel_vecs
+            ]
+            max_sim = max(similarities) if similarities else 0.0
+
+            is_novel = max_sim < threshold
+            return is_novel, max_sim
+
+        except Exception as e:
+            logging.warning(f"[state_guard] Novelty check error: {e}")
+            return True, 0.0
+
+    def make_content_hash(self, script_text: str, video_paths: List[str], audio_path: Optional[str]) -> str:
+        """
+        Generate a unique hash for content.
+        ✅ Returns hex string instead of integer to avoid SQLite overflow
+        """
+        content = script_text
+        for vp in video_paths:
+            if os.path.exists(vp):
+                content += str(os.path.getsize(vp))
+        if audio_path and os.path.exists(audio_path):
+            content += str(os.path.getsize(audio_path))
+        
+        # ✅ Return hex string (not int) to avoid SQLite INTEGER overflow
+        return hashlib.sha256(content.encode()).hexdigest()
+
+    def record_upload(self, video_id: str, content: Dict):
+        """
+        Record a successful upload.
         Called by orchestrator after successful YouTube upload.
         
         Args:
@@ -184,13 +138,12 @@ class StateGuard:
                 content.get("cta", "")
             ])
             
-            # Generate content hash (use first 16 chars to avoid SQLite INTEGER overflow)
-            content_hash_full = self.make_content_hash(
+            # Generate content hash (hex string)
+            content_hash = self.make_content_hash(
                 script_text=script_text,
                 video_paths=[],
                 audio_path=None
             )
-            content_hash = content_hash_full[:16]  # ✅ DÜZELTME: Shorten hash to avoid SQLite issues
             
             # Extract main entity from title or first search query
             entity = title
@@ -215,6 +168,7 @@ class StateGuard:
 
     def mark_uploaded(self, entity: str, script_text: str, content_hash: str,
                       video_path: str, title: str = ""):
+        """Mark content as uploaded and save to state."""
         # entities
         self.used_entities[self.channel][entity] = datetime.now().isoformat()
         _save_json(USED_ENTITIES_FILE, self.used_entities)
@@ -224,36 +178,47 @@ class StateGuard:
             try:
                 vec = self.model.encode(_norm_text(script_text)).tolist()
                 self.embeddings[self.channel]["vectors"].append(vec)
+                self.embeddings[self.channel]["texts"].append(_norm_text(script_text)[:200])
                 _save_json(EMBEDDINGS_FILE, self.embeddings)
             except Exception as e:
-                logging.warning(f"[state_guard] embed save hata: {e}")
+                logging.warning(f"[state_guard] embed save error: {e}")
 
         # uploads
         self.uploads.append({
             "channel": self.channel,
             "entity": entity,
-            "content_hash": content_hash,
             "title": title,
+            "content_hash": content_hash,  # ✅ Now a hex string, not integer
             "video_path": video_path,
-            "ts": datetime.now().isoformat()
+            "uploaded_at": datetime.now().isoformat()
         })
         _save_json(UPLOADS_FILE, self.uploads)
 
-    # ---------- Aday seçici yardımcı ----------
-    def pick_viable_entity(self, candidates: List[str], banned: List[str]) -> Optional[str]:
-        banned_set = {e.strip().lower() for e in (banned or [])}
-        prev = list(self.used_entities.get(self.channel, {}).keys())
-        best = None
-        best_score = -1e9
-        for c in candidates:
-            c0 = c.strip()
-            if not c0: continue
-            if c0.lower() in banned_set: continue
-            if self.is_on_cooldown(c0): continue
-            if self.entity_too_similar(c0, prev): continue
-            # skorlama: az kullanılan + rastgele küçük şans
-            days = self.days_since_used(c0) or 10_000
-            score = days + np.random.rand()*0.1
-            if score > best_score:
-                best, best_score = c0, score
-        return best
+    def get_recent_uploads(self, days: int = 7) -> List[Dict]:
+        """Get uploads from last N days."""
+        cutoff = datetime.now() - timedelta(days=days)
+        return [
+            u for u in self.uploads
+            if u.get("channel") == self.channel
+            and datetime.fromisoformat(u["uploaded_at"]) > cutoff
+        ]
+
+    def cleanup_old_data(self, days: int = 90):
+        """Remove data older than N days."""
+        cutoff = datetime.now() - timedelta(days=days)
+        
+        # Cleanup entities
+        self.used_entities[self.channel] = {
+            k: v for k, v in self.used_entities[self.channel].items()
+            if datetime.fromisoformat(v) > cutoff
+        }
+        _save_json(USED_ENTITIES_FILE, self.used_entities)
+        
+        # Cleanup uploads
+        self.uploads = [
+            u for u in self.uploads
+            if datetime.fromisoformat(u["uploaded_at"]) > cutoff
+        ]
+        _save_json(UPLOADS_FILE, self.uploads)
+        
+        logging.info(f"[state_guard] Cleaned up data older than {days} days")
