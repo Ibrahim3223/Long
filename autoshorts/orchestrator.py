@@ -36,7 +36,7 @@ from autoshorts.tts.edge_handler import TTSHandler
 from autoshorts.captions.renderer import CaptionRenderer
 from autoshorts.audio.bgm_manager import BGMManager
 from autoshorts.utils.ffmpeg_utils import run, ffprobe_duration
-from autoshorts.utils.text_utils import extract_keywords, simplify_query
+from autoshorts.content.text_utils import extract_keywords, simplify_query
 from autoshorts.state.novelty_guard import NoveltyGuard
 from autoshorts.state.state_guard import StateGuard
 from autoshorts.content.quality_scorer import QualityScorer
