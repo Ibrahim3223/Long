@@ -1,538 +1,504 @@
 # ============================================================
-# CHANNELS CONFIGURATION - COMPLETE WITH KOKORO TTS
+# CHANNEL CONFIGURATIONS - KOKORO TTS ENHANCED
 # ============================================================
-# Kokoro TTS ayarları GitHub Actions workflow'da env variables ile set edilir
-# Her kanal için önerilen ses yorumda belirtilmiştir
+# Each channel can have custom settings including Kokoro voice selection
+# 
+# Available Kokoro Voices:
+# AMERICAN FEMALE: af_sarah (professional), af_heart (warm), af_bella (elegant),
+#                  af_sky (energetic), af_alloy, af_aoede, af_jessica, af_nicole, af_nova, af_river
+# AMERICAN MALE:   am_adam (authoritative), am_michael (natural), am_echo, am_eric,
+#                  am_fenrir, am_liam, am_onyx, am_puck
+# BRITISH FEMALE:  bf_alice, bf_emma (sophisticated), bf_isabella (elegant), bf_lily
+# BRITISH MALE:    bm_daniel, bm_fable, bm_george, bm_lewis
 # ============================================================
 
 channels:
-  # ============================================================
-  # GEO & COUNTRIES
-  # ============================================================
-  - env: "WT Facts About Countries"
+  wt-facts-about-countries:
     name: "WT Facts About Countries"
-    mode: "country_facts"
-    lang: "en"
+    topic: "Fascinating facts and trivia about countries worldwide"
+    mode: "educational"
+    style: "Informative and engaging geographical content"
+    search_terms: ["countries", "geography", "world facts", "nations", "cultures"]
+    tts_voice: "af_sarah"  # Professional, clear for educational content
+    lang: "en-US"
     visibility: "public"
-    seed: 1001
-    topic: "Underrated country facts that reveal culture, geography, and daily life; rotate continents and avoid over-covered nations"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=fp32
-    search_terms: ["country aerial drone 4k", "traditional market crowd", "rural village life", "capital city skyline night", "national festival parade", "mountain valley panorama", "coastline cliffs waves", "border crossing sign", "local street food stall", "historic town center"]
 
-  - env: "Planet Snapshot"
-    name: "Planet Snapshot"
-    mode: "country_facts"
-    lang: "en"
-    visibility: "public"
-    seed: 1002
-    topic: "Fast geography bites—flags, borders, foods, and 'only here' quirks per country"
-    # Recommended: KOKORO_VOICE=af_sky, KOKORO_PRECISION=fp16
-    search_terms: ["national flag close up", "street market local food", "coastal city promenade", "mountain lake panorama", "border checkpoint road", "heritage UNESCO site", "street festival dancers", "old town square", "railway station crowd", "farm terrace fields"]
-
-  - env: "CityFrame Stories"
-    name: "CityFrame Stories"
-    mode: "urban_documentary"
-    lang: "en"
-    visibility: "public"
-    seed: 1003
-    topic: "Urban stories—architecture, street art, neighborhood culture, and city evolution"
-    # Recommended: KOKORO_VOICE=af_bella, KOKORO_PRECISION=fp32
-    search_terms: ["city skyline golden hour", "street art mural", "busy intersection timelapse", "historic district buildings", "urban park people", "subway station platform", "rooftop city view", "street market vendors", "night city lights", "pedestrian bridge walkway"]
-
-  # ============================================================
-  # HISTORY & MYTHOLOGY
-  # ============================================================
-  - env: "Tales of The Forgetten Realms"
+  tales-of-the-forgotten-realms:
     name: "Tales of The Forgetten Realms"
-    mode: "history_story"
-    lang: "en"
+    topic: "Epic fantasy stories from forgotten magical realms"
+    mode: "storytelling"
+    style: "Immersive narrative fantasy storytelling"
+    search_terms: ["fantasy", "magic", "medieval", "epic tales", "dragons"]
+    tts_voice: "af_heart"  # Warm, friendly for storytelling
+    lang: "en-US"
     visibility: "public"
-    seed: 2001
-    topic: "Obscure historical events and lost civilizations told cinematically with evidence-based narration"
-    # Recommended: KOKORO_VOICE=am_adam, KOKORO_PRECISION=fp32
-    search_terms: ["ancient ruins sunrise 4k", "desert archaeological site", "old parchment manuscript", "medieval fortress interior", "mossy stone temple", "museum artifacts showcase", "archaeologist brushing bones", "old map table", "torchlight cave walls", "foggy castle hill"]
 
-  - env: "If They Lived Today"
-    name: "If They Lived Today"
-    mode: "if_lived_today"
-    lang: "en"
-    visibility: "public"
-    seed: 2002
-    topic: "Reimagine historical figures navigating modern tech, culture, and dilemmas with empathy"
-    # Recommended: KOKORO_VOICE=af_heart, KOKORO_PRECISION=fp16
-    search_terms: ["modern city crosswalk", "startup coworking office", "smartphone scrolling hand", "subway commute platform", "newsstand magazines", "university campus students", "coffee shop laptop", "press microphones crowd", "social media feed phone", "museum modern wing"]
-
-  - env: "Gods Unleashed"
-    name: "Gods Unleashed"
-    mode: "mythology_battle"
-    lang: "en"
-    visibility: "public"
-    seed: 2003
-    topic: "Mythic face-offs and lore—contrast powers, symbols, and lessons across cultures"
-    # Recommended: KOKORO_VOICE=am_adam, KOKORO_PRECISION=fp32
-    search_terms: ["lightning storm clouds", "volcano eruption lava", "ocean waves storm", "temple golden hour", "statue ancient god", "fire flames ritual", "mountain peak summit", "cosmic nebula space", "warrior statue silhouette", "thunder clouds dramatic"]
-
-  - env: "Flashback Minute"
-    name: "Flashback Minute"
-    mode: "retro_history"
-    lang: "en"
-    visibility: "public"
-    seed: 2004
-    topic: "Quick retro dives—'80s tech, '90s trends, forgotten ads, and cultural moments"
-    # Recommended: KOKORO_VOICE=af_sky, KOKORO_PRECISION=q8
-    search_terms: ["retro arcade games", "vintage television set", "cassette tape player", "vhs tapes shelf", "old computer keyboard", "neon signs 1980s", "vintage car dashboard", "old phone booth", "retro diner interior", "vintage posters wall"]
-
-  - env: "Rewind Retro Media"
-    name: "Rewind Retro Media"
-    mode: "retro_media"
-    lang: "en"
-    visibility: "public"
-    seed: 2005
-    topic: "Nostalgia for vintage movies, TV shows, music videos, and forgotten media"
-    # Recommended: KOKORO_VOICE=am_michael, KOKORO_PRECISION=fp16
-    search_terms: ["vintage film projector", "old tv static screen", "vinyl record spinning", "vintage radio dial", "movie theater seats empty", "film reel closeup", "retro music player", "vintage camera collection", "old cinema marquee", "cassette deck playing"]
-
-  - env: "Epic Mundane"
-    name: "Epic Mundane"
-    mode: "mundane_epic"
-    lang: "en"
-    visibility: "public"
-    seed: 2006
-    topic: "Dramatize everyday tasks—waiting for the microwave, choosing shoes, battling autocorrect"
-    # Recommended: KOKORO_VOICE=af_sky, KOKORO_PRECISION=q8
-    search_terms: ["microwave timer countdown", "shoe store display", "smartphone keyboard typing", "coffee machine brewing", "alarm clock ringing", "traffic light changing", "elevator buttons waiting", "washing machine spinning", "toaster popping up", "door key unlocking"]
-
-  # ============================================================
-  # ENTERTAINMENT & FUN
-  # ============================================================
-  - env: "Famous Quotes Explained"
+  famous-quotes-explained:
     name: "Famous Quotes Explained"
-    mode: "quote_analysis"
-    lang: "en"
+    topic: "Deep analysis and context of famous historical quotes"
+    mode: "educational"
+    style: "Analytical and thought-provoking explanations"
+    search_terms: ["quotes", "philosophy", "history", "wisdom", "famous people"]
+    tts_voice: "am_adam"  # Deep, authoritative for serious content
+    lang: "en-US"
     visibility: "public"
-    seed: 3001
-    topic: "Decode famous quotes—context, misattributions, and modern relevance"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=fp32
-    search_terms: ["old book pages", "library books shelf", "vintage typewriter", "philosopher statue", "reading glasses book", "fountain pen writing", "manuscript paper", "historical portrait", "study desk lamp", "bookstore interior"]
 
-  - env: "Universe Jumper"
-    name: "Universe Jumper"
-    mode: "scifi_crossover"
-    lang: "en"
-    visibility: "public"
-    seed: 3002
-    topic: "Sci-fi crossovers—compare universes, tech, alien species, and what-if scenarios"
-    # Recommended: KOKORO_VOICE=am_michael, KOKORO_PRECISION=fp16
-    search_terms: ["space station interior", "alien planet landscape", "futuristic city night", "spaceship cockpit view", "portal swirling energy", "hologram interface", "space nebula colors", "robot walking corridor", "teleportation effect", "space colony dome"]
-
-  - env: "Tiny Drama Dept."
-    name: "Tiny Drama Dept."
-    mode: "micro_drama"
-    lang: "en"
-    visibility: "public"
-    seed: 3003
-    topic: "Micro-dramas—office email wars, group chat chaos, and passive-aggressive notes"
-    # Recommended: KOKORO_VOICE=af_heart, KOKORO_PRECISION=q8
-    search_terms: ["office desk cluttered", "sticky notes wall", "group chat phone", "email notification screen", "passive note fridge", "office cubicle view", "coffee break room", "meeting room table", "workplace water cooler", "office printer"]
-
-  - env: "Wrong Way First"
-    name: "Wrong Way First"
-    mode: "comedy_failures"
-    lang: "en"
-    visibility: "public"
-    seed: 3004
-    topic: "Epic fails done right—history's mistakes, product disasters, and lessons learned"
-    # Recommended: KOKORO_VOICE=af_sky, KOKORO_PRECISION=q8
-    search_terms: ["construction site accident", "product recall news", "mistake warning sign", "broken device parts", "failed experiment lab", "warning tape barrier", "error message screen", "caution sign yellow", "mishap cleanup crew", "oops expression face"]
-
-  - env: "Pet Inner Monologue"
-    name: "Pet Inner Monologue"
-    mode: "pet_comedy"
-    lang: "en"
-    visibility: "public"
-    seed: 3005
-    topic: "Hilarious pet thoughts—what dogs, cats, and other pets are really thinking"
-    # Recommended: KOKORO_VOICE=af_heart, KOKORO_PRECISION=q8
-    search_terms: ["dog looking camera", "cat staring window", "pet confused face", "dog tilting head", "cat playing toy", "pet waiting food", "dog park playing", "cat scratching post", "pet sleeping couch", "hamster running wheel"]
-
-  - env: "Corporate Jargon Translator"
-    name: "Corporate Jargon Translator"
-    mode: "business_satire"
-    lang: "en"
-    visibility: "public"
-    seed: 3006
-    topic: "Decode corporate speak—synergy, circle back, low-hanging fruit translated to reality"
-    # Recommended: KOKORO_VOICE=am_michael, KOKORO_PRECISION=q8
-    search_terms: ["office meeting room", "business presentation screen", "corporate handshake", "conference table", "whiteboard brainstorm", "business buzzwords", "office corridor walk", "laptop keyboard typing", "coffee meeting casual", "office phone call"]
-
-  # ============================================================
-  # SPORTS
-  # ============================================================
-  - env: "Cricket Queens"
-    name: "Cricket Queens"
-    mode: "cricket_women"
-    lang: "en"
-    visibility: "public"
-    seed: 4001
-    topic: "Women's cricket excellence—matches, players, records, and historic moments"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=fp32
-    search_terms: ["cricket stadium crowd", "female cricket player batting", "cricket ball closeup", "wicket stumps", "cricket field aerial", "cricket bat equipment", "cricket scoreboard", "cricket celebration moment", "cricket pitch preparation", "cricket trophy ceremony"]
-
-  # ============================================================
-  # TECH & SCIENCE
-  # ============================================================
-  - env: "GalacticUpdate"
-    name: "GalacticUpdate"
-    mode: "space_news"
-    lang: "en"
-    visibility: "public"
-    seed: 5001
-    topic: "Space news and discoveries—missions, exoplanets, cosmic phenomena, and astronomy"
-    # Recommended: KOKORO_VOICE=am_adam, KOKORO_PRECISION=fp32
-    search_terms: ["space telescope view", "rocket launch pad", "planet earth orbit", "astronaut spacewalk", "mars rover landscape", "galaxy spiral arms", "space station docking", "satellite solar panels", "nebula colorful clouds", "telescope observatory night"]
-
-  - env: "NextGen Update"
-    name: "NextGen Update"
-    mode: "future_tech"
-    lang: "en"
-    visibility: "public"
-    seed: 5002
-    topic: "Emerging tech and innovations—AI, quantum, biotech, and what's next"
-    # Recommended: KOKORO_VOICE=am_michael, KOKORO_PRECISION=fp16
-    search_terms: ["futuristic technology lab", "robot arm assembly", "holographic display", "ai brain visualization", "quantum computer chip", "biotech laboratory", "drone flying warehouse", "3d printer working", "smart city infrastructure", "innovation center modern"]
-
-  - env: "Pocket Tech Tricks"
-    name: "Pocket Tech Tricks"
-    mode: "tech_tips"
-    lang: "en"
-    visibility: "public"
-    seed: 5003
-    topic: "Quick tech tips—phone hacks, shortcuts, hidden features, and productivity boosts"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=q8
-    search_terms: ["smartphone screen features", "laptop keyboard shortcuts", "app interface closeup", "phone settings menu", "wireless earbuds charging", "smart watch display", "tablet stylus drawing", "tech gadget collection", "usb cable connected", "phone notification center"]
-
-  - env: "FIXIT Fast"
-    name: "FIXIT Fast"
-    mode: "quick_repair"
-    lang: "en"
-    visibility: "public"
-    seed: 5004
-    topic: "Fast fixes—common repairs, household hacks, and DIY solutions in 60 seconds"
-    # Recommended: KOKORO_VOICE=am_michael, KOKORO_PRECISION=q8
-    search_terms: ["toolbox tools organized", "screwdriver hand closeup", "broken device repair", "duct tape fix", "wrench turning bolt", "drill making hole", "hammer hitting nail", "measuring tape extended", "pliers gripping wire", "diy repair workshop"]
-
-  - env: "Hidden Math IRL"
-    name: "Hidden Math IRL"
-    mode: "math_everyday"
-    lang: "en"
-    visibility: "public"
-    seed: 5005
-    topic: "Math in daily life—patterns, probability, geometry in nature and design"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=fp32
-    search_terms: ["fibonacci spiral nature", "geometric patterns architecture", "symmetry butterfly wings", "fractals plant closeup", "golden ratio design", "honeycomb hexagon structure", "tessellation floor tiles", "circular patterns ripples", "probability dice rolling", "mathematical equation chalk"]
-
-  - env: "Mechanism Minute"
-    name: "Mechanism Minute"
-    mode: "how_things_work"
-    lang: "en"
-    visibility: "public"
-    seed: 5006
-    topic: "How everyday mechanisms work—locks, engines, clocks, and hidden engineering"
-    # Recommended: KOKORO_VOICE=am_michael, KOKORO_PRECISION=fp32
-    search_terms: ["mechanical gears turning", "lock mechanism closeup", "clock movement internal", "engine pistons moving", "pulley system working", "spring coil tension", "chain drive mechanism", "gear assembly machine", "hydraulic press working", "lever fulcrum physics"]
-
-  # ============================================================
-  # NATURE & ENVIRONMENT
-  # ============================================================
-  - env: "Echo of the Unknown"
-    name: "Echo of the Unknown"
-    mode: "mysterious_nature"
-    lang: "en"
-    visibility: "public"
-    seed: 6001
-    topic: "Unexplained natural phenomena—strange sounds, mysterious lights, and unsolved mysteries"
-    # Recommended: KOKORO_VOICE=am_adam, KOKORO_PRECISION=fp32
-    search_terms: ["mysterious fog forest", "aurora borealis night", "deep ocean darkness", "cave stalactites dark", "strange light sky", "underwater mysterious", "dense jungle mist", "desert mirage effect", "storm lightning dramatic", "abandoned place nature"]
-
-  - env: "Critter Fact"
-    name: "Critter Fact"
-    mode: "animal_facts"
-    lang: "en"
-    visibility: "public"
-    seed: 6002
-    topic: "Surprising animal behaviors, adaptations, and facts about wildlife"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=fp16
-    search_terms: ["wildlife animal closeup", "bird flying slow motion", "insect macro photography", "marine life underwater", "mammal in habitat", "reptile camouflage", "amphibian pond life", "predator hunting prey", "animal migration herd", "nocturnal animal night"]
-
-  - env: "WildWonderCaps"
-    name: "WildWonderCaps"
-    mode: "nature_photography"
-    lang: "en"
-    visibility: "public"
-    seed: 6003
-    topic: "Stunning nature photography with fascinating captions—landscapes and wildlife"
-    # Recommended: KOKORO_VOICE=af_bella, KOKORO_PRECISION=fp32
-    search_terms: ["landscape mountain sunset", "waterfall rainbow mist", "wildlife aerial drone", "forest canopy above", "desert sand dunes", "glacier ice blue", "savanna golden grass", "coral reef colorful", "canyon rock formation", "northern lights sky"]
-
-  - env: "MicroNature Minute"
-    name: "MicroNature Minute"
-    mode: "macro_nature"
-    lang: "en"
-    visibility: "public"
-    seed: 6004
-    topic: "Macro nature—tiny ecosystems, insects, dewdrops, and hidden micro-worlds"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=fp16
-    search_terms: ["macro insect closeup", "water droplet leaf", "tiny spider web dew", "moss closeup texture", "ant carrying leaf", "butterfly wing scales", "flower pollen grains", "mushroom spores release", "seed germination timelapse", "lichen rock surface"]
-
-  - env: "Microworld Stories"
-    name: "Microworld Stories"
-    mode: "microscopic_life"
-    lang: "en"
-    visibility: "public"
-    seed: 6005
-    topic: "Microscopic life and science—cells, bacteria, and invisible worlds revealed"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=fp32
-    search_terms: ["microscope view cells", "bacteria culture plate", "crystal formation macro", "cellular division process", "blood cells flowing", "microorganism swimming", "lab petri dish", "scientific research microscope", "molecular structure model", "lab specimen slide"]
-
-  - env: "Wild Pattern Atlas"
-    name: "Wild Pattern Atlas"
-    mode: "nature_patterns"
-    lang: "en"
-    visibility: "public"
-    seed: 6006
-    topic: "Patterns in nature—stripes, spots, spirals, and symmetry across species and landscapes"
-    # Recommended: KOKORO_VOICE=af_bella, KOKORO_PRECISION=fp32
-    search_terms: ["zebra stripes pattern", "leopard spots closeup", "spiral shell nautilus", "butterfly wing symmetry", "snake skin scales", "flower petal arrangement", "tree rings cross section", "crystal lattice structure", "ripple pattern water", "feather detail texture"]
-
-  - env: "Eco Heart Hacks"
-    name: "Eco Heart Hacks"
-    mode: "eco_tips"
-    lang: "en"
-    visibility: "public"
-    seed: 6007
-    topic: "Practical eco-friendly hacks—reduce waste, save energy, and sustainable living"
-    # Recommended: KOKORO_VOICE=af_heart, KOKORO_PRECISION=q8
-    search_terms: ["reusable shopping bags", "solar panel roof", "compost bin garden", "recycling symbol closeup", "led lightbulb hand", "water conservation tap", "bamboo products sustainable", "plant based food", "zero waste lifestyle", "green energy windmill"]
-
-  - env: "Ocean Pulse"
-    name: "Ocean Pulse"
-    mode: "ocean_documentary"
-    lang: "en"
-    visibility: "public"
-    seed: 6008
-    topic: "Ocean life, conservation, and marine mysteries—coral reefs to deep sea"
-    # Recommended: KOKORO_VOICE=am_adam, KOKORO_PRECISION=fp32
-    search_terms: ["coral reef colorful", "whale swimming ocean", "dolphin pod jumping", "deep sea creature", "ocean waves aerial", "submarine underwater view", "marine research vessel", "sea turtle swimming", "jellyfish floating", "ocean conservation diver"]
-
-  # ============================================================
-  # TRAVEL & LIFESTYLE
-  # ============================================================
-  - env: "One Day Inside"
-    name: "One Day Inside"
-    mode: "day_in_life"
-    lang: "en"
-    visibility: "public"
-    seed: 7001
-    topic: "A day in unique professions—submarine captain, ice sculptor, wildlife tracker"
-    # Recommended: KOKORO_VOICE=am_michael, KOKORO_PRECISION=fp16
-    search_terms: ["professional at work", "workplace interior view", "hands doing craft", "uniform workwear", "tools equipment setup", "workshop industrial", "office specialized", "outdoor work nature", "control room monitors", "team collaboration workspace"]
-
-  - env: "TrailScape 60"
-    name: "TrailScape 60"
-    mode: "hiking_trails"
-    lang: "en"
-    visibility: "public"
-    seed: 7002
-    topic: "Hiking trails worldwide—scenic routes, difficulty levels, and trail highlights"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=fp16
-    search_terms: ["hiking trail mountain", "forest path sunlight", "trail marker sign", "backpack hiker view", "mountain summit view", "wooden bridge trail", "rocky path climb", "waterfall trail view", "meadow trail flowers", "canyon trail overlook"]
-
-  - env: "RoadVenture 60"
-    name: "RoadVenture 60"
-    mode: "road_trips"
-    lang: "en"
-    visibility: "public"
-    seed: 7003
-    topic: "Epic road trips—scenic drives, hidden stops, and journey highlights"
-    # Recommended: KOKORO_VOICE=am_michael, KOKORO_PRECISION=fp16
-    search_terms: ["road trip highway", "scenic drive mountains", "car dashboard view", "roadside diner vintage", "desert highway stretch", "coastal road ocean", "gas station retro", "car camping sunset", "road sign direction", "rest stop scenic"]
-
-  - env: "Focus Rituals"
-    name: "Focus Rituals"
-    mode: "productivity_tips"
-    lang: "en"
-    visibility: "public"
-    seed: 7004
-    topic: "Focus techniques and productivity rituals—pomodoro, deep work, and concentration hacks"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=q8
-    search_terms: ["timer pomodoro technique", "focused person working", "quiet study space", "notebook planning", "headphones concentration", "desk minimal setup", "meditation mindfulness", "morning routine coffee", "distraction free workspace", "productivity planner"]
-
-  - env: "Orderly Home 60"
-    name: "Orderly Home 60"
-    mode: "organization_tips"
-    lang: "en"
-    visibility: "public"
-    seed: 7005
-    topic: "Home organization—declutter tips, storage hacks, and tidy living spaces"
-    # Recommended: KOKORO_VOICE=af_heart, KOKORO_PRECISION=q8
-    search_terms: ["organized closet shelves", "storage bins labeled", "minimalist room clean", "kitchen organization", "drawer dividers neat", "declutter before after", "folded clothes marie kondo", "pantry organization", "garage storage system", "bathroom counter tidy"]
-
-  - env: "Kitchen Logic Lab"
-    name: "Kitchen Logic Lab"
-    mode: "cooking_science"
-    lang: "en"
-    visibility: "public"
-    seed: 7006
-    topic: "Kitchen science—why recipes work, cooking chemistry, and culinary techniques"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=fp16
-    search_terms: ["cooking chemistry reaction", "kitchen ingredients prep", "knife chopping technique", "pot boiling water", "bread dough rising", "meat searing pan", "emulsion mixing bowl", "caramelization sugar", "kitchen thermometer", "recipe book open"]
-
-  # ============================================================
-  # DOCUMENTARY & EDUCATIONAL
-  # ============================================================
-  - env: "TaxWise USA"
+  taxwise-usa:
     name: "TaxWise USA"
-    mode: "tax_education"
-    lang: "en"
+    topic: "Practical tax tips and financial advice for Americans"
+    mode: "educational"
+    style: "Clear, practical financial guidance"
+    search_terms: ["taxes", "finance", "IRS", "deductions", "tax tips"]
+    tts_voice: "am_michael"  # Natural, conversational for advice
+    lang: "en-US"
     visibility: "public"
-    seed: 8001
-    topic: "US tax tips, deductions, and financial literacy for everyday Americans"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=fp32
-    search_terms: ["tax forms papers", "calculator receipts", "irs building facade", "financial documents desk", "tax deadline calendar", "accountant working office", "money cash bills", "savings piggy bank", "investment portfolio", "tax refund check"]
 
-  - env: "BehindTheFame"
-    name: "BehindTheFame"
-    mode: "celebrity_stories"
-    lang: "en"
+  echo-of-the-unknown:
+    name: "Echo of the Unknown"
+    topic: "Mysterious phenomena and unexplained events"
+    mode: "documentary"
+    style: "Atmospheric exploration of mysteries"
+    search_terms: ["mystery", "paranormal", "unexplained", "enigma", "strange"]
+    tts_voice: "am_adam"  # Deep, authoritative for mysterious content
+    lang: "en-US"
     visibility: "public"
-    seed: 8002
-    topic: "Untold celebrity stories—early struggles, breakthroughs, and lesser-known facts"
-    # Recommended: KOKORO_VOICE=am_adam, KOKORO_PRECISION=fp32
-    search_terms: ["red carpet celebrity", "paparazzi camera flash", "movie premiere event", "award trophy stage", "backstage dressing room", "press conference microphones", "autograph signing crowd", "limousine arrival", "magazine cover photoshoot", "fame star walk"]
 
-  - env: "BeyondAxis"
-    name: "BeyondAxis"
-    mode: "philosophy_thought"
-    lang: "en"
+  flashback-minute:
+    name: "Flashback Minute"
+    topic: "Quick historical moments that shaped our world"
+    mode: "educational"
+    style: "Concise historical storytelling"
+    search_terms: ["history", "historical events", "past", "timeline", "archive"]
+    tts_voice: "bf_emma"  # British sophistication for history
+    lang: "en-GB"
     visibility: "public"
-    seed: 8003
-    topic: "Philosophical concepts—existentialism, ethics, consciousness, and big questions"
-    # Recommended: KOKORO_VOICE=am_adam, KOKORO_PRECISION=fp32
-    search_terms: ["thinker statue philosophy", "library ancient books", "zen garden meditation", "abstract thought concept", "maze puzzle metaphor", "mirror reflection identity", "hourglass time passing", "scales justice balance", "lightbulb idea moment", "path crossroads choice"]
 
-  - env: "Cinematic Echo"
+  universe-jumper:
+    name: "Universe Jumper"
+    topic: "Mind-bending sci-fi concepts and multiverse theories"
+    mode: "entertainment"
+    style: "Imaginative science fiction exploration"
+    search_terms: ["sci-fi", "multiverse", "parallel universe", "space", "quantum"]
+    tts_voice: "af_sky"  # Energetic for sci-fi content
+    lang: "en-US"
+    visibility: "public"
+
+  if-they-lived-today:
+    name: "If They Lived Today"
+    topic: "Historical figures reimagined in modern times"
+    mode: "entertainment"
+    style: "Creative alternate history scenarios"
+    search_terms: ["history", "modern", "alternate history", "what if", "famous people"]
+    tts_voice: "af_heart"  # Warm for storytelling
+    lang: "en-US"
+    visibility: "public"
+
+  rewind-retro-media:
+    name: "Rewind Retro Media"
+    topic: "Nostalgic look at classic movies, TV, and pop culture"
+    mode: "entertainment"
+    style: "Nostalgic and entertaining media retrospectives"
+    search_terms: ["retro", "90s", "80s", "nostalgia", "classic media"]
+    tts_voice: "af_bella"  # Elegant for culture content
+    lang: "en-US"
+    visibility: "public"
+
+  cricket-queens:
+    name: "Cricket Queens"
+    topic: "Women's cricket highlights and player profiles"
+    mode: "sports"
+    style: "Energetic sports coverage"
+    search_terms: ["cricket", "women sports", "female athletes", "sports highlights"]
+    tts_voice: "af_sky"  # Energetic for sports
+    lang: "en-US"
+    visibility: "public"
+
+  galacticupdate:
+    name: "GalacticUpdate"
+    topic: "Latest space exploration and astronomy discoveries"
+    mode: "educational"
+    style: "Scientific space news and discoveries"
+    search_terms: ["space", "astronomy", "NASA", "planets", "cosmos"]
+    tts_voice: "af_sarah"  # Professional for science
+    lang: "en-US"
+    visibility: "public"
+
+  cinematic-echo:
     name: "Cinematic Echo"
-    mode: "film_analysis"
-    lang: "en"
+    topic: "Film analysis and movie storytelling techniques"
+    mode: "entertainment"
+    style: "Analytical film critique and appreciation"
+    search_terms: ["cinema", "movies", "film analysis", "directors", "cinematography"]
+    tts_voice: "af_bella"  # Elegant for film analysis
+    lang: "en-US"
     visibility: "public"
-    seed: 8004
-    topic: "Film analysis—cinematography, symbolism, director techniques, and movie breakdowns"
-    # Recommended: KOKORO_VOICE=am_michael, KOKORO_PRECISION=fp32
-    search_terms: ["film camera professional", "movie theater screen", "director chair set", "cinematography lighting", "film reel vintage", "clapperboard action", "camera dolly track", "editing room screens", "film festival premiere", "movie poster iconic"]
 
-  - env: "LightCraft Studio"
-    name: "LightCraft Studio"
-    mode: "photography_tips"
-    lang: "en"
+  critterfact:
+    name: "CritterFact"
+    topic: "Amazing animal facts and wildlife behaviors"
+    mode: "educational"
+    style: "Fun and informative animal content"
+    search_terms: ["animals", "wildlife", "nature", "creatures", "zoology"]
+    tts_voice: "af_heart"  # Warm for animal content
+    lang: "en-US"
     visibility: "public"
-    seed: 8005
-    topic: "Photography techniques—lighting, composition, editing, and visual storytelling"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=fp16
-    search_terms: ["camera lens closeup", "photography studio lighting", "dslr camera shooting", "tripod equipment setup", "photo editing screen", "portrait photography session", "golden hour sunset", "composition rule thirds", "bokeh effect background", "photographer framing shot"]
 
-  - env: "Object Origins"
-    name: "Object Origins"
-    mode: "object_history"
-    lang: "en"
+  wildwondercaps:
+    name: "WildWonderCaps"
+    topic: "Brief stunning moments from the wild"
+    mode: "documentary"
+    style: "Captivating wildlife moments"
+    search_terms: ["wildlife", "nature", "animals", "wilderness", "safari"]
+    tts_voice: "bf_emma"  # British for documentary
+    lang: "en-GB"
     visibility: "public"
-    seed: 8006
-    topic: "History of everyday objects—forks, zippers, umbrellas, and invention stories"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=fp32
-    search_terms: ["vintage object collection", "antique tool display", "patent drawing diagram", "invention prototype", "old factory production", "manufacturing assembly", "product evolution timeline", "museum artifact exhibit", "historical advertisement", "blueprint technical drawing"]
 
-  # ============================================================
-  # SCIENCE & TIME
-  # ============================================================
-  - env: "SpaceVista 60"
-    name: "SpaceVista 60"
-    mode: "space_visuals"
-    lang: "en"
+  nextgen-update:
+    name: "NextGen Update"
+    topic: "Emerging technologies and future innovations"
+    mode: "educational"
+    style: "Forward-thinking tech coverage"
+    search_terms: ["technology", "innovation", "future tech", "AI", "gadgets"]
+    tts_voice: "af_sarah"  # Professional for tech
+    lang: "en-US"
     visibility: "public"
-    seed: 9001
-    topic: "Space imagery and visuals—planets, nebulae, telescopes, and cosmic beauty"
-    # Recommended: KOKORO_VOICE=am_adam, KOKORO_PRECISION=fp32
-    search_terms: ["space telescope hubble", "planet jupiter closeup", "nebula colorful clouds", "star cluster formation", "galaxy milky way", "mars surface rover", "astronaut floating space", "satellite earth orbit", "moon crater surface", "cosmos deep space"]
 
-  - env: "SkySynthLab"
-    name: "SkySynthLab"
-    mode: "weather_science"
-    lang: "en"
+  beyondaxis:
+    name: "BeyondAxis"
+    topic: "Philosophical concepts and abstract thinking"
+    mode: "educational"
+    style: "Thought-provoking philosophical exploration"
+    search_terms: ["philosophy", "consciousness", "existence", "metaphysics", "ethics"]
+    tts_voice: "am_adam"  # Authoritative for philosophy
+    lang: "en-US"
     visibility: "public"
-    seed: 9002
-    topic: "Weather phenomena and atmospheric science—clouds, storms, climate patterns"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=fp16
-    search_terms: ["storm clouds dramatic", "lightning strike bolt", "rainbow after rain", "tornado funnel cloud", "fog morning mist", "snow falling closeup", "cumulus clouds blue sky", "weather station equipment", "hurricane satellite view", "frost ice crystals"]
 
-  - env: "Weather Window 60"
-    name: "Weather Window 60"
-    mode: "weather_daily"
-    lang: "en"
+  behindthefame:
+    name: "BehindTheFame"
+    topic: "Untold stories of famous personalities"
+    mode: "documentary"
+    style: "Revealing biographical narratives"
+    search_terms: ["celebrities", "biography", "famous people", "success stories"]
+    tts_voice: "af_bella"  # Elegant for celebrity content
+    lang: "en-US"
     visibility: "public"
-    seed: 9003
-    topic: "Daily weather insights—forecasts, seasonal changes, and weather curiosities"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=q8
-    search_terms: ["weather forecast map", "rain drops window", "sunny day blue sky", "wind blowing trees", "thermometer temperature", "barometer pressure gauge", "weather vane wind", "clouds timelapse", "sunrise sunset colors", "season change nature"]
 
-  - env: "Timelapse Lab"
-    name: "Timelapse Lab"
-    mode: "timelapse_showcase"
-    lang: "en"
+  one-day-inside:
+    name: "One Day Inside"
+    topic: "Immersive day-in-the-life experiences"
+    mode: "vlog"
+    style: "Personal and immersive lifestyle content"
+    search_terms: ["lifestyle", "daily life", "routine", "day in life", "experience"]
+    tts_voice: "am_michael"  # Natural for vlog style
+    lang: "en-US"
     visibility: "public"
-    seed: 9004
-    topic: "Timelapse videos—nature, cities, construction, and transformation over time"
-    # Recommended: KOKORO_VOICE=am_michael, KOKORO_PRECISION=fp16
-    search_terms: ["timelapse city traffic", "construction building timelapse", "flower blooming timelapse", "clouds moving fast", "sunset timelapse colors", "stars rotating night", "shadow moving day", "crowd people timelapse", "seasons changing tree", "ice melting timelapse"]
 
-  - env: "NameDay 60"
-    name: "NameDay 60"
-    mode: "name_etymology"
-    lang: "en"
+  gods-unleashed:
+    name: "Gods Unleashed"
+    topic: "Mythology and ancient deities across cultures"
+    mode: "educational"
+    style: "Epic mythological storytelling"
+    search_terms: ["mythology", "gods", "ancient", "legends", "folklore"]
+    tts_voice: "am_adam"  # Deep for epic content
+    lang: "en-US"
     visibility: "public"
-    seed: 9005
-    topic: "Name origins and meanings—etymology, cultural significance, and naming trends"
-    # Recommended: KOKORO_VOICE=af_sarah, KOKORO_PRECISION=q8
-    search_terms: ["baby name book", "calligraphy writing name", "family tree genealogy", "birth certificate document", "nameplate engraving", "signature signing paper", "alphabet letters blocks", "cultural naming ceremony", "name meaning dictionary", "handwritten name tag"]
 
-  # ============================================================
-  # ARCHITECTURE & DESIGN
-  # ============================================================
-  - env: "Bridge & Tunnel Atlas"
-    name: "Bridge & Tunnel Atlas"
-    mode: "infrastructure"
-    lang: "en"
+  microworld-stories:
+    name: "Microworld Stories"
+    topic: "Fascinating tales from the microscopic realm"
+    mode: "educational"
+    style: "Scientific exploration of tiny worlds"
+    search_terms: ["microscopic", "bacteria", "cells", "microbiology", "tiny"]
+    tts_voice: "af_sarah"  # Professional for science
+    lang: "en-US"
     visibility: "public"
-    seed: 10001
-    topic: "Engineering marvels—bridges, tunnels, and infrastructure around the world"
-    # Recommended: KOKORO_VOICE=am_adam, KOKORO_PRECISION=fp32
-    search_terms: ["suspension bridge aerial", "tunnel interior lights", "bridge construction progress", "viaduct mountain valley", "underwater tunnel", "cable stayed bridge", "arch bridge stone", "bridge sunset silhouette", "tunnel boring machine", "bridge traffic timelapse"]
 
-  - env: "Bot Gone Wild"
+  bot-gone-wild:
     name: "Bot Gone Wild"
-    mode: "robot_fails"
-    lang: "en"
+    topic: "AI mishaps and robot fails with humor"
+    mode: "entertainment"
+    style: "Humorous tech failures and AI moments"
+    search_terms: ["AI", "robots", "fails", "technology", "artificial intelligence"]
+    tts_voice: "af_sky"  # Energetic for entertainment
+    lang: "en-US"
     visibility: "public"
-    seed: 10002
-    topic: "Robot fails and AI quirks—when automation goes hilariously wrong"
-    # Recommended: KOKORO_VOICE=af_sky, KOKORO_PRECISION=q8
-    search_terms: ["robot malfunction fail", "automation error factory", "ai mistake funny", "robot stuck situation", "machine confused behavior", "chatbot weird response", "robot falling over", "ai generated art weird", "automation gone wrong", "robot learning struggle"]
 
-# ============================================================
-# END OF CHANNELS CONFIGURATION
-# ============================================================
-# Total: 50 channels configured
-# Each channel has recommended Kokoro TTS voice in comments
-# Set via GitHub Actions workflow env variables:
-#   TTS_PROVIDER: "kokoro"
-#   KOKORO_VOICE: "af_sarah"  (or other voice)
-#   KOKORO_PRECISION: "fp32"  (or fp16, q8, q4)
-# ============================================================
+  skysynthlab:
+    name: "SkySynthLab"
+    topic: "Atmospheric science and weather phenomena"
+    mode: "educational"
+    style: "Scientific weather explanations"
+    search_terms: ["weather", "atmosphere", "meteorology", "climate", "sky"]
+    tts_voice: "af_sarah"  # Professional for science
+    lang: "en-US"
+    visibility: "public"
+
+  fixit-fast:
+    name: "FixIt Fast"
+    topic: "Quick DIY repairs and home fixes"
+    mode: "educational"
+    style: "Practical how-to repair guides"
+    search_terms: ["DIY", "repair", "home improvement", "fix", "maintenance"]
+    tts_voice: "am_michael"  # Natural for instructional
+    lang: "en-US"
+    visibility: "public"
+
+  gameday-60:
+    name: "GameDay 60"
+    topic: "Sports highlights in 60 seconds"
+    mode: "sports"
+    style: "Fast-paced sports recaps"
+    search_terms: ["sports", "games", "highlights", "athletes", "competition"]
+    tts_voice: "af_sky"  # Energetic for sports
+    lang: "en-US"
+    visibility: "public"
+
+  planet-snapshot:
+    name: "Planet Snapshot"
+    topic: "Stunning planetary landscapes and geology"
+    mode: "documentary"
+    style: "Visual exploration of planets"
+    search_terms: ["planets", "space", "geology", "landscapes", "astronomy"]
+    tts_voice: "af_sarah"  # Professional for science
+    lang: "en-US"
+    visibility: "public"
+
+  cityframe-stories:
+    name: "CityFrame Stories"
+    topic: "Urban tales and city life narratives"
+    mode: "storytelling"
+    style: "Urban storytelling and city culture"
+    search_terms: ["city", "urban", "architecture", "metropolitan", "streets"]
+    tts_voice: "af_heart"  # Warm for storytelling
+    lang: "en-US"
+    visibility: "public"
+
+  eco-habit-hacks:
+    name: "Eco Habit Hacks"
+    topic: "Sustainable living tips and green habits"
+    mode: "educational"
+    style: "Practical eco-friendly advice"
+    search_terms: ["sustainability", "eco-friendly", "green living", "environment"]
+    tts_voice: "af_sarah"  # Professional for advice
+    lang: "en-US"
+    visibility: "public"
+
+  pocket-tech-tricks:
+    name: "Pocket Tech Tricks"
+    topic: "Quick tech tips and smartphone hacks"
+    mode: "educational"
+    style: "Bite-sized tech tutorials"
+    search_terms: ["tech tips", "smartphone", "apps", "gadgets", "life hacks"]
+    tts_voice: "af_sky"  # Energetic for tech tips
+    lang: "en-US"
+    visibility: "public"
+
+  spacevista-60:
+    name: "SpaceVista 60"
+    topic: "Space imagery in 60 seconds"
+    mode: "documentary"
+    style: "Visual space exploration"
+    search_terms: ["space", "cosmos", "nebula", "galaxies", "astronomy"]
+    tts_voice: "af_sarah"  # Professional for science
+    lang: "en-US"
+    visibility: "public"
+
+  micronature-minute:
+    name: "MicroNature Minute"
+    topic: "Close-up nature and macro wildlife"
+    mode: "documentary"
+    style: "Intimate natural world exploration"
+    search_terms: ["macro", "nature", "insects", "plants", "close-up"]
+    tts_voice: "af_heart"  # Warm for nature
+    lang: "en-US"
+    visibility: "public"
+
+  kitchen-logic-lab:
+    name: "Kitchen Logic Lab"
+    topic: "Food science and cooking chemistry"
+    mode: "educational"
+    style: "Scientific cooking explanations"
+    search_terms: ["cooking", "food science", "kitchen", "chemistry", "culinary"]
+    tts_voice: "af_sarah"  # Professional for science
+    lang: "en-US"
+    visibility: "public"
+
+  weather-window-60:
+    name: "Weather Window 60"
+    topic: "Weather patterns in 60 seconds"
+    mode: "educational"
+    style: "Quick weather phenomena explanations"
+    search_terms: ["weather", "meteorology", "storms", "climate", "forecast"]
+    tts_voice: "af_sarah"  # Professional for science
+    lang: "en-US"
+    visibility: "public"
+
+  focus-rituals:
+    name: "Focus Rituals"
+    topic: "Productivity techniques and focus methods"
+    mode: "educational"
+    style: "Practical productivity guidance"
+    search_terms: ["productivity", "focus", "concentration", "habits", "mindfulness"]
+    tts_voice: "am_michael"  # Natural for advice
+    lang: "en-US"
+    visibility: "public"
+
+  trailscape-60:
+    name: "TrailScape 60"
+    topic: "Hiking trails and outdoor scenery"
+    mode: "documentary"
+    style: "Visual trail exploration"
+    search_terms: ["hiking", "trails", "nature", "outdoors", "mountains"]
+    tts_voice: "af_heart"  # Warm for nature
+    lang: "en-US"
+    visibility: "public"
+
+  ocean-pulse:
+    name: "Ocean Pulse"
+    topic: "Marine life and ocean ecosystems"
+    mode: "documentary"
+    style: "Immersive ocean exploration"
+    search_terms: ["ocean", "marine life", "underwater", "sea creatures", "coral"]
+    tts_voice: "bf_emma"  # British for documentary
+    lang: "en-GB"
+    visibility: "public"
+
+  timelapse-lab:
+    name: "Timelapse Lab"
+    topic: "Mesmerizing timelapse transformations"
+    mode: "visual"
+    style: "Visual storytelling through time"
+    search_terms: ["timelapse", "time", "transformation", "change", "growth"]
+    tts_voice: "af_sarah"  # Professional narration
+    lang: "en-US"
+    visibility: "public"
+
+  orderly-home-60:
+    name: "Orderly Home 60"
+    topic: "Quick home organization tips"
+    mode: "educational"
+    style: "Practical home organization advice"
+    search_terms: ["organization", "home", "declutter", "storage", "tidy"]
+    tts_voice: "af_sarah"  # Professional for advice
+    lang: "en-US"
+    visibility: "public"
+
+  roadvista-60:
+    name: "RoadVista 60"
+    topic: "Scenic road trips and highway views"
+    mode: "documentary"
+    style: "Visual road journey exploration"
+    search_terms: ["road trip", "highway", "scenic", "drive", "travel"]
+    tts_voice: "am_michael"  # Natural for travel
+    lang: "en-US"
+    visibility: "public"
+
+  wild-pattern-atlas:
+    name: "Wild Pattern Atlas"
+    topic: "Natural patterns in nature and wildlife"
+    mode: "documentary"
+    style: "Visual pattern exploration"
+    search_terms: ["patterns", "nature", "geometry", "symmetry", "wildlife"]
+    tts_voice: "af_bella"  # Elegant for artistic content
+    lang: "en-US"
+    visibility: "public"
+
+  hidden-math-irl:
+    name: "Hidden Math IRL"
+    topic: "Mathematical patterns in everyday life"
+    mode: "educational"
+    style: "Engaging mathematical explanations"
+    search_terms: ["mathematics", "patterns", "geometry", "numbers", "everyday"]
+    tts_voice: "af_sarah"  # Professional for education
+    lang: "en-US"
+    visibility: "public"
+
+  mechanism-minute:
+    name: "Mechanism Minute"
+    topic: "How mechanical devices and machines work"
+    mode: "educational"
+    style: "Technical mechanism explanations"
+    search_terms: ["mechanics", "machines", "engineering", "how it works", "gears"]
+    tts_voice: "am_michael"  # Natural for technical
+    lang: "en-US"
+    visibility: "public"
+
+  lightcraft-studio:
+    name: "LightCraft Studio"
+    topic: "Photography techniques and lighting effects"
+    mode: "educational"
+    style: "Artistic photography guidance"
+    search_terms: ["photography", "lighting", "camera", "visual arts", "composition"]
+    tts_voice: "af_bella"  # Elegant for arts
+    lang: "en-US"
+    visibility: "public"
+
+  bridge-tunnel-atlas:
+    name: "Bridge & Tunnel Atlas"
+    topic: "Engineering marvels of bridges and tunnels"
+    mode: "documentary"
+    style: "Engineering storytelling"
+    search_terms: ["bridges", "tunnels", "engineering", "infrastructure", "construction"]
+    tts_voice: "bm_daniel"  # British male for documentary
+    lang: "en-GB"
+    visibility: "public"
+
+  object-origins:
+    name: "Object Origins"
+    topic: "History and invention of everyday objects"
+    mode: "educational"
+    style: "Historical object storytelling"
+    search_terms: ["history", "inventions", "objects", "origins", "everyday items"]
+    tts_voice: "bf_emma"  # British for historical
+    lang: "en-GB"
+    visibility: "public"
+
+  epic-mundane:
+    name: "Epic Mundane"
+    topic: "Making ordinary moments extraordinary"
+    mode: "entertainment"
+    style: "Dramatic narration of everyday life"
+    search_terms: ["everyday", "mundane", "ordinary", "dramatic", "daily life"]
+    tts_voice: "am_adam"  # Deep, dramatic voice
+    lang: "en-US"
+    visibility: "public"
+
+  corporate-jargon-translator:
+    name: "Corporate Jargon Translator"
+    topic: "Decoding business buzzwords with humor"
+    mode: "entertainment"
+    style: "Humorous business satire"
+    search_terms: ["business", "corporate", "jargon", "office", "workplace"]
+    tts_voice: "af_sky"  # Energetic for comedy
+    lang: "en-US"
+    visibility: "public"
+
+  pet-inner-monologue:
+    name: "Pet Inner Monologue"
+    topic: "Humorous pet thoughts and perspectives"
+    mode: "entertainment"
+    style: "Comedy pet narration"
+    search_terms: ["pets", "animals", "dogs", "cats", "funny"]
+    tts_voice: "af_heart"  # Warm for pet content
+    lang: "en-US"
+    visibility: "public"
+
+  tiny-drama-dept:
+    name: "Tiny Drama Dept."
+    topic: "Micro dramatic stories and mini theater"
+    mode: "entertainment"
+    style: "Dramatic short storytelling"
+    search_terms: ["drama", "theater", "short stories", "acting", "performance"]
+    tts_voice: "af_bella"  # Elegant for drama
+    lang: "en-US"
+    visibility: "public"
+
+  wrong-way-first:
+    name: "Wrong Way First"
+    topic: "Learning from mistakes and trial-and-error"
+    mode: "educational"
+    style: "Encouraging failure-based learning"
+    search_terms: ["mistakes", "learning", "trial and error", "failure", "growth"]
+    tts_voice: "am_michael"  # Natural, conversational
+    lang: "en-US"
+    visibility: "public"
