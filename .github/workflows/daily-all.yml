@@ -79,6 +79,7 @@ jobs:
     needs: make-matrix
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: ${{ matrix.environment }}  # ✅ CRITICAL: Bu satır olmadan secrets erişilemiyor!
     
     strategy:
       fail-fast: false
