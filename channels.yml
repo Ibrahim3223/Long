@@ -1,504 +1,494 @@
 # ============================================================
 # CHANNEL CONFIGURATIONS - KOKORO TTS ENHANCED
 # ============================================================
-# Each channel can have custom settings including Kokoro voice selection
-# 
-# Available Kokoro Voices:
-# AMERICAN FEMALE: af_sarah (professional), af_heart (warm), af_bella (elegant),
-#                  af_sky (energetic), af_alloy, af_aoede, af_jessica, af_nicole, af_nova, af_river
-# AMERICAN MALE:   am_adam (authoritative), am_michael (natural), am_echo, am_eric,
-#                  am_fenrir, am_liam, am_onyx, am_puck
-# BRITISH FEMALE:  bf_alice, bf_emma (sophisticated), bf_isabella (elegant), bf_lily
-# BRITISH MALE:    bm_daniel, bm_fable, bm_george, bm_lewis
-# ============================================================
 
 channels:
-  wt-facts-about-countries:
+  - env: wt-facts-about-countries
     name: "WT Facts About Countries"
     topic: "Fascinating facts and trivia about countries worldwide"
     mode: "educational"
     style: "Informative and engaging geographical content"
     search_terms: ["countries", "geography", "world facts", "nations", "cultures"]
-    tts_voice: "af_sarah"  # Professional, clear for educational content
+    tts_voice: "af_sarah"
     lang: "en-US"
     visibility: "public"
 
-  tales-of-the-forgotten-realms:
+  - env: tales-of-the-forgotten-realms
     name: "Tales of The Forgetten Realms"
     topic: "Epic fantasy stories from forgotten magical realms"
     mode: "storytelling"
     style: "Immersive narrative fantasy storytelling"
     search_terms: ["fantasy", "magic", "medieval", "epic tales", "dragons"]
-    tts_voice: "af_heart"  # Warm, friendly for storytelling
+    tts_voice: "af_heart"
     lang: "en-US"
     visibility: "public"
 
-  famous-quotes-explained:
+  - env: famous-quotes-explained
     name: "Famous Quotes Explained"
     topic: "Deep analysis and context of famous historical quotes"
     mode: "educational"
     style: "Analytical and thought-provoking explanations"
     search_terms: ["quotes", "philosophy", "history", "wisdom", "famous people"]
-    tts_voice: "am_adam"  # Deep, authoritative for serious content
+    tts_voice: "am_adam"
     lang: "en-US"
     visibility: "public"
 
-  taxwise-usa:
+  - env: taxwise-usa
     name: "TaxWise USA"
     topic: "Practical tax tips and financial advice for Americans"
     mode: "educational"
     style: "Clear, practical financial guidance"
     search_terms: ["taxes", "finance", "IRS", "deductions", "tax tips"]
-    tts_voice: "am_michael"  # Natural, conversational for advice
+    tts_voice: "am_michael"
     lang: "en-US"
     visibility: "public"
 
-  echo-of-the-unknown:
+  - env: echo-of-the-unknown
     name: "Echo of the Unknown"
     topic: "Mysterious phenomena and unexplained events"
     mode: "documentary"
     style: "Atmospheric exploration of mysteries"
     search_terms: ["mystery", "paranormal", "unexplained", "enigma", "strange"]
-    tts_voice: "am_adam"  # Deep, authoritative for mysterious content
+    tts_voice: "am_adam"
     lang: "en-US"
     visibility: "public"
 
-  flashback-minute:
+  - env: flashback-minute
     name: "Flashback Minute"
     topic: "Quick historical moments that shaped our world"
     mode: "educational"
     style: "Concise historical storytelling"
     search_terms: ["history", "historical events", "past", "timeline", "archive"]
-    tts_voice: "bf_emma"  # British sophistication for history
+    tts_voice: "bf_emma"
     lang: "en-GB"
     visibility: "public"
 
-  universe-jumper:
+  - env: universe-jumper
     name: "Universe Jumper"
     topic: "Mind-bending sci-fi concepts and multiverse theories"
     mode: "entertainment"
     style: "Imaginative science fiction exploration"
     search_terms: ["sci-fi", "multiverse", "parallel universe", "space", "quantum"]
-    tts_voice: "af_sky"  # Energetic for sci-fi content
+    tts_voice: "af_sky"
     lang: "en-US"
     visibility: "public"
 
-  if-they-lived-today:
+  - env: if-they-lived-today
     name: "If They Lived Today"
     topic: "Historical figures reimagined in modern times"
     mode: "entertainment"
     style: "Creative alternate history scenarios"
     search_terms: ["history", "modern", "alternate history", "what if", "famous people"]
-    tts_voice: "af_heart"  # Warm for storytelling
+    tts_voice: "af_heart"
     lang: "en-US"
     visibility: "public"
 
-  rewind-retro-media:
+  - env: rewind-retro-media
     name: "Rewind Retro Media"
     topic: "Nostalgic look at classic movies, TV, and pop culture"
     mode: "entertainment"
     style: "Nostalgic and entertaining media retrospectives"
     search_terms: ["retro", "90s", "80s", "nostalgia", "classic media"]
-    tts_voice: "af_bella"  # Elegant for culture content
+    tts_voice: "af_bella"
     lang: "en-US"
     visibility: "public"
 
-  cricket-queens:
+  - env: cricket-queens
     name: "Cricket Queens"
     topic: "Women's cricket highlights and player profiles"
     mode: "sports"
     style: "Energetic sports coverage"
     search_terms: ["cricket", "women sports", "female athletes", "sports highlights"]
-    tts_voice: "af_sky"  # Energetic for sports
+    tts_voice: "af_sky"
     lang: "en-US"
     visibility: "public"
 
-  galacticupdate:
+  - env: galacticupdate
     name: "GalacticUpdate"
     topic: "Latest space exploration and astronomy discoveries"
     mode: "educational"
     style: "Scientific space news and discoveries"
     search_terms: ["space", "astronomy", "NASA", "planets", "cosmos"]
-    tts_voice: "af_sarah"  # Professional for science
+    tts_voice: "af_sarah"
     lang: "en-US"
     visibility: "public"
 
-  cinematic-echo:
+  - env: cinematic-echo
     name: "Cinematic Echo"
     topic: "Film analysis and movie storytelling techniques"
     mode: "entertainment"
     style: "Analytical film critique and appreciation"
     search_terms: ["cinema", "movies", "film analysis", "directors", "cinematography"]
-    tts_voice: "af_bella"  # Elegant for film analysis
+    tts_voice: "af_bella"
     lang: "en-US"
     visibility: "public"
 
-  critterfact:
+  - env: critterfact
     name: "CritterFact"
     topic: "Amazing animal facts and wildlife behaviors"
     mode: "educational"
     style: "Fun and informative animal content"
     search_terms: ["animals", "wildlife", "nature", "creatures", "zoology"]
-    tts_voice: "af_heart"  # Warm for animal content
+    tts_voice: "af_heart"
     lang: "en-US"
     visibility: "public"
 
-  wildwondercaps:
+  - env: wildwondercaps
     name: "WildWonderCaps"
     topic: "Brief stunning moments from the wild"
     mode: "documentary"
     style: "Captivating wildlife moments"
     search_terms: ["wildlife", "nature", "animals", "wilderness", "safari"]
-    tts_voice: "bf_emma"  # British for documentary
+    tts_voice: "bf_emma"
     lang: "en-GB"
     visibility: "public"
 
-  nextgen-update:
+  - env: nextgen-update
     name: "NextGen Update"
     topic: "Emerging technologies and future innovations"
     mode: "educational"
     style: "Forward-thinking tech coverage"
     search_terms: ["technology", "innovation", "future tech", "AI", "gadgets"]
-    tts_voice: "af_sarah"  # Professional for tech
+    tts_voice: "af_sarah"
     lang: "en-US"
     visibility: "public"
 
-  beyondaxis:
+  - env: beyondaxis
     name: "BeyondAxis"
     topic: "Philosophical concepts and abstract thinking"
     mode: "educational"
     style: "Thought-provoking philosophical exploration"
     search_terms: ["philosophy", "consciousness", "existence", "metaphysics", "ethics"]
-    tts_voice: "am_adam"  # Authoritative for philosophy
+    tts_voice: "am_adam"
     lang: "en-US"
     visibility: "public"
 
-  behindthefame:
+  - env: behindthefame
     name: "BehindTheFame"
     topic: "Untold stories of famous personalities"
     mode: "documentary"
     style: "Revealing biographical narratives"
     search_terms: ["celebrities", "biography", "famous people", "success stories"]
-    tts_voice: "af_bella"  # Elegant for celebrity content
+    tts_voice: "af_bella"
     lang: "en-US"
     visibility: "public"
 
-  one-day-inside:
+  - env: one-day-inside
     name: "One Day Inside"
     topic: "Immersive day-in-the-life experiences"
     mode: "vlog"
     style: "Personal and immersive lifestyle content"
     search_terms: ["lifestyle", "daily life", "routine", "day in life", "experience"]
-    tts_voice: "am_michael"  # Natural for vlog style
+    tts_voice: "am_michael"
     lang: "en-US"
     visibility: "public"
 
-  gods-unleashed:
+  - env: gods-unleashed
     name: "Gods Unleashed"
     topic: "Mythology and ancient deities across cultures"
     mode: "educational"
     style: "Epic mythological storytelling"
     search_terms: ["mythology", "gods", "ancient", "legends", "folklore"]
-    tts_voice: "am_adam"  # Deep for epic content
+    tts_voice: "am_adam"
     lang: "en-US"
     visibility: "public"
 
-  microworld-stories:
+  - env: microworld-stories
     name: "Microworld Stories"
     topic: "Fascinating tales from the microscopic realm"
     mode: "educational"
     style: "Scientific exploration of tiny worlds"
     search_terms: ["microscopic", "bacteria", "cells", "microbiology", "tiny"]
-    tts_voice: "af_sarah"  # Professional for science
+    tts_voice: "af_sarah"
     lang: "en-US"
     visibility: "public"
 
-  bot-gone-wild:
+  - env: bot-gone-wild
     name: "Bot Gone Wild"
     topic: "AI mishaps and robot fails with humor"
     mode: "entertainment"
     style: "Humorous tech failures and AI moments"
     search_terms: ["AI", "robots", "fails", "technology", "artificial intelligence"]
-    tts_voice: "af_sky"  # Energetic for entertainment
+    tts_voice: "af_sky"
     lang: "en-US"
     visibility: "public"
 
-  skysynthlab:
+  - env: skysynthlab
     name: "SkySynthLab"
     topic: "Atmospheric science and weather phenomena"
     mode: "educational"
     style: "Scientific weather explanations"
     search_terms: ["weather", "atmosphere", "meteorology", "climate", "sky"]
-    tts_voice: "af_sarah"  # Professional for science
+    tts_voice: "af_sarah"
     lang: "en-US"
     visibility: "public"
 
-  fixit-fast:
+  - env: fixit-fast
     name: "FixIt Fast"
     topic: "Quick DIY repairs and home fixes"
     mode: "educational"
     style: "Practical how-to repair guides"
     search_terms: ["DIY", "repair", "home improvement", "fix", "maintenance"]
-    tts_voice: "am_michael"  # Natural for instructional
+    tts_voice: "am_michael"
     lang: "en-US"
     visibility: "public"
 
-  gameday-60:
+  - env: gameday-60
     name: "GameDay 60"
     topic: "Sports highlights in 60 seconds"
     mode: "sports"
     style: "Fast-paced sports recaps"
     search_terms: ["sports", "games", "highlights", "athletes", "competition"]
-    tts_voice: "af_sky"  # Energetic for sports
+    tts_voice: "af_sky"
     lang: "en-US"
     visibility: "public"
 
-  planet-snapshot:
+  - env: planet-snapshot
     name: "Planet Snapshot"
     topic: "Stunning planetary landscapes and geology"
     mode: "documentary"
     style: "Visual exploration of planets"
     search_terms: ["planets", "space", "geology", "landscapes", "astronomy"]
-    tts_voice: "af_sarah"  # Professional for science
+    tts_voice: "af_sarah"
     lang: "en-US"
     visibility: "public"
 
-  cityframe-stories:
+  - env: cityframe-stories
     name: "CityFrame Stories"
     topic: "Urban tales and city life narratives"
     mode: "storytelling"
     style: "Urban storytelling and city culture"
     search_terms: ["city", "urban", "architecture", "metropolitan", "streets"]
-    tts_voice: "af_heart"  # Warm for storytelling
+    tts_voice: "af_heart"
     lang: "en-US"
     visibility: "public"
 
-  eco-habit-hacks:
+  - env: eco-habit-hacks
     name: "Eco Habit Hacks"
     topic: "Sustainable living tips and green habits"
     mode: "educational"
     style: "Practical eco-friendly advice"
     search_terms: ["sustainability", "eco-friendly", "green living", "environment"]
-    tts_voice: "af_sarah"  # Professional for advice
+    tts_voice: "af_sarah"
     lang: "en-US"
     visibility: "public"
 
-  pocket-tech-tricks:
+  - env: pocket-tech-tricks
     name: "Pocket Tech Tricks"
     topic: "Quick tech tips and smartphone hacks"
     mode: "educational"
     style: "Bite-sized tech tutorials"
     search_terms: ["tech tips", "smartphone", "apps", "gadgets", "life hacks"]
-    tts_voice: "af_sky"  # Energetic for tech tips
+    tts_voice: "af_sky"
     lang: "en-US"
     visibility: "public"
 
-  spacevista-60:
+  - env: spacevista-60
     name: "SpaceVista 60"
     topic: "Space imagery in 60 seconds"
     mode: "documentary"
     style: "Visual space exploration"
     search_terms: ["space", "cosmos", "nebula", "galaxies", "astronomy"]
-    tts_voice: "af_sarah"  # Professional for science
+    tts_voice: "af_sarah"
     lang: "en-US"
     visibility: "public"
 
-  micronature-minute:
+  - env: micronature-minute
     name: "MicroNature Minute"
     topic: "Close-up nature and macro wildlife"
     mode: "documentary"
     style: "Intimate natural world exploration"
     search_terms: ["macro", "nature", "insects", "plants", "close-up"]
-    tts_voice: "af_heart"  # Warm for nature
+    tts_voice: "af_heart"
     lang: "en-US"
     visibility: "public"
 
-  kitchen-logic-lab:
+  - env: kitchen-logic-lab
     name: "Kitchen Logic Lab"
     topic: "Food science and cooking chemistry"
     mode: "educational"
     style: "Scientific cooking explanations"
     search_terms: ["cooking", "food science", "kitchen", "chemistry", "culinary"]
-    tts_voice: "af_sarah"  # Professional for science
+    tts_voice: "af_sarah"
     lang: "en-US"
     visibility: "public"
 
-  weather-window-60:
+  - env: weather-window-60
     name: "Weather Window 60"
     topic: "Weather patterns in 60 seconds"
     mode: "educational"
     style: "Quick weather phenomena explanations"
     search_terms: ["weather", "meteorology", "storms", "climate", "forecast"]
-    tts_voice: "af_sarah"  # Professional for science
+    tts_voice: "af_sarah"
     lang: "en-US"
     visibility: "public"
 
-  focus-rituals:
+  - env: focus-rituals
     name: "Focus Rituals"
     topic: "Productivity techniques and focus methods"
     mode: "educational"
     style: "Practical productivity guidance"
     search_terms: ["productivity", "focus", "concentration", "habits", "mindfulness"]
-    tts_voice: "am_michael"  # Natural for advice
+    tts_voice: "am_michael"
     lang: "en-US"
     visibility: "public"
 
-  trailscape-60:
+  - env: trailscape-60
     name: "TrailScape 60"
     topic: "Hiking trails and outdoor scenery"
     mode: "documentary"
     style: "Visual trail exploration"
     search_terms: ["hiking", "trails", "nature", "outdoors", "mountains"]
-    tts_voice: "af_heart"  # Warm for nature
+    tts_voice: "af_heart"
     lang: "en-US"
     visibility: "public"
 
-  ocean-pulse:
+  - env: ocean-pulse
     name: "Ocean Pulse"
     topic: "Marine life and ocean ecosystems"
     mode: "documentary"
     style: "Immersive ocean exploration"
     search_terms: ["ocean", "marine life", "underwater", "sea creatures", "coral"]
-    tts_voice: "bf_emma"  # British for documentary
+    tts_voice: "bf_emma"
     lang: "en-GB"
     visibility: "public"
 
-  timelapse-lab:
+  - env: timelapse-lab
     name: "Timelapse Lab"
     topic: "Mesmerizing timelapse transformations"
     mode: "visual"
     style: "Visual storytelling through time"
     search_terms: ["timelapse", "time", "transformation", "change", "growth"]
-    tts_voice: "af_sarah"  # Professional narration
+    tts_voice: "af_sarah"
     lang: "en-US"
     visibility: "public"
 
-  orderly-home-60:
+  - env: orderly-home-60
     name: "Orderly Home 60"
     topic: "Quick home organization tips"
     mode: "educational"
     style: "Practical home organization advice"
     search_terms: ["organization", "home", "declutter", "storage", "tidy"]
-    tts_voice: "af_sarah"  # Professional for advice
+    tts_voice: "af_sarah"
     lang: "en-US"
     visibility: "public"
 
-  roadvista-60:
+  - env: roadvista-60
     name: "RoadVista 60"
     topic: "Scenic road trips and highway views"
     mode: "documentary"
     style: "Visual road journey exploration"
     search_terms: ["road trip", "highway", "scenic", "drive", "travel"]
-    tts_voice: "am_michael"  # Natural for travel
+    tts_voice: "am_michael"
     lang: "en-US"
     visibility: "public"
 
-  wild-pattern-atlas:
+  - env: wild-pattern-atlas
     name: "Wild Pattern Atlas"
     topic: "Natural patterns in nature and wildlife"
     mode: "documentary"
     style: "Visual pattern exploration"
     search_terms: ["patterns", "nature", "geometry", "symmetry", "wildlife"]
-    tts_voice: "af_bella"  # Elegant for artistic content
+    tts_voice: "af_bella"
     lang: "en-US"
     visibility: "public"
 
-  hidden-math-irl:
+  - env: hidden-math-irl
     name: "Hidden Math IRL"
     topic: "Mathematical patterns in everyday life"
     mode: "educational"
     style: "Engaging mathematical explanations"
     search_terms: ["mathematics", "patterns", "geometry", "numbers", "everyday"]
-    tts_voice: "af_sarah"  # Professional for education
+    tts_voice: "af_sarah"
     lang: "en-US"
     visibility: "public"
 
-  mechanism-minute:
+  - env: mechanism-minute
     name: "Mechanism Minute"
     topic: "How mechanical devices and machines work"
     mode: "educational"
     style: "Technical mechanism explanations"
     search_terms: ["mechanics", "machines", "engineering", "how it works", "gears"]
-    tts_voice: "am_michael"  # Natural for technical
+    tts_voice: "am_michael"
     lang: "en-US"
     visibility: "public"
 
-  lightcraft-studio:
+  - env: lightcraft-studio
     name: "LightCraft Studio"
     topic: "Photography techniques and lighting effects"
     mode: "educational"
     style: "Artistic photography guidance"
     search_terms: ["photography", "lighting", "camera", "visual arts", "composition"]
-    tts_voice: "af_bella"  # Elegant for arts
+    tts_voice: "af_bella"
     lang: "en-US"
     visibility: "public"
 
-  bridge-tunnel-atlas:
+  - env: bridge-tunnel-atlas
     name: "Bridge & Tunnel Atlas"
     topic: "Engineering marvels of bridges and tunnels"
     mode: "documentary"
     style: "Engineering storytelling"
     search_terms: ["bridges", "tunnels", "engineering", "infrastructure", "construction"]
-    tts_voice: "bm_daniel"  # British male for documentary
+    tts_voice: "bm_daniel"
     lang: "en-GB"
     visibility: "public"
 
-  object-origins:
+  - env: object-origins
     name: "Object Origins"
     topic: "History and invention of everyday objects"
     mode: "educational"
     style: "Historical object storytelling"
     search_terms: ["history", "inventions", "objects", "origins", "everyday items"]
-    tts_voice: "bf_emma"  # British for historical
+    tts_voice: "bf_emma"
     lang: "en-GB"
     visibility: "public"
 
-  epic-mundane:
+  - env: epic-mundane
     name: "Epic Mundane"
     topic: "Making ordinary moments extraordinary"
     mode: "entertainment"
     style: "Dramatic narration of everyday life"
     search_terms: ["everyday", "mundane", "ordinary", "dramatic", "daily life"]
-    tts_voice: "am_adam"  # Deep, dramatic voice
+    tts_voice: "am_adam"
     lang: "en-US"
     visibility: "public"
 
-  corporate-jargon-translator:
+  - env: corporate-jargon-translator
     name: "Corporate Jargon Translator"
     topic: "Decoding business buzzwords with humor"
     mode: "entertainment"
     style: "Humorous business satire"
     search_terms: ["business", "corporate", "jargon", "office", "workplace"]
-    tts_voice: "af_sky"  # Energetic for comedy
+    tts_voice: "af_sky"
     lang: "en-US"
     visibility: "public"
 
-  pet-inner-monologue:
+  - env: pet-inner-monologue
     name: "Pet Inner Monologue"
     topic: "Humorous pet thoughts and perspectives"
     mode: "entertainment"
     style: "Comedy pet narration"
     search_terms: ["pets", "animals", "dogs", "cats", "funny"]
-    tts_voice: "af_heart"  # Warm for pet content
+    tts_voice: "af_heart"
     lang: "en-US"
     visibility: "public"
 
-  tiny-drama-dept:
+  - env: tiny-drama-dept
     name: "Tiny Drama Dept."
     topic: "Micro dramatic stories and mini theater"
     mode: "entertainment"
     style: "Dramatic short storytelling"
     search_terms: ["drama", "theater", "short stories", "acting", "performance"]
-    tts_voice: "af_bella"  # Elegant for drama
+    tts_voice: "af_bella"
     lang: "en-US"
     visibility: "public"
 
-  wrong-way-first:
+  - env: wrong-way-first
     name: "Wrong Way First"
     topic: "Learning from mistakes and trial-and-error"
     mode: "educational"
     style: "Encouraging failure-based learning"
     search_terms: ["mistakes", "learning", "trial and error", "failure", "growth"]
-    tts_voice: "am_michael"  # Natural, conversational
+    tts_voice: "am_michael"
     lang: "en-US"
     visibility: "public"
