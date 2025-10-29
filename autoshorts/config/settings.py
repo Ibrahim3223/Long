@@ -387,17 +387,27 @@ FAST_MODE = _env_bool("FAST_MODE", True)  # default True for faster runs
 FFMPEG_THREADS = _env_int("FFMPEG_THREADS", max(2, (os.cpu_count() or 4) - 1))
 
 # ============================================================
-# STARTUP LOG
+# STARTUP LOG - UPDATED WITH KOKORO TTS INFO
 # ============================================================
+# Replace the existing startup log section with this updated version
+# This should be at the very end of settings.py
+
 import logging
 _logger = logging.getLogger(__name__)
+
+# Build TTS info string
+_tts_info = f"provider={TTS_PROVIDER}"
+if TTS_PROVIDER in ("kokoro", "auto") and KOKORO_ENABLED:
+    _tts_info += f", kokoro_voice={KOKORO_VOICE}, precision={KOKORO_PRECISION}"
+_tts_info += f", edge_voice={EFFECTIVE_TTS_VOICE}, rate={TTS_RATE}, pitch={TTS_PITCH}"
+
 _logger.info("=" * 60)
 _logger.info("LONG-FORM SETTINGS LOADED")
 _logger.info(f"Channel: {CHANNEL_NAME} | Mode: {CHANNEL_MODE}")
 _logger.info(f"Sentences: {MIN_SENTENCES}-{MAX_SENTENCES} (target {TARGET_SENTENCES})")
 _logger.info(f"Duration: {TARGET_MIN_SEC/60:.1f}-{TARGET_MAX_SEC/60:.1f} min (target {TARGET_DURATION/60:.1f})")
 _logger.info(f"Captions: {'ENABLED' if KARAOKE_CAPTIONS else 'DISABLED'}")
-_logger.info(f"TTS: provider={TTS_PROVIDER}, voice={EFFECTIVE_TTS_VOICE}, rate={TTS_RATE}, pitch={TTS_PITCH}")
+_logger.info(f"TTS: {_tts_info}")  # ✅ Updated to show Kokoro info
 _logger.info(f"BGM: {'ENABLED' if BGM_ENABLED else 'DISABLED'} | Dir: {BGM_DIR}")
 _logger.info(f"FAST_MODE: {FAST_MODE} | FFMPEG_THREADS: {FFMPEG_THREADS}")
 _logger.info("=" * 60)
