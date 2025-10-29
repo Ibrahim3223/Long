@@ -136,13 +136,75 @@ SCENE_MIN_DURATION = 8.0
 SCENE_MAX_DURATION = 15.0
 
 # ============================================================
-# TTS SETTINGS
+# TTS SETTINGS - ENHANCED WITH KOKORO SUPPORT
+# ============================================================
+# Multi-provider TTS system with automatic fallback
+# Providers: Kokoro (ultra-realistic) → Edge (fast) → Google (fallback)
 # ============================================================
 
-TTS_PROVIDER = _env_str("TTS_PROVIDER", "edge")
+# ============================================================
+# PRIMARY TTS PROVIDER SELECTION
+# ============================================================
+TTS_PROVIDER = _env_str("TTS_PROVIDER", "auto")
+# Options:
+# - "kokoro" : Use Kokoro TTS (ultra-realistic AI voice, best quality)
+# - "edge"   : Use Edge TTS (fast, reliable, word timings)
+# - "google" : Use Google TTS (basic fallback)
+# - "auto"   : Automatic selection (Kokoro → Edge → Google)
+
+# ============================================================
+# KOKORO TTS SETTINGS (Ultra-Realistic AI Voice)
+# ============================================================
+# Only used when TTS_PROVIDER is "kokoro" or "auto"
+
+KOKORO_ENABLED = _env_bool("KOKORO_ENABLED", True)
+KOKORO_FALLBACK_EDGE = _env_bool("KOKORO_FALLBACK_EDGE", True)
+
+# Voice Selection (8 options)
+KOKORO_VOICE = _env_str("KOKORO_VOICE", "af_sarah")
+# Available voices:
+#   FEMALE VOICES:
+#   - af_heart    : Heart (warm, friendly) - Great for storytelling
+#   - af_bella    : Bella (elegant, smooth) - Premium content
+#   - af_sarah    : Sarah (professional, clear) - Educational/Documentary [DEFAULT]
+#   - af_sky      : Sky (energetic, bright) - Entertainment/Casual
+#   
+#   MALE VOICES:
+#   - am_adam     : Adam (deep, authoritative) - News/Serious content
+#   - am_michael  : Michael (natural, conversational) - General use
+#   
+#   BRITISH ENGLISH:
+#   - bf_emma     : Emma (sophisticated British female)
+#   - bf_isabella : Isabella (elegant British female)
+
+# Model Precision (Quality vs Speed tradeoff)
+KOKORO_PRECISION = _env_str("KOKORO_PRECISION", "fp32")
+# Options:
+#   - fp32    : Full precision (~330MB) - Best quality, slower [RECOMMENDED FOR PRODUCTION]
+#   - fp16    : Half precision (~165MB) - Good quality, faster
+#   - q8      : 8-bit quantized (~90MB) - Decent quality, fast
+#   - q4      : 4-bit quantized (~50MB) - Lower quality, very fast [GOOD FOR TESTING]
+#   - q4f16   : Mixed 4/16-bit (~80MB) - Balanced
+
+# ============================================================
+# CHANNEL-SPECIFIC VOICE RECOMMENDATIONS
+# ============================================================
+# Set these based on your channel type:
+#
+# Educational/Professional → KOKORO_VOICE=af_sarah, PRECISION=fp32
+# Storytelling/Entertainment → KOKORO_VOICE=af_heart, PRECISION=fp16
+# News/Documentary → KOKORO_VOICE=am_adam, PRECISION=fp32
+# Casual/Fun → KOKORO_VOICE=af_sky, PRECISION=fp16
+# British Content → KOKORO_VOICE=bf_emma, PRECISION=fp32
+# Tech/Gaming → KOKORO_VOICE=am_michael, PRECISION=fp16
+
+# ============================================================
+# LANGUAGE & EDGE TTS SETTINGS
+# ============================================================
 LANG = _env_str("LANG", "en")
 _base_lang = (CHANNEL_LANG_OVERRIDE or LANG).split("-")[0].lower()
 
+# Default Edge TTS voices by language
 _DEFAULT_TTS_BY_LANG = {
     "en": "en-US-GuyNeural",
     "tr": "tr-TR-AhmetNeural",
@@ -154,18 +216,37 @@ _DEFAULT_TTS_BY_LANG = {
     "it": "it-IT-DiegoNeural",
 }
 
+# Edge TTS Voice Configuration
 _raw_voice = _env_str("TTS_VOICE", _DEFAULT_TTS_BY_LANG.get(_base_lang, "en-US-GuyNeural"))
 TTS_VOICE = _raw_voice
 EFFECTIVE_TTS_VOICE = _raw_voice or _DEFAULT_TTS_BY_LANG.get(_base_lang, "en-US-GuyNeural")
 
 VOICE = EFFECTIVE_TTS_VOICE
-TTS_RATE = _env_str("TTS_RATE", "+5%")
-TTS_PITCH = _env_str("TTS_PITCH", "+0Hz")
-TTS_STYLE = _env_str("TTS_STYLE", "narration-professional")
 
+# Edge TTS Parameters
+TTS_RATE = _env_str("TTS_RATE", "+5%")      # Speech rate: -50% to +100%
+TTS_PITCH = _env_str("TTS_PITCH", "+0Hz")   # Pitch adjustment
+TTS_STYLE = _env_str("TTS_STYLE", "narration-professional")  # Speaking style
+
+# Edge TTS Specific (for fallback)
 EDGE_TTS_VOICE = _env_str("EDGE_TTS_VOICE", EFFECTIVE_TTS_VOICE)
 EDGE_TTS_RATE = _env_str("EDGE_TTS_RATE", TTS_RATE)
+
+# Google TTS Specific (last resort fallback)
 GOOGLE_TTS_LANG = _env_str("GOOGLE_TTS_LANG", f"{_base_lang}-{_base_lang.upper()}")
+
+# ============================================================
+# TTS PERFORMANCE & QUALITY SETTINGS
+# ============================================================
+TTS_TIMEOUT = _env_int("TTS_TIMEOUT", 30)           # Timeout per TTS request (seconds)
+TTS_MAX_RETRIES = _env_int("TTS_MAX_RETRIES", 2)    # Max retry attempts
+TTS_CACHE_ENABLED = _env_bool("TTS_CACHE_ENABLED", False)  # Cache generated audio
+
+# ============================================================
+# STARTUP LOG - Show active TTS configuration
+# ============================================================
+# This will be logged at startup to show which TTS is active
+# (Will be added to the main startup log section at the end of settings.py)
 
 # ============================================================
 # PEXELS SETTINGS - OPTIMIZED FOR LONG-FORM
