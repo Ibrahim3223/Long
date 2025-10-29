@@ -34,12 +34,12 @@ from autoshorts.content.gemini_client import GeminiClient
 from autoshorts.video.pexels_client import PexelsClient
 from autoshorts.tts.edge_handler import TTSHandler
 from autoshorts.captions.renderer import CaptionRenderer
-from autoshorts.bgm.bgm_manager import BGMManager
+from autoshorts.audio.bgm_manager import BGMManager
 from autoshorts.utils.ffmpeg_utils import run, ffprobe_duration
 from autoshorts.utils.text_utils import extract_keywords, simplify_query
 from autoshorts.state.novelty_guard import NoveltyGuard
 from autoshorts.state.state_guard import StateGuard
-from autoshorts.quality.quality_scorer import QualityScorer
+from autoshorts.content.quality_scorer import QualityScorer
 from autoshorts.utils.rate_limiter import RateLimiter
 
 PEXELS_SEARCH_ENDPOINT = "https://api.pexels.com/videos/search"
