@@ -11,10 +11,58 @@ pyyaml>=6.0
 pydantic>=2.0
 python-dotenv>=1.0.0
 
-# --- Text-to-Speech ---
-edge-tts>=6.1.18  # CRITICAL: Latest version for API compatibility
-nest-asyncio>=1.5.0
-gtts>=2.5.0
+# ============================================================
+# TEXT-TO-SPEECH - MULTI-PROVIDER SUPPORT
+# ============================================================
+
+# --- Kokoro TTS (Ultra-realistic AI voice synthesis) ---
+# OPTIONAL: System falls back to Edge TTS if not available
+# Model: onnx-community/Kokoro-82M-v1.0-ONNX
+# Features:
+# - 8 high-quality voices (male, female, British)
+# - CPU-optimized ONNX Runtime
+# - Multiple precision options (fp32, fp16, q8, q4)
+# - 24kHz sample rate for natural sound
+# - Streaming support for long text
+#
+# Model sizes (downloaded on first use):
+# - fp32: ~330MB (best quality) [RECOMMENDED FOR PRODUCTION]
+# - fp16: ~165MB (good quality, faster)
+# - q8: ~90MB (decent quality, fast)
+# - q4: ~50MB (lower quality, very fast)
+#
+# To disable Kokoro and use only Edge TTS:
+# export KOKORO_ENABLED=false
+# or set TTS_PROVIDER=edge in settings
+onnxruntime>=1.16.0           # ONNX Runtime for Kokoro inference
+huggingface-hub>=0.19.0       # Download Kokoro models from HuggingFace
+
+# Optional: Better phoneme conversion (improves Kokoro quality)
+# Uncomment if you want the highest quality Kokoro TTS:
+# phonemizer>=3.2.0           # G2P (grapheme-to-phoneme) conversion
+# g2p-en>=2.1.0               # English phoneme dictionary
+
+# --- Edge TTS (Fast, reliable, word-level timings) ---
+edge-tts>=6.1.18              # Microsoft Edge TTS (primary fallback)
+nest-asyncio>=1.5.0           # Async support for Edge TTS
+
+# --- Google TTS (Last resort fallback) ---
+gtts>=2.5.0                   # Google Text-to-Speech (basic fallback)
+
+# ============================================================
+# PROVIDER PRIORITY (Automatic fallback chain):
+# ============================================================
+# 1. Kokoro TTS    → Best quality, ultra-realistic
+# 2. Edge TTS      → Fast, reliable, word timings
+# 3. Google TTS    → Always works, basic quality
+#
+# Configuration via environment variables:
+# export TTS_PROVIDER=kokoro    # Use Kokoro (best quality)
+# export TTS_PROVIDER=edge      # Use Edge (fast, reliable)
+# export TTS_PROVIDER=auto      # Auto select with fallback
+# export KOKORO_VOICE=af_sarah  # Voice selection
+# export KOKORO_PRECISION=fp32  # Model precision
+# ============================================================
 
 # --- Google APIs (YouTube upload) ---
 google-api-python-client>=2.100.0
@@ -44,54 +92,77 @@ tqdm>=4.66.0
 colorlog>=6.8.0
 
 # ============================================================
-# MILISANIYE HASSASİYETİNDE CAPTION SYNC - stable-ts
+# CAPTION SYNC - MILISECOND PRECISION
 # ============================================================
 # stable-ts: faster-whisper + DTW alignment = word-level precision
-# ~10-20ms hassasiyet - izleyicinin gözünü yormayan mükemmel sync!
+# ~10-20ms accuracy - perfect sync for professional videos!
 #
-# stable-ts forced alignment sistemi:
-# 1. faster-whisper ile transcription (hızlı!)
-# 2. DTW (Dynamic Time Warping) ile forced alignment
-# 3. Her kelime için start/end timestamps (milisaniye precision)
-# 4. Dependency problemleri YOK - production-ready!
+# stable-ts forced alignment system:
+# 1. faster-whisper for transcription (fast!)
+# 2. DTW (Dynamic Time Warping) for forced alignment
+# 3. Word-level start/end timestamps (millisecond precision)
+# 4. NO dependency issues - production-ready!
 #
-# Installation:
-# pip install stable-ts
+# Performance:
+# - CPU only: ~2-5 seconds per audio file (30s video)
+# - Lightweight and stable (~500MB RAM)
+# - Model download: ~150MB on first run
+# - NO GPU, torch, or CUDA required!
 #
+# Fallback Strategy (3-layer system):
+# 1. stable-ts forced alignment (BEST - word-level precision)
+# 2. Edge-TTS word timings (GOOD - TTS engine boundaries)
+# 3. Character-based estimation (FALLBACK - always works)
+# ============================================================
 stable-ts>=2.14.0
 faster-whisper>=0.10.0
-# torch ve torchaudio GEREKMİYOR - sadece CPU inference!
+# Note: torch and torchaudio NOT required - CPU inference only!
 
 # ============================================================
-# System Requirements:
+# SYSTEM REQUIREMENTS SUMMARY
 # ============================================================
+# Required system packages:
 # - FFmpeg (video/audio processing)
-# - Model download: First run'da faster-whisper model indirilir (~150MB)
-# - CPU YETER! GPU gerekmez, torch/cuda gerekmez!
-# - Production-ready, dependency sorunları YOK!
+# - Python 3.10+ (recommended)
 #
-# Performans:
-# - CPU'da: ~2-5 saniye per audio file (30 saniyelik video için)
-# - Hafif ve stabil
-# - Memory efficient (~500MB RAM)
+# RAM requirements:
+# - Minimum: 2GB
+# - Recommended: 4GB (for Kokoro fp32 + stable-ts)
+# - Optimal: 8GB (for multiple concurrent processes)
 #
+# Disk space:
+# - ~500MB for Python packages
+# - ~330MB for Kokoro fp32 model (optional)
+# - ~150MB for faster-whisper model
+# - Total: ~1GB for full setup
+#
+# CPU requirements:
+# - Minimum: 2 cores
+# - Recommended: 4+ cores (for faster processing)
+# - All inference runs on CPU (no GPU needed)
+#
+# Installation time (first run):
+# - Packages: ~2-5 minutes
+# - Models download: ~5-10 minutes (automatic)
+# - Total: ~10-15 minutes first time
+# - Subsequent runs: instant (models cached)
 # ============================================================
-# Fallback Strategy (3-layer system):
+
 # ============================================================
-# 1. stable-ts forced alignment (BEST - word-level precision)
-#    - Real audio analysis via faster-whisper
-#    - ~10-20ms accuracy
-#    - CPU-only, no GPU needed
-#    - DTW-based alignment
-#    - Production-tested, stabil
+# INSTALLATION NOTES FOR GITHUB ACTIONS
+# ============================================================
+# Models are automatically downloaded on first use and cached
+# GitHub Actions cache can be used to speed up subsequent runs:
 #
-# 2. Edge-TTS word timings (GOOD - TTS engine boundaries)
-#    - TTS engine word boundaries
-#    - ~50-100ms accuracy
-#    - No extra processing
+# - name: Cache Kokoro Models
+#   uses: actions/cache@v4
+#   with:
+#     path: ~/.cache/kokoro
+#     key: kokoro-models-${{ runner.os }}
 #
-# 3. Character-based estimation (FALLBACK - last resort)
-#    - Word length based distribution
-#    - ~200ms accuracy
-#    - Always works
+# - name: Cache Whisper Models
+#   uses: actions/cache@v4
+#   with:
+#     path: ~/.cache/huggingface
+#     key: whisper-models-${{ runner.os }}
 # ============================================================
