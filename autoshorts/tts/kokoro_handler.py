@@ -1,223 +1,192 @@
 # -*- coding: utf-8 -*-
 """
 Kokoro TTS Handler - Ultra-realistic voice synthesis
-✅ ONNX Runtime implementation (CPU-optimized)
-✅ 8 voice options (af_heart, af_bella, af_sarah, am_michael, etc.)
-✅ WAV output with proper header
-✅ Streaming support for long text
+✅ kokoro-onnx paketi ile basit ve çalışır implementasyon
+✅ 26 voice seçeneği (af_heart, af_bella, am_michael, vb.)
+✅ Otomatik model indirme
 """
 import os
 import logging
 import tempfile
-import numpy as np
+import requests
 from pathlib import Path
-from typing import Dict, Any, Tuple, List, Optional
-import struct
+from typing import Dict, Any, Tuple, List
 import wave
+import struct
 
 logger = logging.getLogger(__name__)
 
-# Voice mapping (same as kokoro-js)
 KOKORO_VOICES = {
-    "af_heart": "af",      # Female - Heart (warm, friendly)
-    "af_bella": "af_bella", # Female - Bella (elegant)
-    "af_sarah": "af_sarah", # Female - Sarah (professional)
-    "af_sky": "af_sky",     # Female - Sky (energetic)
-    "am_adam": "am_adam",   # Male - Adam (deep, authoritative)
-    "am_michael": "am_michael", # Male - Michael (natural)
-    "bf_emma": "bf_emma",   # British Female - Emma
-    "bf_isabella": "bf_isabella" # British Female - Isabella
+    # Female American
+    "af_heart": "af_heart",
+    "af_bella": "af_bella",
+    "af_sarah": "af_sarah",
+    "af_sky": "af_sky",
+    "af_alloy": "af_alloy",
+    "af_aoede": "af_aoede",
+    "af_jessica": "af_jessica",
+    "af_kore": "af_kore",
+    "af_nicole": "af_nicole",
+    "af_nova": "af_nova",
+    "af_river": "af_river",
+    # Male American  
+    "am_adam": "am_adam",
+    "am_michael": "am_michael",
+    "am_echo": "am_echo",
+    "am_eric": "am_eric",
+    "am_fenrir": "am_fenrir",
+    "am_liam": "am_liam",
+    "am_onyx": "am_onyx",
+    "am_puck": "am_puck",
+    "am_santa": "am_santa",
+    # British Female
+    "bf_alice": "bf_alice",
+    "bf_emma": "bf_emma",
+    "bf_isabella": "bf_isabella",
+    "bf_lily": "bf_lily",
+    # British Male
+    "bm_daniel": "bm_daniel",
+    "bm_fable": "bm_fable",
+    "bm_george": "bm_george",
+    "bm_lewis": "bm_lewis"
 }
 
-DEFAULT_VOICE = "af_sarah"  # Professional female voice
+DEFAULT_VOICE = "af_sarah"
 
 
 class KokoroTTS:
-    """
-    Kokoro TTS using ONNX Runtime.
-    Model: onnx-community/Kokoro-82M-v1.0-ONNX
-    """
+    """Kokoro TTS using kokoro-onnx package."""
     
-    MODEL_NAME = "onnx-community/Kokoro-82M-v1.0-ONNX"
-    SAMPLE_RATE = 24000  # 24kHz output
-    MAX_TEXT_LENGTH = 500  # Characters per chunk
+    MODEL_BASE_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+    SAMPLE_RATE = 24000
+    
+    PRECISION_FILES = {
+        "fp32": "kokoro-v1.0.onnx",
+        "fp16": "kokoro-v1.0.fp16.onnx",
+        "int8": "kokoro-v1.0.int8.onnx"
+    }
     
     def __init__(self, voice: str = DEFAULT_VOICE, precision: str = "fp32"):
-        """
-        Initialize Kokoro TTS.
-        
-        Args:
-            voice: Voice ID from KOKORO_VOICES
-            precision: Model precision (fp32, fp16, q8, q4, q4f16)
-        """
         self.voice = voice if voice in KOKORO_VOICES else DEFAULT_VOICE
         self.precision = precision
-        self.model = None
-        self.session = None
+        self.kokoro = None
+        self.cache_dir = Path.home() / ".cache" / "kokoro"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         logger.info(f"🎤 Kokoro TTS initialized: voice={self.voice}, precision={self.precision}")
     
+    def _download_file(self, url: str, dest: Path):
+        """Download file with progress."""
+        if dest.exists():
+            logger.info(f"✓ Model already cached: {dest.name}")
+            return
+            
+        logger.info(f"📥 Downloading {dest.name}...")
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        
+        total_size = int(response.headers.get('content-length', 0))
+        with open(dest, 'wb') as f:
+            downloaded = 0
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+                downloaded += len(chunk)
+                if total_size > 0:
+                    progress = (downloaded / total_size) * 100
+                    if downloaded % (1024 * 1024) == 0:  # Log every MB
+                        logger.info(f"  {progress:.1f}% - {downloaded // (1024*1024)}MB / {total_size // (1024*1024)}MB")
+        
+        logger.info(f"✅ Downloaded: {dest.name}")
+    
+    def _ensure_models(self):
+        """Download models if not cached."""
+        model_file = self.PRECISION_FILES.get(self.precision, self.PRECISION_FILES["fp32"])
+        
+        model_path = self.cache_dir / model_file
+        voices_path = self.cache_dir / "voices-v1.0.bin"
+        
+        # Download model
+        if not model_path.exists():
+            model_url = f"{self.MODEL_BASE_URL}/{model_file}"
+            self._download_file(model_url, model_path)
+        
+        # Download voices
+        if not voices_path.exists():
+            voices_url = f"{self.MODEL_BASE_URL}/voices-v1.0.bin"
+            self._download_file(voices_url, voices_path)
+        
+        return str(model_path), str(voices_path)
+    
     def _load_model(self):
-        """Lazy load ONNX model."""
-        if self.session is not None:
+        """Lazy load Kokoro model."""
+        if self.kokoro is not None:
             return
         
         try:
-            import onnxruntime as ort
-            from huggingface_hub import hf_hub_download
+            from kokoro_onnx import Kokoro
             
-            # Download model from HuggingFace
-            logger.info(f"📥 Downloading Kokoro model ({self.precision})...")
-            model_path = hf_hub_download(
-                repo_id=self.MODEL_NAME,
-                filename=f"model_{self.precision}.onnx",
-                cache_dir=os.path.expanduser("~/.cache/kokoro")
-            )
+            model_path, voices_path = self._ensure_models()
             
-            # Create ONNX Runtime session (CPU optimized)
-            sess_options = ort.SessionOptions()
-            sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            sess_options.intra_op_num_threads = max(1, os.cpu_count() // 2)
-            
-            self.session = ort.InferenceSession(
-                model_path,
-                sess_options=sess_options,
-                providers=['CPUExecutionProvider']
-            )
-            
-            logger.info(f"✅ Kokoro model loaded: {model_path}")
+            logger.info(f"🔄 Loading Kokoro model: {Path(model_path).name}")
+            self.kokoro = Kokoro(model_path, voices_path)
+            logger.info(f"✅ Kokoro model loaded")
             
         except ImportError as e:
             raise ImportError(
-                "Kokoro TTS requires: pip install onnxruntime huggingface-hub\n"
+                "Kokoro TTS requires: pip install kokoro-onnx soundfile\n"
                 f"Error: {e}"
             )
         except Exception as e:
             raise RuntimeError(f"Failed to load Kokoro model: {e}")
     
-    def _text_to_phonemes(self, text: str) -> List[str]:
-        """
-        Convert text to phonemes (simplified).
-        In production, use proper G2P (grapheme-to-phoneme) library.
-        """
-        # For now, return characters (Kokoro handles basic text)
-        # TODO: Integrate phonemizer or g2p_en for better results
-        return list(text.lower())
-    
-    def _synthesize_chunk(self, text: str) -> np.ndarray:
-        """Synthesize a single text chunk."""
-        self._load_model()
-        
-        # Prepare input
-        phonemes = self._text_to_phonemes(text)
-        
-        # Convert to input IDs (simplified - actual implementation needs proper tokenization)
-        # This is a placeholder - real implementation would use Kokoro's tokenizer
-        input_ids = np.array([ord(c) % 256 for c in text], dtype=np.int64).reshape(1, -1)
-        
-        # Voice embedding (simplified)
-        voice_id = list(KOKORO_VOICES.keys()).index(self.voice)
-        voice_embedding = np.array([voice_id], dtype=np.int64).reshape(1, -1)
-        
-        # Run inference
-        try:
-            outputs = self.session.run(
-                None,
-                {
-                    'input_ids': input_ids,
-                    'voice_id': voice_embedding
-                }
-            )
-            
-            # Extract audio (assuming first output is audio waveform)
-            audio = outputs[0].flatten()
-            return audio
-            
-        except Exception as e:
-            logger.error(f"Kokoro inference failed: {e}")
-            # Return silence on error
-            return np.zeros(self.SAMPLE_RATE, dtype=np.float32)
-    
-    def _split_text(self, text: str) -> List[str]:
-        """Split long text into chunks."""
-        if len(text) <= self.MAX_TEXT_LENGTH:
-            return [text]
-        
-        chunks = []
-        sentences = text.replace('! ', '!|').replace('? ', '?|').replace('. ', '.|').split('|')
-        
-        current = ""
-        for sent in sentences:
-            if len(current) + len(sent) <= self.MAX_TEXT_LENGTH:
-                current += sent + " "
-            else:
-                if current:
-                    chunks.append(current.strip())
-                current = sent + " "
-        
-        if current:
-            chunks.append(current.strip())
-        
-        return chunks
-    
     def generate(self, text: str) -> Dict[str, Any]:
-        """
-        Generate speech from text.
-        
-        Returns:
-            Dict with 'audio' (bytes), 'duration' (float), 'word_timings' (list)
-        """
+        """Generate speech from text."""
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")
         
+        self._load_model()
         text = text.strip()
-        chunks = self._split_text(text)
         
-        logger.info(f"🎙️ Generating Kokoro TTS: {len(chunks)} chunks, {len(text)} chars")
+        logger.info(f"🎙️ Generating Kokoro TTS: voice={self.voice}, {len(text)} chars")
         
-        # Synthesize all chunks
-        audio_arrays = []
-        for chunk in chunks:
-            audio = self._synthesize_chunk(chunk)
-            audio_arrays.append(audio)
-        
-        # Concatenate audio
-        full_audio = np.concatenate(audio_arrays)
-        
-        # Calculate duration
-        duration = len(full_audio) / self.SAMPLE_RATE
+        # Generate audio with kokoro-onnx
+        samples, sample_rate = self.kokoro.create(
+            text,
+            voice=self.voice,
+            speed=1.0,
+            lang="en-us"
+        )
         
         # Convert to WAV bytes
-        wav_bytes = self._array_to_wav(full_audio)
+        wav_bytes = self._array_to_wav(samples, sample_rate)
+        duration = len(samples) / sample_rate
         
-        logger.info(f"✅ Kokoro TTS generated: {duration:.2f}s, {len(wav_bytes)} bytes")
+        logger.info(f"✅ Kokoro TTS generated: {duration:.2f}s")
         
         return {
             'audio': wav_bytes,
             'duration': duration,
-            'word_timings': []  # Kokoro doesn't provide word timings directly
+            'word_timings': []
         }
     
     def synthesize(self, text: str, wav_out: str) -> Tuple[float, List[Tuple[str, float]]]:
-        """
-        Synthesize text and save to file.
-        
-        Returns:
-            (duration, word_timings)
-        """
+        """Synthesize and save to file."""
         result = self.generate(text)
         
-        # Save to file
         with open(wav_out, 'wb') as f:
             f.write(result['audio'])
         
         return result['duration'], result['word_timings']
     
-    def _array_to_wav(self, audio: np.ndarray) -> bytes:
+    def _array_to_wav(self, samples, sample_rate: int) -> bytes:
         """Convert numpy array to WAV bytes."""
-        # Normalize to int16
-        audio = np.clip(audio, -1.0, 1.0)
-        audio_int16 = (audio * 32767).astype(np.int16)
+        import numpy as np
+        
+        # Ensure samples are in correct format
+        if samples.dtype != np.int16:
+            # Normalize and convert to int16
+            samples = np.clip(samples, -1.0, 1.0)
+            samples = (samples * 32767).astype(np.int16)
         
         # Create WAV in memory
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
@@ -227,8 +196,8 @@ class KokoroTTS:
             with wave.open(tmp_path, 'wb') as wav_file:
                 wav_file.setnchannels(1)  # Mono
                 wav_file.setsampwidth(2)  # 16-bit
-                wav_file.setframerate(self.SAMPLE_RATE)
-                wav_file.writeframes(audio_int16.tobytes())
+                wav_file.setframerate(sample_rate)
+                wav_file.writeframes(samples.tobytes())
             
             with open(tmp_path, 'rb') as f:
                 wav_bytes = f.read()
@@ -246,14 +215,15 @@ class KokoroTTS:
     @classmethod
     def get_voice_info(cls, voice: str) -> Dict[str, str]:
         """Get voice information."""
-        voices_info = {
-            "af_heart": {"name": "Heart", "gender": "female", "style": "warm, friendly"},
-            "af_bella": {"name": "Bella", "gender": "female", "style": "elegant, smooth"},
-            "af_sarah": {"name": "Sarah", "gender": "female", "style": "professional, clear"},
-            "af_sky": {"name": "Sky", "gender": "female", "style": "energetic, bright"},
-            "am_adam": {"name": "Adam", "gender": "male", "style": "deep, authoritative"},
-            "am_michael": {"name": "Michael", "gender": "male", "style": "natural, conversational"},
-            "bf_emma": {"name": "Emma", "gender": "female", "style": "british, sophisticated"},
-            "bf_isabella": {"name": "Isabella", "gender": "female", "style": "british, elegant"}
+        voice_info = {
+            "af_heart": {"name": "Heart", "gender": "female", "accent": "american"},
+            "af_bella": {"name": "Bella", "gender": "female", "accent": "american"},
+            "af_sarah": {"name": "Sarah", "gender": "female", "accent": "american"},
+            "af_sky": {"name": "Sky", "gender": "female", "accent": "american"},
+            "am_adam": {"name": "Adam", "gender": "male", "accent": "american"},
+            "am_michael": {"name": "Michael", "gender": "male", "accent": "american"},
+            "bf_emma": {"name": "Emma", "gender": "female", "accent": "british"},
+            "bf_isabella": {"name": "Isabella", "gender": "female", "accent": "british"},
+            "bm_daniel": {"name": "Daniel", "gender": "male", "accent": "british"},
         }
-        return voices_info.get(voice, {"name": "Unknown", "gender": "unknown", "style": "unknown"})
+        return voice_info.get(voice, {"name": "Unknown", "gender": "unknown", "accent": "unknown"})
