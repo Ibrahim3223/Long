@@ -32,7 +32,7 @@ from urllib3.util.retry import Retry  # ✅ EKLENDİ
 from autoshorts.config import settings
 from autoshorts.content.gemini_client import GeminiClient
 from autoshorts.video.pexels_client import PexelsClient
-from autoshorts.tts.edge_handler import TTSHandler
+from autoshorts.tts.unified_handler import UnifiedTTSHandler as TTSHandler
 from autoshorts.captions.renderer import CaptionRenderer
 from autoshorts.audio.bgm_manager import BGMManager
 from autoshorts.utils.ffmpeg_utils import run, ffprobe_duration
