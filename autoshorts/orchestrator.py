@@ -132,74 +132,87 @@ class ShortsOrchestrator:
         self,
         channel_id: str,
         temp_dir: str,
-        api_key: Optional[str] = None,
-        pexels_key: Optional[str] = None,
-    ) -> None:
-        # ✅ Sanitize temp directory path
-        temp_dir = sanitize_path(temp_dir)
-        
+        api_key: str,
+        pexels_key: str,
+        pixabay_key: Optional[str] = None,
+        use_novelty: bool = True,
+        ffmpeg_preset: str = "veryfast",
+    ):
         self.channel_id = channel_id
         self.temp_dir = pathlib.Path(temp_dir)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
+        self.ffmpeg_preset = ffmpeg_preset
 
-        # External services
-        self.gemini = GeminiClient(api_key=api_key or settings.GEMINI_API_KEY)
-        self.quality_scorer = QualityScorer()
+        # API clients
+        self.gemini = GeminiClient(api_key=api_key)
+        self.pexels = PexelsClient(api_key=pexels_key)
+        
+        # ✅ Pixabay as backup
+        try:
+            from autoshorts.video.pixabay_client import PixabayClient
+            self.pixabay = PixabayClient(api_key=pixabay_key)
+            logger.info("✅ Pixabay client initialized as backup")
+        except Exception as e:
+            logger.warning(f"⚠️ Pixabay client initialization failed: {e}")
+            self.pixabay = None
+
+        # TTS
         self.tts = TTSHandler()
+
+        # Caption renderer
         self.caption_renderer = CaptionRenderer()
+
+        # BGM manager
         self.bgm_manager = BGMManager()
-        self.state_guard = StateGuard(channel_id)
-        self.novelty_guard = NoveltyGuard()
-        
-        # ✅ FIX: Add use_novelty attribute
-        self.use_novelty = bool(
-            getattr(settings, "NOVELTY_ENFORCE", True) or 
-            (os.getenv("NOVELTY_ENFORCE", "1") == "1")
+
+        # Quality scorer
+        try:
+            self.quality_scorer = QualityScorer()
+        except Exception as exc:
+            logger.warning("Quality scorer init failed: %s", exc)
+            self.quality_scorer = None
+
+        # Novelty guard
+        self.use_novelty = use_novelty
+        if use_novelty:
+            try:
+                self.novelty_guard = NoveltyGuard()
+                logger.info("Novelty guard enabled")
+            except Exception as exc:
+                logger.warning("Novelty guard init failed: %s", exc)
+                self.novelty_guard = None
+        else:
+            self.novelty_guard = None
+
+        # State guard
+        try:
+            self.state_guard = StateGuard(channel=channel_id)
+            logger.info("State guard initialized")
+        except Exception as exc:
+            logger.warning("State guard init failed: %s", exc)
+            self.state_guard = None
+
+        # HTTP session for downloads
+        self._http = requests.Session()
+        retry_strategy = Retry(
+            total=2,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
         )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self._http.mount("http://", adapter)
+        self._http.mount("https://", adapter)
 
-        # Keys
-        self.pexels_key = pexels_key or settings.PEXELS_API_KEY
-        if not self.pexels_key:
-            raise ValueError("PEXELS_API_KEY required")
-
-        # Runtime caches
-        # ✅ Disable clip cache to save disk space
-        self._clip_cache = None
-        self._video_candidates: Dict[str, List[ClipCandidate]] = {}
-        self._video_url_cache: Dict[str, List[str]] = {}
-        self._used_video_ids: Set[str] = set()
-        
-        # ✅ Rate limiter for Pexels API (0.3s between calls = max 200/min)
+        # Rate limiter for Pexels
         self._pexels_rate_limiter = RateLimiter(min_interval=0.8)
 
-        # Pexels client & HTTP session
-        self.pexels = PexelsClient(api_key=self.pexels_key)
-        self._http = requests.Session()
-        self._http.headers.update({"Authorization": self.pexels_key})
-        try:
-            adapter = HTTPAdapter(
-                pool_connections=8, 
-                pool_maxsize=16,
-                max_retries=2  # ✅ Reduce retries for faster failures
-            )
-            self._http.mount("https://", adapter)
-            self._http.mount("http://", adapter)
-        except Exception as exc:
-            logger.debug("Unable to enable HTTP pooling: %s", exc)
+        # Thread pool for parallel processing
+        self._executor = ThreadPoolExecutor(max_workers=4)
 
-        # Performance toggles
-        self.fast_mode = bool(getattr(settings, "FAST_MODE", False) or (os.getenv("FAST_MODE", "0") == "1"))
-        self.ffmpeg_preset = os.getenv(
-            "FFMPEG_PRESET",
-            "veryfast" if self.fast_mode else "medium"
-        )
-        
-        # ✅ Thread pool for parallel processing
-        max_workers = min(4, (os.cpu_count() or 4))
-        self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        # Track used video IDs to avoid duplicates
+        self._used_video_ids: Set[str] = set()
 
-        logger.info("🎬 ShortsOrchestrator ready (channel=%s, FAST_MODE=%s, workers=%d, novelty=%s)", 
-                   channel_id, self.fast_mode, max_workers, self.use_novelty)
+        logger.info("ShortsOrchestrator initialized for channel: %s", channel_id)
 
     def __del__(self):
         """Cleanup thread pool on deletion."""
@@ -756,37 +769,66 @@ class ShortsOrchestrator:
         if not candidate:
             mode = os.getenv("MODE") or "general"
             
-        # ✅ IMPROVED: Emergency fallback - allow video reuse if all else fails
+        # ✅ IMPROVED: Diverse fallback categories
         if not candidate:
             mode = os.getenv("MODE") or "general"
             
+            # ✅ More diverse fallback terms for each mode
             fallback_terms = {
-                "country_facts": ["nature", "city", "landscape"],
-                "history_story": ["history", "ancient", "heritage"],
-                "science": ["technology", "innovation"],
-                "kids_educational": ["nature", "animals", "colorful"],
-                "_default": ["nature", "people", "city"]
+                "country_facts": [
+                    "urban cityscape", "cultural festival", "traditional market",
+                    "countryside village", "mountain landscape", "coastal town"
+                ],
+                "history_story": [
+                    "ancient architecture", "historical monument", "old library",
+                    "museum artifacts", "vintage documents", "classical art"
+                ],
+                "science": [
+                    "laboratory research", "scientific experiment", "technology innovation",
+                    "microscope view", "data visualization", "modern workspace"
+                ],
+                "kids_educational": [
+                    "colorful animation", "nature closeup", "animals wildlife",
+                    "underwater scene", "space stars", "playground activity"
+                ],
+                "_default": [
+                    "urban life", "people working", "nature landscape",
+                    "technology modern", "creative workspace", "travel destination"
+                ]
             }
             
             terms = fallback_terms.get(mode, fallback_terms["_default"])
             
-            # ✅ First try: Sadece kullanılmamış videolar
-            for fallback_term in terms[:2]:
-                logger.info(f"🔄 Trying fallback: {fallback_term}")
-                
-                self._pexels_rate_limiter.wait()
-                try:
-                    result = self.pexels.search_videos(fallback_term, per_page=15, page=1)
-                    videos = result.get("videos", []) if isinstance(result, dict) else result
-                    
-                    if videos:
-                        for video in videos:
+            # ✅ Shuffle for variety
+            import random
+            random.shuffle(terms)
+            
+            # Try Pexels fallback
+            for fallback_term in terms[:3]:
+                logger.info(f"🔄 Pexels fallback: {fallback_term}")
+                candidate = self._search_pexels_for_query(fallback_term)
+                if candidate:
+                    break
+            
+            # Try Pixabay fallback
+            if not candidate and self.pixabay and self.pixabay.enabled:
+                for fallback_term in terms[:3]:
+                    logger.info(f"🔄 Pixabay fallback: {fallback_term}")
+                    candidate = self._search_pixabay_for_query(fallback_term)
+                    if candidate:
+                        break
+            
+            # ✅ EMERGENCY: Allow video reuse only as last resort
+            if not candidate:
+                logger.warning("⚠️ Emergency: Allowing video reuse")
+                for fallback_term in terms[:1]:
+                    try:
+                        result = self.pexels.search_videos(fallback_term, per_page=15, page=1)
+                        videos = result.get("videos", []) if isinstance(result, dict) else result
+                        
+                        if videos:
+                            video = videos[0]
                             video_id = str(video.get("id", ""))
-                            
-                            # Skip if already used
-                            if video_id in self._used_video_ids:
-                                continue
-                            
                             video_files = video.get("video_files", [])
                             
                             for vf in video_files:
@@ -797,19 +839,12 @@ class ShortsOrchestrator:
                                         duration=video.get("duration", 0),
                                         url=vf.get("link", "")
                                     )
-                                    self._used_video_ids.add(video_id)
-                                    logger.info(f"✅ Using fallback video: {fallback_term} (ID: {video_id})")
+                                    logger.info(f"✅ Reusing video: {fallback_term}")
                                     break
-                            
                             if candidate:
                                 break
-                    
-                    if candidate:
-                        break
-                        
-                except Exception as e:
-                    logger.debug(f"Fallback search failed for '{fallback_term}': {e}")
-                    continue
+                    except:
+                        continue
             
             # ✅ EMERGENCY: Eğer hala video yoksa, kullanılmış videoları tekrar kullan
             if not candidate:
@@ -876,71 +911,136 @@ class ShortsOrchestrator:
         chapter_title: Optional[str] = None,
         timeout: int = 10
     ) -> Optional[ClipCandidate]:
-        """Find best matching video clip from Pexels."""
+        """Find best matching video clip from Pexels/Pixabay."""
+        
+        # ✅ Build diverse query list
         queries = []
         
-        # ✅ OPTIMIZATION: Only use most relevant queries
+        # 1. Use search queries (highest priority)
         if search_queries:
-            queries.append(search_queries[0])
+            queries.extend(search_queries[:3])  # Use top 3
         
-        if chapter_title and not queries:
+        # 2. Use chapter title
+        if chapter_title and chapter_title not in queries:
             queries.append(chapter_title)
         
-        if not queries:
-            queries.extend(keywords[:2])
+        # 3. Use keywords
+        if keywords:
+            # Combine keywords for better results
+            queries.append(" ".join(keywords[:2]))
+            queries.extend(keywords[:3])
         
-        queries = queries[:2]
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_queries = []
+        for q in queries:
+            normalized = simplify_query(q).lower()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                unique_queries.append(q)
         
-        # ✅ CRITICAL: Sadece page 1 kullan (cache hit artar, API calls azalır)
+        queries = unique_queries[:5]  # Limit to 5 queries
+        
+        logger.info(f"🔍 Searching with {len(queries)} queries: {queries}")
+        
+        # ✅ Try Pexels first
         for query in queries:
             query = simplify_query(query)
             if not query:
                 continue
-                
-            self._pexels_rate_limiter.wait()
             
-            try:
-                # ✅ Sadece page 1, cache'den gelme olasılığı yüksek
-                result = self.pexels.search_videos(query, per_page=15, page=1)
-                
-                if isinstance(result, dict):
-                    videos = result.get("videos", [])
-                elif isinstance(result, list):
-                    videos = result
-                else:
-                    logger.warning(f"Unexpected Pexels response type: {type(result)}")
+            candidate = self._search_pexels_for_query(query)
+            if candidate:
+                return candidate
+        
+        # ✅ Try Pixabay as backup
+        if self.pixabay and self.pixabay.enabled:
+            logger.info("🔄 Trying Pixabay as backup...")
+            for query in queries:
+                query = simplify_query(query)
+                if not query:
                     continue
                 
-                if not videos:
-                    logger.debug(f"No videos found for '{query}'")
+                candidate = self._search_pixabay_for_query(query)
+                if candidate:
+                    return candidate
+        
+        return None
+    
+    def _search_pexels_for_query(self, query: str) -> Optional[ClipCandidate]:
+        """Search Pexels for a single query."""
+        self._pexels_rate_limiter.wait()
+        
+        try:
+            result = self.pexels.search_videos(query, per_page=15, page=1)
+            
+            if isinstance(result, dict):
+                videos = result.get("videos", [])
+            elif isinstance(result, list):
+                videos = result
+            else:
+                return None
+            
+            if not videos:
+                return None
+            
+            # Try to find unused video
+            for video in videos:
+                video_id = str(video.get("id", ""))
+                
+                if video_id in self._used_video_ids:
                     continue
                 
-                logger.info(f"🔍 Found {len(videos)} videos for '{query}'")
+                video_files = video.get("video_files", [])
+                for vf in video_files:
+                    if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
+                        candidate = ClipCandidate(
+                            pexels_id=video_id,
+                            path="",
+                            duration=video.get("duration", 0),
+                            url=vf.get("link", "")
+                        )
+                        self._used_video_ids.add(video_id)
+                        logger.info(f"✅ Pexels: {query} (ID: {video_id})")
+                        return candidate
+            
+        except Exception as exc:
+            logger.debug(f"Pexels search error for '{query}': {exc}")
+        
+        return None
+    
+    def _search_pixabay_for_query(self, query: str) -> Optional[ClipCandidate]:
+        """Search Pixabay for a single query."""
+        try:
+            result = self.pixabay.search_videos(query, per_page=20, page=1)
+            hits = result.get("hits", [])
+            
+            if not hits:
+                return None
+            
+            # Try to find unused video
+            for video in hits:
+                video_id = f"pixabay_{video.get('id', '')}"
                 
-                # ✅ Try to find unused video
-                for video in videos:
-                    video_id = str(video.get("id", ""))
-                    
-                    # ✅ Skip if already used
-                    if video_id in self._used_video_ids:
-                        continue
-                    
-                    video_files = video.get("video_files", [])
-                    for vf in video_files:
-                        if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
-                            candidate = ClipCandidate(
-                                pexels_id=video_id,
-                                path="",
-                                duration=video.get("duration", 0),
-                                url=vf.get("link", "")
-                            )
-                            self._used_video_ids.add(video_id)
-                            logger.info(f"✅ Selected video: {video_id} from '{query}'")
-                            return candidate
+                if video_id in self._used_video_ids:
+                    continue
                 
-            except Exception as exc:
-                logger.debug(f"Search error for '{query}': {exc}")
-                continue
+                video_url = self.pixabay.get_video_url(video, quality="large")
+                if not video_url:
+                    continue
+                
+                candidate = ClipCandidate(
+                    pexels_id=video_id,
+                    path="",
+                    duration=video.get("duration", 0),
+                    url=video_url
+                )
+                self._used_video_ids.add(video_id)
+                logger.info(f"✅ Pixabay: {query} (ID: {video_id})")
+                return candidate
+            
+        except Exception as exc:
+            logger.debug(f"Pixabay search error for '{query}': {exc}")
         
         return None
         
