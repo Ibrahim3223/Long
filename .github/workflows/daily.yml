@@ -120,13 +120,51 @@ jobs:
           restore-keys: |
             state-long-${{ inputs.environment }}-
 
+      # ✅ YENİ: Kokoro TTS model cache
+      - name: Cache Kokoro TTS Models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kokoro
+          key: kokoro-models-${{ runner.os }}-v1
+          restore-keys: |
+            kokoro-models-${{ runner.os }}-
+        
+      # ✅ YENİ: Whisper model cache (stable-ts için)
+      - name: Cache Whisper Models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: whisper-models-${{ runner.os }}-v1
+          restore-keys: |
+            whisper-models-${{ runner.os }}-            
+
       - name: Install dependencies
         run: |
           echo "📦 Installing Python dependencies..."
           pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
+          echo "✅ Core dependencies installed"
+          
+          # Show installed versions
           pip show google-generativeai
-          echo "✅ Dependencies installed"
+          pip show onnxruntime
+          pip show huggingface-hub
+          echo "✅ All dependencies installed"
+
+      - name: Verify Kokoro TTS Setup
+        run: |
+          echo "🎙️ Verifying Kokoro TTS installation..."
+          python3 -c "
+          try:
+              import onnxruntime as ort
+              print(f'✅ ONNXRuntime: {ort.__version__}')
+              from huggingface_hub import __version__ as hf_version
+              print(f'✅ HuggingFace Hub: {hf_version}')
+              print('✅ Kokoro TTS ready (models will download on first use)')
+          except ImportError as e:
+              print(f'⚠️ Kokoro TTS not available: {e}')
+              print('⚠️ Will fall back to Edge TTS')
+          " || echo "⚠️ Kokoro verification failed, continuing with Edge TTS..."          
 
       - name: Install stable-ts (milisecond-perfect captions)
         run: |
