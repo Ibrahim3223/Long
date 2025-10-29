@@ -11,32 +11,36 @@ High level orchestration for generating complete videos.
 """
 from __future__ import annotations
 
+import os
+import re
+import sys
+import time
+import random
+import shutil
 import hashlib
 import logging
-import os
 import pathlib
-import random
-import re
-import shutil
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import tempfile
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Set, Any, Union
+from typing import List, Dict, Tuple, Optional, Set, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
-from requests.adapters import HTTPAdapter
+from requests.adapters import HTTPAdapter  # ✅ EKLENDİ
+from urllib3.util.retry import Retry  # ✅ EKLENDİ
 
-from autoshorts.audio.bgm_manager import BGMManager
-from autoshorts.captions.renderer import CaptionRenderer
 from autoshorts.config import settings
 from autoshorts.content.gemini_client import GeminiClient
-from autoshorts.content.quality_scorer import QualityScorer
-from autoshorts.content.text_utils import extract_keywords, simplify_query
+from autoshorts.video.pexels_client import PexelsClient
+from autoshorts.tts.tts_handler import TTSHandler
+from autoshorts.captions.renderer import CaptionRenderer
+from autoshorts.bgm.bgm_manager import BGMManager
+from autoshorts.utils.ffmpeg_utils import run, ffprobe_duration
+from autoshorts.utils.text_utils import extract_keywords, simplify_query
 from autoshorts.state.novelty_guard import NoveltyGuard
 from autoshorts.state.state_guard import StateGuard
-from autoshorts.tts.edge_handler import TTSHandler
-from autoshorts.utils.ffmpeg_utils import ffprobe_duration, run
-from autoshorts.video import PexelsClient
+from autoshorts.quality.quality_scorer import QualityScorer
+from autoshorts.utils.rate_limiter import RateLimiter
 
 PEXELS_SEARCH_ENDPOINT = "https://api.pexels.com/videos/search"
 
