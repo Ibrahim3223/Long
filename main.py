@@ -146,7 +146,8 @@ def main():
         print(f"📝 Topic: {os.environ['TOPIC'][:80]}...")
         
         # Create temp directory
-        temp_dir = os.path.join(tempfile.gettempdir(), f"autoshorts_{channel_name}")
+        temp_dir_name = channel_name.replace(" ", "_")  # ✅ Boşlukları kaldır
+        temp_dir = os.path.join(tempfile.gettempdir(), f"autoshorts_{temp_dir_name}")
         os.makedirs(temp_dir, exist_ok=True)
         print(f"📁 Temp dir: {temp_dir}")
         
