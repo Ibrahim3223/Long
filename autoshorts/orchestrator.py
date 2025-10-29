@@ -756,23 +756,26 @@ class ShortsOrchestrator:
         if not candidate:
             mode = os.getenv("MODE") or "general"
             
-            # ✅ Daha az fallback term, daha yaygın terimler (cache hit artar)
+        # ✅ IMPROVED: Emergency fallback - allow video reuse if all else fails
+        if not candidate:
+            mode = os.getenv("MODE") or "general"
+            
             fallback_terms = {
                 "country_facts": ["nature", "city", "landscape"],
                 "history_story": ["history", "ancient", "heritage"],
                 "science": ["technology", "innovation"],
+                "kids_educational": ["nature", "animals", "colorful"],
                 "_default": ["nature", "people", "city"]
             }
             
             terms = fallback_terms.get(mode, fallback_terms["_default"])
             
-            # ✅ Sadece ilk 2 terimi dene
+            # ✅ First try: Sadece kullanılmamış videolar
             for fallback_term in terms[:2]:
                 logger.info(f"🔄 Trying fallback: {fallback_term}")
                 
                 self._pexels_rate_limiter.wait()
                 try:
-                    # ✅ CRITICAL: Sadece page 1 (cache'den gelme olasılığı çok yüksek)
                     result = self.pexels.search_videos(fallback_term, per_page=15, page=1)
                     videos = result.get("videos", []) if isinstance(result, dict) else result
                     
@@ -780,7 +783,7 @@ class ShortsOrchestrator:
                         for video in videos:
                             video_id = str(video.get("id", ""))
                             
-                            # ✅ Skip if already used
+                            # Skip if already used
                             if video_id in self._used_video_ids:
                                 continue
                             
@@ -808,8 +811,40 @@ class ShortsOrchestrator:
                     logger.debug(f"Fallback search failed for '{fallback_term}': {e}")
                     continue
             
+            # ✅ EMERGENCY: Eğer hala video yoksa, kullanılmış videoları tekrar kullan
             if not candidate:
-                logger.warning("❌ All fallback attempts failed")
+                logger.warning("⚠️ No unused videos found, allowing video reuse for this scene")
+                
+                for fallback_term in terms[:1]:  # Sadece ilk terimi dene
+                    try:
+                        result = self.pexels.search_videos(fallback_term, per_page=15, page=1)
+                        videos = result.get("videos", []) if isinstance(result, dict) else result
+                        
+                        if videos:
+                            # ✅ İlk bulduğu videoyu kullan (kullanılmış olsa bile)
+                            video = videos[0]
+                            video_id = str(video.get("id", ""))
+                            video_files = video.get("video_files", [])
+                            
+                            for vf in video_files:
+                                if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
+                                    candidate = ClipCandidate(
+                                        pexels_id=video_id,
+                                        path="",
+                                        duration=video.get("duration", 0),
+                                        url=vf.get("link", "")
+                                    )
+                                    logger.info(f"✅ Reusing video: {fallback_term} (ID: {video_id})")
+                                    break
+                            
+                            if candidate:
+                                break
+                    except Exception as e:
+                        logger.debug(f"Emergency fallback failed: {e}")
+                        continue
+            
+            if not candidate:
+                logger.error("❌ All fallback attempts failed (including emergency reuse)")
 
         local_path = self._download_clip(candidate)
         if not local_path:
@@ -911,6 +946,11 @@ class ShortsOrchestrator:
         
     def _download_clip(self, candidate: ClipCandidate) -> Optional[str]:
         """Download video clip."""
+        # ✅ Safety check
+        if not candidate:
+            logger.error("Cannot download clip: candidate is None")
+            return None
+        
         # ✅ No cache - always download fresh to save disk space
         local_path = str(self.temp_dir / f"clip_{candidate.pexels_id}.mp4")
         local_path = sanitize_path(local_path)
