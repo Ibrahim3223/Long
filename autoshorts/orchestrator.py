@@ -40,7 +40,6 @@ from autoshorts.content.text_utils import extract_keywords, simplify_query
 from autoshorts.state.novelty_guard import NoveltyGuard
 from autoshorts.state.state_guard import StateGuard
 from autoshorts.content.quality_scorer import QualityScorer
-from autoshorts.utils.rate_limiter import RateLimiter
 
 PEXELS_SEARCH_ENDPOINT = "https://api.pexels.com/videos/search"
 
