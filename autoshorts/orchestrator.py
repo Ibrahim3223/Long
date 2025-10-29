@@ -170,7 +170,7 @@ class ShortsOrchestrator:
         self._used_video_ids: Set[str] = set()
         
         # ✅ Rate limiter for Pexels API (0.3s between calls = max 200/min)
-        self._pexels_rate_limiter = RateLimiter(min_interval=0.3)
+        self._pexels_rate_limiter = RateLimiter(min_interval=0.8)
 
         # Pexels client & HTTP session
         self.pexels = PexelsClient(api_key=self.pexels_key)
@@ -752,34 +752,31 @@ class ShortsOrchestrator:
         # ✅ IMPROVED: Better fallback with variety
         if not candidate:
             mode = os.getenv("MODE") or "general"
+        # ✅ OPTIMIZED: Minimal fallback with cache priority
+        if not candidate:
+            mode = os.getenv("MODE") or "general"
+            
+            # ✅ Daha az fallback term, daha yaygın terimler (cache hit artar)
             fallback_terms = {
-                "country_facts": ["nature landscape", "city skyline", "cultural heritage", "world travel", "countryside"],
-                "history_story": ["ancient ruins", "historical", "heritage site", "old architecture"],
-                "science": ["technology", "laboratory", "innovation", "research center"],
-                "_default": ["world", "people working", "nature beauty", "urban life", "travel destinations"]
+                "country_facts": ["nature", "city", "landscape"],
+                "history_story": ["history", "ancient", "heritage"],
+                "science": ["technology", "innovation"],
+                "_default": ["nature", "people", "city"]
             }
             
-            # ✅ Get fallback terms for mode
             terms = fallback_terms.get(mode, fallback_terms["_default"])
             
-            # ✅ Try multiple fallback terms with random selection
-            import random
-            random.shuffle(terms)
-            
-            for fallback_term in terms[:3]:  # Try up to 3 different fallback terms
-                logger.info(f"🔄 Trying generic fallback: {fallback_term}")
+            # ✅ Sadece ilk 2 terimi dene
+            for fallback_term in terms[:2]:
+                logger.info(f"🔄 Trying fallback: {fallback_term}")
                 
                 self._pexels_rate_limiter.wait()
                 try:
-                    # ✅ Use random page for more variety
-                    random_page = random.randint(1, 3)
-                    result = self.pexels.search_videos(fallback_term, per_page=10, page=random_page)
+                    # ✅ CRITICAL: Sadece page 1 (cache'den gelme olasılığı çok yüksek)
+                    result = self.pexels.search_videos(fallback_term, per_page=15, page=1)
                     videos = result.get("videos", []) if isinstance(result, dict) else result
                     
                     if videos:
-                        # ✅ Shuffle videos for variety
-                        random.shuffle(videos)
-                        
                         for video in videos:
                             video_id = str(video.get("id", ""))
                             
@@ -813,9 +810,6 @@ class ShortsOrchestrator:
             
             if not candidate:
                 logger.warning("❌ All fallback attempts failed")
-        
-        if not candidate:
-            return None
 
         local_path = self._download_clip(candidate)
         if not local_path:
@@ -862,57 +856,56 @@ class ShortsOrchestrator:
         
         queries = queries[:2]
         
-        # ✅ Try multiple pages to get more variety
-        for page_num in [1, 2]:  # Try first 2 pages
-            for query in queries:
-                query = simplify_query(query)
-                if not query:
-                    continue
-                    
-                self._pexels_rate_limiter.wait()
+        # ✅ CRITICAL: Sadece page 1 kullan (cache hit artar, API calls azalır)
+        for query in queries:
+            query = simplify_query(query)
+            if not query:
+                continue
                 
-                try:
-                    # ✅ Search with page parameter for variety
-                    result = self.pexels.search_videos(query, per_page=10, page=page_num)
-                    
-                    if isinstance(result, dict):
-                        videos = result.get("videos", [])
-                    elif isinstance(result, list):
-                        videos = result
-                    else:
-                        logger.warning(f"Unexpected Pexels response type: {type(result)}")
-                        continue
-                    
-                    if not videos:
-                        logger.debug(f"No videos found for '{query}' (page {page_num})")
-                        continue
-                    
-                    logger.info(f"🔍 Found {len(videos)} videos for '{query}' (page {page_num})")
-                    
-                    # ✅ Try to find unused video
-                    for video in videos:
-                        video_id = str(video.get("id", ""))
-                        
-                        # ✅ Skip if already used
-                        if video_id in self._used_video_ids:
-                            continue
-                        
-                        video_files = video.get("video_files", [])
-                        for vf in video_files:
-                            if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
-                                candidate = ClipCandidate(
-                                    pexels_id=video_id,
-                                    path="",
-                                    duration=video.get("duration", 0),
-                                    url=vf.get("link", "")
-                                )
-                                self._used_video_ids.add(video_id)
-                                logger.info(f"✅ Selected video: {video_id} from '{query}'")
-                                return candidate
-                    
-                except Exception as exc:
-                    logger.debug(f"Search error for '{query}': {exc}")
+            self._pexels_rate_limiter.wait()
+            
+            try:
+                # ✅ Sadece page 1, cache'den gelme olasılığı yüksek
+                result = self.pexels.search_videos(query, per_page=15, page=1)
+                
+                if isinstance(result, dict):
+                    videos = result.get("videos", [])
+                elif isinstance(result, list):
+                    videos = result
+                else:
+                    logger.warning(f"Unexpected Pexels response type: {type(result)}")
                     continue
+                
+                if not videos:
+                    logger.debug(f"No videos found for '{query}'")
+                    continue
+                
+                logger.info(f"🔍 Found {len(videos)} videos for '{query}'")
+                
+                # ✅ Try to find unused video
+                for video in videos:
+                    video_id = str(video.get("id", ""))
+                    
+                    # ✅ Skip if already used
+                    if video_id in self._used_video_ids:
+                        continue
+                    
+                    video_files = video.get("video_files", [])
+                    for vf in video_files:
+                        if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
+                            candidate = ClipCandidate(
+                                pexels_id=video_id,
+                                path="",
+                                duration=video.get("duration", 0),
+                                url=vf.get("link", "")
+                            )
+                            self._used_video_ids.add(video_id)
+                            logger.info(f"✅ Selected video: {video_id} from '{query}'")
+                            return candidate
+                
+            except Exception as exc:
+                logger.debug(f"Search error for '{query}': {exc}")
+                continue
         
         return None
         
