@@ -106,19 +106,8 @@ def find_channel_config(channel_name: str, config: Dict[str, Any]) -> Optional[D
 
 
 def apply_channel_settings(channel_name: str) -> Dict[str, Any]:
-    """
-    Load and apply channel-specific settings.
-    
-    Args:
-        channel_name: Name of the channel to configure
-        
-    Returns:
-        Dict with channel-specific settings
-    """
-    # Load channels config
+    """Load and apply channel-specific settings."""
     config = load_channels_config()
-    
-    # Find this channel's config
     channel_config = find_channel_config(channel_name, config)
     
     if not channel_config:
@@ -128,24 +117,23 @@ def apply_channel_settings(channel_name: str) -> Dict[str, Any]:
             "CHANNEL_MODE": "general",
             "CHANNEL_SEARCH_TERMS": [],
             "CHANNEL_LANG": "en",
-            "CHANNEL_VISIBILITY": "public"
+            "CHANNEL_VISIBILITY": "public",
+            "CHANNEL_TTS_VOICE": "af_sarah"  # ✅ EKLE
         }
     
-    # Extract settings
     settings = {
         "CHANNEL_TOPIC": channel_config.get("topic", "Interesting facts and knowledge"),
         "CHANNEL_MODE": channel_config.get("mode", "general"),
         "CHANNEL_SEARCH_TERMS": channel_config.get("search_terms", []),
         "CHANNEL_LANG": channel_config.get("lang", "en"),
-        "CHANNEL_VISIBILITY": channel_config.get("visibility", "public")
+        "CHANNEL_VISIBILITY": channel_config.get("visibility", "public"),
+        "CHANNEL_TTS_VOICE": channel_config.get("tts_voice", "af_sarah")  # ✅ EKLE
     }
     
     logger.info(f"📺 Channel: {channel_name}")
-    logger.info(f"🎯 Topic: {settings['CHANNEL_TOPIC'][:80]}...")
-    logger.info(f"🔍 Search terms: {len(settings['CHANNEL_SEARCH_TERMS'])} available")
+    logger.info(f"🎙️ TTS Voice: {settings['CHANNEL_TTS_VOICE']}")  # ✅ EKLE
     
     return settings
-
 
 def get_channel_search_terms(channel_name: str) -> List[str]:
     """
