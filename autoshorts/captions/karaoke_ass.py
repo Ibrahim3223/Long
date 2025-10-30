@@ -97,7 +97,7 @@ def build_karaoke_ass(
     seg_dur: float,
     words: List[Tuple[str, float]],
     is_hook: bool = False,
-    style_name: str = "Style1",
+    style_name: Optional[str] = None,
     time_offset: float = 0.0,
 ) -> str:
     """
@@ -140,8 +140,6 @@ Style: Default,{primary_font},{fontsize},{color_code},{color_code},{style['color
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     
-    # ✅ Time offset desteği (kwargs'dan al)
-    time_offset = kwargs.get('time_offset', 0.0)
     
     # ✅ SADE ALTYAZI - Tüm metin aynı anda, aynı renkte
     # Karaoke \k tag'leri YOK
