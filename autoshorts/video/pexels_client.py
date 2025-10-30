@@ -350,7 +350,7 @@ class PexelsClient:
             
             # Handle rate limiting specifically
             if response.status_code == 429:
-                retry_after = int(response.headers.get('Retry-After', 60))
+                retry_after = int(response.headers.get('Retry-After', 10))
                 logger.warning(f"⏳ Rate limited (429)! Waiting {retry_after}s...")
                 time.sleep(retry_after)
                 
