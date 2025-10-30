@@ -374,6 +374,9 @@ class ShortsOrchestrator:
                 "_sub_topic": sub_topic  # Store for later
             }
             
+            # Build sentences list
+            sentences = []
+            
             # Hook'u ekle
             if script["hook"]:
                 sentences.append({"text": script["hook"], "type": "hook"})
@@ -394,17 +397,15 @@ class ShortsOrchestrator:
                     
                 sentences.append({"text": sentence, "type": "content"})
             
-            # ✅ DÜZELTME: CTA son cümle ile aynıysa ekleme
+            # CTA ekle (son cümle ile aynıysa ekleme)
             if script["cta"]:
                 normalized_cta = script["cta"].strip().lower()
                 
-                # Check if last sentence is the same as CTA
+                # Son cümle CTA ile aynı mı kontrol et
                 if sentences and sentences[-1]["text"].strip().lower() == normalized_cta:
                     logger.info("⚠️ Skipping duplicate CTA (same as last sentence)")
-                    # Replace last sentence type to 'cta' instead of adding duplicate
                     sentences[-1]["type"] = "cta"
                 else:
-                    # CTA is different, add it
                     sentences.append({"text": script["cta"], "type": "cta"})
             
             script["sentences"] = sentences
