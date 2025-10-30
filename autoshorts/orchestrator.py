@@ -549,12 +549,16 @@ class ShortsOrchestrator:
                 skipped_scenes += 1
                 continue
 
+            CAPTION_OFFSET = 0.5
+            words_with_offset = [(w, d) for w, d in words] if words else []
+            
             captioned = self._render_captions(
                 video_path=scene_path,
                 text=text,
-                words=words,
+                words=words_with_offset,
                 duration=audio_dur,
                 sentence_type=sentence_type,
+                caption_offset=CAPTION_OFFSET,
             )
 
             final_scene = self._mux_audio(
@@ -1140,57 +1144,63 @@ class ShortsOrchestrator:
         duration: float,
         index: int,
     ) -> Optional[str]:
-        """Mux audio with video and add 0.5s pause at the end."""
+        """Mux audio with video, adding 0.5s silence at start and end."""
         import tempfile
         
-        # ✅ Scene sonunda 0.5 saniye pause
-        SCENE_PAUSE = 0
+        # ✅ 0.5s padding at start and end
+        PADDING_START = 0.5
+        PADDING_END = 0.5
         
         output = self.temp_dir / f"scene_{index:03d}_final.mp4"
         
-        # Audio'ya pause ekle
-        audio_with_pause = audio_path
+        # ✅ Audio'ya başta ve sonda padding ekle
+        audio_with_padding = audio_path
         try:
             from pydub import AudioSegment
             
+            # Asıl audio'yu yükle
             audio = AudioSegment.from_file(audio_path)
-            silence = AudioSegment.silent(duration=int(SCENE_PAUSE * 1000))  # ms
-            audio_paused = audio + silence
             
-            # Temporary file with pause
+            # Başta ve sonda sessizlik ekle
+            silence_start = AudioSegment.silent(duration=int(PADDING_START * 1000))
+            silence_end = AudioSegment.silent(duration=int(PADDING_END * 1000))
+            audio_padded = silence_start + audio + silence_end
+            
+            # Temporary file with padding
             with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
-                audio_paused.export(tmp.name, format='mp3', bitrate='160k')
-                audio_with_pause = tmp.name
+                audio_padded.export(tmp.name, format='mp3', bitrate='160k')
+                audio_with_padding = tmp.name
             
-            logger.debug(f"✅ Added {SCENE_PAUSE}s pause to scene {index} audio")
+            logger.debug(f"✅ Added {PADDING_START}s + {PADDING_END}s padding to scene {index}")
             
         except Exception as e:
-            logger.warning(f"⚠️ Failed to add audio pause for scene {index}: {e}")
-            SCENE_PAUSE = 0  # Don't extend video if audio pause failed
+            logger.warning(f"⚠️ Failed to add audio padding for scene {index}: {e}")
+            PADDING_START = 0
+            PADDING_END = 0
         
         try:
-            # Total duration with pause
-            total_duration = duration + SCENE_PAUSE
+            # Total duration with padding
+            total_duration = duration + PADDING_START + PADDING_END
             
             # FFmpeg command
             cmd = [
                 "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                 "-i", video_path,
-                "-i", audio_with_pause,
+                "-i", audio_with_padding,
                 "-t", f"{total_duration:.3f}",
             ]
             
-            # Video encoding strategy
-            if SCENE_PAUSE > 0:
+            # Video encoding (extend video to match audio duration)
+            if PADDING_START > 0 or PADDING_END > 0:
                 # Need to re-encode to extend video
                 cmd.extend([
                     "-c:v", "libx264",
                     "-preset", self.ffmpeg_preset,
                     "-crf", "23",
-                    "-vf", f"tpad=stop_mode=clone:stop_duration={SCENE_PAUSE}",  # Freeze last frame
+                    "-vf", f"tpad=stop_mode=clone:stop_duration={PADDING_START + PADDING_END}",
                 ])
             else:
-                # Stream copy if no pause
+                # Stream copy if no padding
                 cmd.extend(["-c:v", "copy"])
             
             # Audio settings
@@ -1214,9 +1224,9 @@ class ShortsOrchestrator:
         
         finally:
             # Cleanup temporary audio file
-            if audio_with_pause != audio_path and os.path.exists(audio_with_pause):
+            if audio_with_padding != audio_path and os.path.exists(audio_with_padding):
                 try:
-                    os.unlink(audio_with_pause)
+                    os.unlink(audio_with_padding)
                 except Exception:
                     pass
         
