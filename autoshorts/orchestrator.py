@@ -1151,7 +1151,7 @@ class ShortsOrchestrator:
         
         # ✅ 0.5s padding at start and end
         PADDING_START = 0.5
-        PADDING_END = 0.5
+        PADDING_END = 0
         
         output = self.temp_dir / f"scene_{index:03d}_final.mp4"
         
@@ -1164,11 +1164,10 @@ class ShortsOrchestrator:
             
             # Sessizlik oluştur
             silence_start = AudioSegment.silent(duration=int(PADDING_START * 1000))
-            silence_end = AudioSegment.silent(duration=int(PADDING_END * 1000))
             
             # Audio'yu yükle ve padding ekle
             audio = AudioSegment.from_file(audio_path)
-            audio_padded = silence_start + audio + silence_end
+            audio_padded = silence_start + audio
             
             # Geçici dosyaya kaydet
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False, dir=str(self.temp_dir)) as tmp:
@@ -1187,7 +1186,7 @@ class ShortsOrchestrator:
         
         try:
             # Hedef duration
-            target_duration = duration + PADDING_START + PADDING_END
+            target_duration = duration + PADDING_START
             
             # Video'yu hedef duration'a uzat (loop ile)
             # ✅ CRITICAL: Her zaman re-encode (stream copy sorunları önlemek için)
