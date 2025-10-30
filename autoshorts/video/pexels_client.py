@@ -225,7 +225,7 @@ class PexelsClient:
         self, 
         api_key: Optional[str] = None,
         enable_cache: bool = True,
-        cache_ttl_hours: int = 24,
+        cache_ttl_hours: int = 168,
         max_retries: int = 3
     ):
         """
