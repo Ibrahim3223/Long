@@ -67,7 +67,7 @@ class CaptionRenderer:
                 words = [(w, d) for w, d in words]  # Copy list
                 logger.debug(f"Applying caption offset: +{caption_offset:.2f}s")
             
-            # ✅ ASS dosyası oluştur
+          # ✅ ASS dosyası oluştur
             style_name = get_random_style()
             ass_content = build_karaoke_ass(
                 text=text,
