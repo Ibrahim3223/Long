@@ -1117,8 +1117,9 @@ class ShortsOrchestrator:
         words: List[Tuple[str, float]],
         duration: float,
         sentence_type: str = "content",
+        caption_offset: float = 0.0,
     ) -> str:
-        """Render captions on video."""
+        """Render captions on video with optional time offset."""
         if not getattr(settings, "KARAOKE_CAPTIONS", True):
             return video_path
 
@@ -1129,6 +1130,7 @@ class ShortsOrchestrator:
                 words=words,
                 duration=duration,
                 sentence_type=sentence_type,
+                caption_offset=caption_offset,
             )
             return output if os.path.exists(output) else video_path
         
