@@ -1139,38 +1139,100 @@ class ShortsOrchestrator:
         duration: float,
         index: int,
     ) -> Optional[str]:
-        """Mux audio with video."""
+        """Mux audio with video and add 0.5s pause at the end."""
+        import tempfile
+        
+        # ✅ Scene sonunda 0.5 saniye pause
+        SCENE_PAUSE = 0.5
+        
         output = self.temp_dir / f"scene_{index:03d}_final.mp4"
+        
+        # Audio'ya pause ekle
+        audio_with_pause = audio_path
         try:
-            run([
+            from pydub import AudioSegment
+            
+            audio = AudioSegment.from_file(audio_path)
+            silence = AudioSegment.silent(duration=int(SCENE_PAUSE * 1000))  # ms
+            audio_paused = audio + silence
+            
+            # Temporary file with pause
+            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
+                audio_paused.export(tmp.name, format='mp3', bitrate='160k')
+                audio_with_pause = tmp.name
+            
+            logger.debug(f"✅ Added {SCENE_PAUSE}s pause to scene {index} audio")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to add audio pause for scene {index}: {e}")
+            SCENE_PAUSE = 0  # Don't extend video if audio pause failed
+        
+        try:
+            # Total duration with pause
+            total_duration = duration + SCENE_PAUSE
+            
+            # FFmpeg command
+            cmd = [
                 "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                 "-i", video_path,
-                "-i", audio_path,
-                "-t", f"{duration:.3f}",
-                "-c:v", "copy",
+                "-i", audio_with_pause,
+                "-t", f"{total_duration:.3f}",
+            ]
+            
+            # Video encoding strategy
+            if SCENE_PAUSE > 0:
+                # Need to re-encode to extend video
+                cmd.extend([
+                    "-c:v", "libx264",
+                    "-preset", self.ffmpeg_preset,
+                    "-crf", "23",
+                    "-vf", f"tpad=stop_mode=clone:stop_duration={SCENE_PAUSE}",  # Freeze last frame
+                ])
+            else:
+                # Stream copy if no pause
+                cmd.extend(["-c:v", "copy"])
+            
+            # Audio settings
+            cmd.extend([
                 "-c:a", "aac",
                 "-b:a", "160k",
                 "-map", "0:v:0",
                 "-map", "1:a:0",
-                "-shortest",
                 "-movflags", "+faststart",
                 str(output),
             ])
+            
+            run(cmd, check=True)
+            
+            logger.debug(f"✅ Scene {index} muxed (duration: {total_duration:.2f}s)")
+            
         except Exception as exc:
             logger.error("Audio mux failed: %s", exc)
             logger.debug("", exc_info=True)
             return None
-
+        
+        finally:
+            # Cleanup temporary audio file
+            if audio_with_pause != audio_path and os.path.exists(audio_with_pause):
+                try:
+                    os.unlink(audio_with_pause)
+                except Exception:
+                    pass
+        
         return str(output) if output.exists() else None
 
     def _concat_segments(self, segments: Iterable[str], output: str) -> None:
         """Concatenate video segments."""
+        import pathlib
+        
         concat_file = pathlib.Path(output).with_suffix(".txt")
         try:
             with open(concat_file, "w", encoding="utf-8") as handle:
                 for segment in segments:
                     handle.write(f"file '{segment}'\n")
-
+            
+            logger.info(f"🔗 Concatenating {len(list(segments))} scenes")
+            
             # Try stream-copy concat (fast)
             try:
                 run([
@@ -1179,9 +1241,12 @@ class ShortsOrchestrator:
                     "-safe", "0",
                     "-i", str(concat_file),
                     "-c", "copy",
+                    "-movflags", "+faststart",
                     output
-                ])
-            except Exception:
+                ], check=True)
+                logger.info("✅ Concatenation successful (stream copy)")
+                
+            except Exception as e:
                 # Fallback to re-encode
                 logger.info("Stream-copy concat failed, re-encoding...")
                 run([
@@ -1194,11 +1259,22 @@ class ShortsOrchestrator:
                     "-crf", "23",
                     "-c:a", "aac",
                     "-b:a", "160k",
+                    "-movflags", "+faststart",
                     output
-                ])
+                ], check=True)
+                logger.info("✅ Concatenation successful (re-encode)")
+                
+        except Exception as exc:
+            logger.error(f"Concatenation failed: {exc}")
+            logger.debug("", exc_info=True)
+            raise
+            
         finally:
             if concat_file.exists():
-                concat_file.unlink()
+                try:
+                    concat_file.unlink()
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------
     # Helpers for novelty/state
