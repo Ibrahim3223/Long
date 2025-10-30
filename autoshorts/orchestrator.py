@@ -535,9 +535,17 @@ class ShortsOrchestrator:
                     if idx not in batch_results:
                         batch_results[idx] = None
             
-            # Update results
-            for idx, result in batch_results.items():
-                results[idx] = result
+            # ✅ Update results - ensure correct assignment
+            for idx in batch_indices:
+                if idx in batch_results:
+                    results[idx] = batch_results[idx]
+                    
+                    # Verify assignment worked
+                    if results[idx] is not None:
+                        audio_path, words = results[idx]
+                        if not os.path.exists(audio_path):
+                            logger.error(f"❌ Scene {idx}: Audio file missing after assignment: {audio_path}")
+                            results[idx] = None
             
             # Log batch progress
             batch_success = sum(1 for idx in batch_indices if results[idx] is not None)
@@ -562,6 +570,14 @@ class ShortsOrchestrator:
         success_rate = (successful / total_sentences * 100) if total_sentences > 0 else 0
         
         logger.info(f"📊 TTS Generation Complete: {successful}/{total_sentences} ({success_rate:.1f}%)")
+        
+        # ✅ DEBUG: Log first few results
+        for i in range(min(3, len(results))):
+            if results[i]:
+                audio_path, words = results[i]
+                logger.debug(f"Result[{i}]: {audio_path}, {len(words)} words")
+            else:
+                logger.debug(f"Result[{i}]: None")
         
         if success_rate < 80:
             logger.error(f"❌ TTS success rate too low: {success_rate:.1f}%")
@@ -603,23 +619,7 @@ class ShortsOrchestrator:
             if not tts_result:
                 logger.warning("Skipping scene %d (no TTS)", idx)
                 skipped_scenes += 1
-                continue
-
-            # ✅ CRITICAL: Validate audio file matches expected index
-            expected_audio = str(self.temp_dir / f"tts_{idx:03d}.wav")
-            if audio_path != expected_audio:
-                logger.error(f"❌ MISMATCH: Scene {idx} expected {expected_audio}, got {audio_path}")
-                skipped_scenes += 1
-                continue
-            
-            # ✅ Validate audio file is not corrupted
-            if audio_dur < 0.5:
-                logger.error(f"❌ CORRUPT: Scene {idx} audio too short: {audio_dur:.2f}s")
-                skipped_scenes += 1
-                continue
-            
-            # ✅ Log for debugging
-            logger.debug(f"Scene {idx}: '{text[:50]}...' → {audio_dur:.2f}s")            
+                continue          
 
             audio_path, words = tts_result
             audio_dur = ffprobe_duration(audio_path)
