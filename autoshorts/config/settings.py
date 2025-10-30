@@ -80,6 +80,7 @@ try:
     CHANNEL_SEARCH_TERMS = _channel_settings.get("CHANNEL_SEARCH_TERMS", [])
     CHANNEL_LANG_OVERRIDE = _channel_settings.get("CHANNEL_LANG", None)
     CHANNEL_VISIBILITY_OVERRIDE = _channel_settings.get("CHANNEL_VISIBILITY", None)
+    CHANNEL_TTS_VOICE = _channel_settings.get("CHANNEL_TTS_VOICE", "af_sarah")
 except Exception as e:
     import logging
     logging.warning(f"⚠️ Failed to load channel config: {e}")
@@ -88,6 +89,7 @@ except Exception as e:
     CHANNEL_SEARCH_TERMS = []
     CHANNEL_LANG_OVERRIDE = None
     CHANNEL_VISIBILITY_OVERRIDE = None
+    CHANNEL_TTS_VOICE = "af_sarah"
 
 if os.getenv("TOPIC"):
     CHANNEL_TOPIC = _env_str("TOPIC", CHANNEL_TOPIC)
@@ -161,7 +163,7 @@ KOKORO_ENABLED = _env_bool("KOKORO_ENABLED", True)
 KOKORO_FALLBACK_EDGE = _env_bool("KOKORO_FALLBACK_EDGE", True)
 
 # Voice Selection (8 options)
-KOKORO_VOICE = _env_str("KOKORO_VOICE", "af_sarah")
+KOKORO_VOICE = _env_str("KOKORO_VOICE", CHANNEL_TTS_VOICE)
 # Available voices:
 #   FEMALE VOICES:
 #   - af_heart    : Heart (warm, friendly) - Great for storytelling
