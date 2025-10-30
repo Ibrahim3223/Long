@@ -374,22 +374,22 @@ class ShortsOrchestrator:
                 "_sub_topic": sub_topic  # Store for later
             }
             
-            # Build sentences list
-            sentences = []
-            
-            # ✅ Add hook if exists
+            # Hook'u ekle
             if script["hook"]:
                 sentences.append({"text": script["hook"], "type": "hook"})
             
-            # ✅ DÜZELTME: İlk cümle hook ile aynıysa ekleme
-            for sentence in script["script"]:
-                # Normalize both for comparison
+            # Script cümlelerini ekle (ilk cümle hook ile aynıysa atla)
+            for idx, sentence in enumerate(script["script"]):
                 normalized_sentence = sentence.strip().lower()
                 normalized_hook = script["hook"].strip().lower() if script["hook"] else ""
                 
-                # Skip if this sentence is the same as hook
-                if normalized_sentence == normalized_hook:
-                    logger.info("⚠️ Skipping duplicate first sentence (same as hook)")
+                # İlk cümle hook ile benzer mi kontrol et
+                if idx == 0 and normalized_sentence == normalized_hook:
+                    logger.info("⚠️ Skipping first sentence (duplicate of hook)")
+                    continue
+                
+                # Boş cümleleri de atla
+                if not sentence.strip():
                     continue
                     
                 sentences.append({"text": sentence, "type": "content"})
@@ -1143,7 +1143,7 @@ class ShortsOrchestrator:
         import tempfile
         
         # ✅ Scene sonunda 0.5 saniye pause
-        SCENE_PAUSE = 0.5
+        SCENE_PAUSE = 0
         
         output = self.temp_dir / f"scene_{index:03d}_final.mp4"
         
