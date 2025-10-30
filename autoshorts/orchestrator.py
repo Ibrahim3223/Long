@@ -555,10 +555,10 @@ class ShortsOrchestrator:
             captioned = self._render_captions(
                 video_path=scene_path,
                 text=text,
-                words=words_with_offset,
+                words=words,
                 duration=audio_dur,
                 sentence_type=sentence_type,
-                caption_offset=CAPTION_OFFSET,
+                caption_offset=0.0,  # ✅ Offset kaldırıldı
             )
 
             final_scene = self._mux_audio(
@@ -1146,66 +1146,33 @@ class ShortsOrchestrator:
         duration: float,
         index: int,
     ) -> Optional[str]:
-        """Mux audio with video, adding 0.5s silence at start and end."""
-        import tempfile
-        
-        # ✅ 0.5s padding at start and end
-        PADDING_START = 0.5
-        PADDING_END = 0
-        
+        """Mux audio with video - simple and clean."""
         output = self.temp_dir / f"scene_{index:03d}_final.mp4"
         
-        # ✅ Audio'ya başta ve sonda sessizlik ekle
-        padded_audio = audio_path
-        audio_success = False
-        
         try:
-            from pydub import AudioSegment
+            # Video duration'ı kontrol et
+            video_duration = ffprobe_duration(video_path)
             
-            # Sessizlik oluştur
-            silence_start = AudioSegment.silent(duration=int(PADDING_START * 1000))
+            # ✅ Kaç kere loop etmeli
+            loop_count = int(duration / video_duration) + 1
             
-            # Audio'yu yükle ve padding ekle
-            audio = AudioSegment.from_file(audio_path)
-            audio_padded = silence_start + audio
-            
-            # Geçici dosyaya kaydet
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False, dir=str(self.temp_dir)) as tmp:
-                audio_padded.export(tmp.name, format='wav')
-                padded_audio = tmp.name
-                audio_success = True
-            
-            logger.debug(f"✅ Audio padding successful for scene {index}")
-            
-        except Exception as e:
-            logger.error(f"❌ Audio padding FAILED for scene {index}: {e}")
-            # Fallback: padding yok
-            PADDING_START = 0
-            PADDING_END = 0
-            padded_audio = audio_path
-        
-        try:
-            # Hedef duration
-            target_duration = duration + PADDING_START
-            
-            # Video'yu hedef duration'a uzat (loop ile)
-            # ✅ CRITICAL: Her zaman re-encode (stream copy sorunları önlemek için)
+            # ✅ Video'yu loop ederek uzat, audio ekle
             cmd = [
                 "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
-                "-stream_loop", "-1",  # Sonsuz loop
+                "-stream_loop", str(loop_count),
                 "-i", video_path,
-                "-i", padded_audio,
-                "-t", f"{target_duration:.3f}",  # Kesin süre
+                "-i", audio_path,
+                "-t", f"{duration:.3f}",
                 "-c:v", "libx264",
                 "-preset", self.ffmpeg_preset,
                 "-crf", "23",
                 "-pix_fmt", "yuv420p",
                 "-c:a", "aac",
                 "-b:a", "192k",
-                "-ar", "48000",  # Standart sample rate
-                "-ac", "2",  # Stereo
-                "-map", "0:v:0",  # İlk input'tan video
-                "-map", "1:a:0",  # İkinci input'tan audio
+                "-ar", "48000",
+                "-ac", "2",
+                "-map", "0:v:0",
+                "-map", "1:a:0",
                 "-movflags", "+faststart",
                 str(output),
             ]
@@ -1225,7 +1192,7 @@ class ShortsOrchestrator:
             result = subprocess_run(probe_cmd, stdout=PIPE, stderr=PIPE, text=True)
             
             if result.stdout.strip():
-                logger.debug(f"✅ Scene {index} muxed successfully (audio: {result.stdout.strip()}, duration: {target_duration:.2f}s)")
+                logger.debug(f"✅ Scene {index} muxed (audio: {result.stdout.strip()}, duration: {duration:.2f}s)")
             else:
                 logger.error(f"❌ Scene {index} has NO AUDIO TRACK!")
                 return None
@@ -1234,15 +1201,6 @@ class ShortsOrchestrator:
             logger.error(f"❌ Audio mux failed for scene {index}: {exc}")
             logger.debug("", exc_info=True)
             return None
-        
-        finally:
-            # Cleanup temporary audio
-            if audio_success and padded_audio != audio_path:
-                try:
-                    if os.path.exists(padded_audio):
-                        os.unlink(padded_audio)
-                except Exception:
-                    pass
         
         return str(output) if output.exists() else None
 
