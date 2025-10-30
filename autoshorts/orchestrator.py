@@ -1155,87 +1155,93 @@ class ShortsOrchestrator:
         
         output = self.temp_dir / f"scene_{index:03d}_final.mp4"
         
-        # ✅ Audio'ya başta ve sonda padding ekle
-        audio_with_padding = audio_path
+        # ✅ Audio'ya başta ve sonda sessizlik ekle
+        padded_audio = audio_path
+        audio_success = False
+        
         try:
             from pydub import AudioSegment
             
-            # Asıl audio'yu yükle
-            audio = AudioSegment.from_file(audio_path)
-            
-            # Başta ve sonda sessizlik ekle
+            # Sessizlik oluştur
             silence_start = AudioSegment.silent(duration=int(PADDING_START * 1000))
             silence_end = AudioSegment.silent(duration=int(PADDING_END * 1000))
+            
+            # Audio'yu yükle ve padding ekle
+            audio = AudioSegment.from_file(audio_path)
             audio_padded = silence_start + audio + silence_end
             
-            # Temporary file with padding
-            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
-                audio_padded.export(tmp.name, format='mp3', bitrate='160k')
-                audio_with_padding = tmp.name
+            # Geçici dosyaya kaydet
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False, dir=str(self.temp_dir)) as tmp:
+                audio_padded.export(tmp.name, format='wav')
+                padded_audio = tmp.name
+                audio_success = True
             
-            logger.debug(f"✅ Added {PADDING_START}s + {PADDING_END}s padding to scene {index}")
+            logger.debug(f"✅ Audio padding successful for scene {index}")
             
         except Exception as e:
-            logger.warning(f"⚠️ Failed to add audio padding for scene {index}: {e}")
+            logger.error(f"❌ Audio padding FAILED for scene {index}: {e}")
+            # Fallback: padding yok
             PADDING_START = 0
             PADDING_END = 0
+            padded_audio = audio_path
         
         try:
-            # Video duration'ı hesapla
-            video_duration = ffprobe_duration(video_path)
-            audio_duration = duration + PADDING_START + PADDING_END
+            # Hedef duration
+            target_duration = duration + PADDING_START + PADDING_END
             
-            # ✅ Video'yu loop ederek audio uzunluğuna çıkar
-            if audio_duration > video_duration:
-                loop_count = int(audio_duration / video_duration) + 1
-                
-                cmd = [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-stream_loop", str(loop_count),
-                    "-i", video_path,
-                    "-i", audio_with_padding,
-                    "-t", f"{audio_duration:.3f}",
-                    "-c:v", "libx264",
-                    "-preset", self.ffmpeg_preset,
-                    "-crf", "23",
-                    "-c:a", "aac",
-                    "-b:a", "160k",
-                    "-map", "0:v:0",
-                    "-map", "1:a:0",
-                    "-shortest",
-                    "-movflags", "+faststart",
-                    str(output),
-                ]
-            else:
-                # Video zaten yeterince uzun
-                cmd = [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", video_path,
-                    "-i", audio_with_padding,
-                    "-t", f"{audio_duration:.3f}",
-                    "-c:v", "copy",
-                    "-c:a", "aac",
-                    "-b:a", "160k",
-                    "-map", "0:v:0",
-                    "-map", "1:a:0",
-                    "-movflags", "+faststart",
-                    str(output),
-                ]
+            # Video'yu hedef duration'a uzat (loop ile)
+            # ✅ CRITICAL: Her zaman re-encode (stream copy sorunları önlemek için)
+            cmd = [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
+                "-stream_loop", "-1",  # Sonsuz loop
+                "-i", video_path,
+                "-i", padded_audio,
+                "-t", f"{target_duration:.3f}",  # Kesin süre
+                "-c:v", "libx264",
+                "-preset", self.ffmpeg_preset,
+                "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-ar", "48000",  # Standart sample rate
+                "-ac", "2",  # Stereo
+                "-map", "0:v:0",  # İlk input'tan video
+                "-map", "1:a:0",  # İkinci input'tan audio
+                "-movflags", "+faststart",
+                str(output),
+            ]
             
             run(cmd, check=True)
             
-            logger.debug(f"✅ Scene {index} muxed (duration: {audio_duration:.2f}s)")
+            # Verify audio track
+            probe_cmd = [
+                "ffprobe", "-v", "error",
+                "-select_streams", "a:0",
+                "-show_entries", "stream=codec_name",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(output)
+            ]
+            
+            from subprocess import run as subprocess_run, PIPE
+            result = subprocess_run(probe_cmd, stdout=PIPE, stderr=PIPE, text=True)
+            
+            if result.stdout.strip():
+                logger.debug(f"✅ Scene {index} muxed successfully (audio: {result.stdout.strip()}, duration: {target_duration:.2f}s)")
+            else:
+                logger.error(f"❌ Scene {index} has NO AUDIO TRACK!")
+                return None
             
         except Exception as exc:
-            logger.error("Audio mux failed: %s", exc)
+            logger.error(f"❌ Audio mux failed for scene {index}: {exc}")
             logger.debug("", exc_info=True)
             return None
         
         finally:
-            # Cleanup temporary audio file
-            if audio_with_padding != audio_path and os.path.exists(audio_with_padding):
+            # Cleanup temporary audio
+            if audio_success and padded_audio != audio_path:
                 try:
-                    os.unlink(audio_with_padding)
+                    if os.path.exists(padded_audio):
+                        os.unlink(padded_audio)
                 except Exception:
                     pass
         
@@ -1256,15 +1262,22 @@ class ShortsOrchestrator:
             # Try stream-copy concat (fast)
             try:
                 run([
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
                     "-f", "concat",
                     "-safe", "0",
                     "-i", str(concat_file),
-                    "-c", "copy",
+                    "-c:v", "libx264",
+                    "-preset", self.ffmpeg_preset,
+                    "-crf", "23",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-ar", "48000",
+                    "-ac", "2",
                     "-movflags", "+faststart",
                     output
                 ], check=True)
-                logger.info("✅ Concatenation successful (stream copy)")
+                logger.info("✅ Concatenation successful (re-encoded for compatibility)")
                 
             except Exception as e:
                 # Fallback to re-encode
