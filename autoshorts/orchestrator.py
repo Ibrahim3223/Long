@@ -573,6 +573,9 @@ class ShortsOrchestrator:
         skipped_scenes = 0
 
         for idx, (sent, tts_result) in enumerate(zip(sentences, tts_results)):
+            audio_path = None
+            scene_path = None
+            captioned = None            
             if not tts_result:
                 logger.warning("Skipping scene %d (no TTS)", idx)
                 skipped_scenes += 1
