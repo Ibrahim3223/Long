@@ -39,6 +39,7 @@ class CaptionRenderer:
         is_hook: bool = False,
         sentence_type: str = "buildup",
         temp_dir: Optional[str] = None,
+        caption_offset: float = 0.0,
     ) -> str:
         """Render captions with improved synchronization."""
         ass_path = video_path.replace(".mp4", ".ass")
@@ -61,6 +62,11 @@ class CaptionRenderer:
                 logger.warning("         No valid word timings; skipping captions.")
                 return video_path
 
+            # ✅ Offset varsa word timings'i kaydır
+            if caption_offset > 0:
+                words = [(w, d) for w, d in words]  # Copy list
+                logger.debug(f"Applying caption offset: +{caption_offset:.2f}s")
+            
             # ✅ ASS dosyası oluştur
             style_name = get_random_style()
             ass_content = build_karaoke_ass(
@@ -68,7 +74,8 @@ class CaptionRenderer:
                 seg_dur=duration,
                 words=words,
                 is_hook=(sentence_type == "hook"),
-                style_name=style_name
+                style_name=style_name,
+                time_offset=caption_offset,
             )
             
             with open(ass_path, "w", encoding="utf-8") as f:
