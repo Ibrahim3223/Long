@@ -444,103 +444,127 @@ class ShortsOrchestrator:
         self, sentences: Sequence[Dict]
     ) -> List[Optional[Tuple[str, List[Tuple[str, float]]]]]:
         """
-        ✅ Generate TTS for all sentences in parallel with improved error handling.
-        
-        Returns:
-            List of (audio_path, word_timings) tuples or None for failed sentences
+        ✅ Generate TTS with improved reliability and resource management.
         """
         results = [None] * len(sentences)
         
-        def process_sentence(idx: int, sent: Dict) -> Tuple[int, Optional[Tuple[str, List[Tuple[str, float]]]]]:
-            """Process single sentence TTS with retry logic."""
+        def process_sentence_safe(idx: int, sent: Dict) -> Tuple[int, Optional[Tuple[str, List[Tuple[str, float]]]]]:
+            """Process single sentence with comprehensive error handling."""
             text = sent.get("text", "")
             
             if not text.strip():
+                logger.warning(f"Scene {idx}: Empty text")
                 return idx, None
             
             out_path = str(self.temp_dir / f"tts_{idx:03d}.wav")
             out_path = sanitize_path(out_path)
             
-            # ✅ Retry logic for TTS
-            max_retries = 2
-            for attempt in range(max_retries):
+            # ✅ Multiple retry attempts
+            for attempt in range(3):
                 try:
+                    # Generate TTS
                     duration, words = self.tts.synthesize(text, out_path)
                     
-                    # ✅ Verify audio file exists and has content
+                    # Validate output
                     if not os.path.exists(out_path):
                         raise ValueError(f"Audio file not created: {out_path}")
                     
-                    if os.path.getsize(out_path) < 1000:  # Less than 1KB
-                        raise ValueError(f"Audio file too small: {out_path}")
+                    file_size = os.path.getsize(out_path)
+                    if file_size < 1000:
+                        raise ValueError(f"Audio file too small: {file_size} bytes")
                     
-                    logger.debug(f"✅ TTS success for sentence {idx}: {duration:.2f}s, {len(words)} words")
+                    if duration < 0.5:
+                        raise ValueError(f"Audio duration too short: {duration}s")
+                    
+                    logger.debug(f"✅ Scene {idx}: {duration:.2f}s, {len(words)} words")
                     return idx, (out_path, words)
                     
                 except Exception as exc:
-                    if attempt < max_retries - 1:
-                        logger.warning(f"⚠️ TTS attempt {attempt+1} failed for sentence {idx}: {exc}, retrying...")
+                    logger.warning(f"⚠️ Scene {idx} attempt {attempt+1}/3 failed: {exc}")
+                    
+                    # Clean up failed file
+                    if os.path.exists(out_path):
+                        try:
+                            os.remove(out_path)
+                        except:
+                            pass
+                    
+                    if attempt < 2:
                         import time
-                        time.sleep(1)
+                        time.sleep(0.5 * (attempt + 1))
                     else:
-                        logger.error(f"❌ TTS failed for sentence {idx} after {max_retries} attempts: {exc}")
+                        logger.error(f"❌ Scene {idx} failed after 3 attempts")
                         return idx, None
+            
+            return idx, None
         
-        # ✅ IMPROVED: Longer timeout, sequential fallback if parallel fails
-        try:
-            futures = {}
-            for idx, sent in enumerate(sentences):
-                future = self._executor.submit(process_sentence, idx, sent)
-                futures[future] = idx
+        # ✅ STRATEGY: Process in small batches to avoid resource exhaustion
+        BATCH_SIZE = 10
+        total_sentences = len(sentences)
+        
+        logger.info(f"🎙️ Generating TTS for {total_sentences} sentences in batches of {BATCH_SIZE}")
+        
+        for batch_start in range(0, total_sentences, BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, total_sentences)
+            batch_indices = range(batch_start, batch_end)
             
-            # ✅ Collect results with longer timeout
-            completed = 0
-            for future in as_completed(futures, timeout=180):  # ✅ 3 minutes total
-                try:
-                    idx, result = future.result(timeout=60)  # ✅ 60s per sentence
-                    results[idx] = result
-                    completed += 1
-                    
-                    if completed % 10 == 0:
-                        logger.info(f"📊 TTS progress: {completed}/{len(sentences)}")
-                        
-                except Exception as exc:
-                    idx = futures[future]
-                    logger.error(f"❌ TTS future failed for sentence {idx}: {exc}")
-                    results[idx] = None
+            logger.info(f"📊 Processing batch {batch_start//BATCH_SIZE + 1}/{(total_sentences + BATCH_SIZE - 1)//BATCH_SIZE} (sentences {batch_start}-{batch_end-1})")
             
-            # ✅ Check for failures
-            failed_indices = [i for i, r in enumerate(results) if r is None]
-            
-            if failed_indices:
-                logger.warning(f"⚠️ {len(failed_indices)} sentences failed parallel TTS, retrying sequentially...")
+            # Process batch in parallel
+            batch_results = {}
+            try:
+                futures = {}
+                for idx in batch_indices:
+                    future = self._executor.submit(process_sentence_safe, idx, sentences[idx])
+                    futures[future] = idx
                 
-                # ✅ Retry failed ones sequentially
-                for idx in failed_indices:
-                    logger.info(f"🔄 Retrying sentence {idx} sequentially...")
-                    _, result = process_sentence(idx, sentences[idx])
-                    results[idx] = result
-                    
-                    if result:
-                        logger.info(f"✅ Sequential retry succeeded for sentence {idx}")
-                    else:
-                        logger.error(f"❌ Sequential retry failed for sentence {idx}")
-        
-        except Exception as exc:
-            logger.error(f"❌ Parallel TTS failed completely: {exc}, falling back to sequential...")
+                # Collect batch results with timeout
+                for future in as_completed(futures, timeout=120):
+                    try:
+                        idx, result = future.result(timeout=60)
+                        batch_results[idx] = result
+                    except Exception as exc:
+                        idx = futures[future]
+                        logger.error(f"❌ Batch future failed for scene {idx}: {exc}")
+                        batch_results[idx] = None
+                
+            except Exception as exc:
+                logger.error(f"❌ Batch processing failed: {exc}")
+                # Fill failed batch with None
+                for idx in batch_indices:
+                    if idx not in batch_results:
+                        batch_results[idx] = None
             
-            # ✅ Complete fallback to sequential
-            for idx, sent in enumerate(sentences):
-                logger.info(f"🔄 Sequential TTS {idx+1}/{len(sentences)}")
-                _, result = process_sentence(idx, sent)
+            # Update results
+            for idx, result in batch_results.items():
                 results[idx] = result
+            
+            # Log batch progress
+            batch_success = sum(1 for idx in batch_indices if results[idx] is not None)
+            logger.info(f"✅ Batch complete: {batch_success}/{len(batch_indices)} successful")
+        
+        # ✅ Sequential fallback for failed sentences
+        failed_indices = [i for i, r in enumerate(results) if r is None]
+        
+        if failed_indices:
+            logger.warning(f"⚠️ {len(failed_indices)} scenes failed, retrying sequentially...")
+            
+            for idx in failed_indices:
+                logger.info(f"🔄 Sequential retry {idx+1}/{total_sentences}")
+                _, result = process_sentence_safe(idx, sentences[idx])
+                results[idx] = result
+                
+                if result:
+                    logger.info(f"✅ Sequential success for scene {idx}")
         
         # ✅ Final validation
         successful = sum(1 for r in results if r is not None)
-        logger.info(f"📊 TTS complete: {successful}/{len(sentences)} successful")
+        success_rate = (successful / total_sentences * 100) if total_sentences > 0 else 0
         
-        if successful < len(sentences) * 0.8:  # Less than 80% success
-            logger.error(f"❌ Too many TTS failures: {successful}/{len(sentences)}")
+        logger.info(f"📊 TTS Generation Complete: {successful}/{total_sentences} ({success_rate:.1f}%)")
+        
+        if success_rate < 80:
+            logger.error(f"❌ TTS success rate too low: {success_rate:.1f}%")
             return [None] * len(sentences)
         
         return results
