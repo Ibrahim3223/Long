@@ -146,6 +146,9 @@ class ShortsOrchestrator:
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.ffmpeg_preset = ffmpeg_preset
 
+        # ✅ Store API keys
+        self.pexels_key = pexels_key        
+
         # API clients
         self.gemini = GeminiClient(api_key=api_key)
         self.pexels = PexelsClient(api_key=pexels_key)
