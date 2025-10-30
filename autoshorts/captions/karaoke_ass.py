@@ -140,9 +140,13 @@ Style: Default,{primary_font},{fontsize},{color_code},{color_code},{style['color
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     
+    # ✅ Time offset desteği (kwargs'dan al)
+    time_offset = kwargs.get('time_offset', 0.0)
+    
     # ✅ SADE ALTYAZI - Tüm metin aynı anda, aynı renkte
     # Karaoke \k tag'leri YOK
-    end_time = _ass_time(seg_dur)
+    start_time = _ass_time(time_offset)
+    end_time = _ass_time(seg_dur + time_offset)
     
     # ✅ Metin çok uzunsa 2 satıra böl (daha okunabilir)
     words_list = text.split()
@@ -153,7 +157,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         line2 = " ".join(words_list[mid:])
         text = f"{line1}\\N{line2}"  # \\N = yeni satır (ASS formatı)
     
-    body = f"Dialogue: 0,0:00:00.00,{end_time},Default,,0,0,0,,{text}\n"
+    body = f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{text}\n"
     
     return header + body
 
