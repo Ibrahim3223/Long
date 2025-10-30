@@ -343,7 +343,7 @@ UPLOAD_TO_YT = _env_bool("UPLOAD_TO_YT", True)
 VISIBILITY = _env_str("VISIBILITY", "public")
 UPLOAD_AS_SHORTS = False
 
-ENABLE_CHAPTERS = _env_bool("ENABLE_CHAPTERS", True)
+ENABLE_CHAPTERS = _env_bool("ENABLE_CHAPTERS", False)
 MIN_CHAPTER_DURATION = _env_int("MIN_CHAPTER_DURATION", 30)
 
 # ============================================================
