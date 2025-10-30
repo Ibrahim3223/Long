@@ -441,7 +441,7 @@ class ShortsOrchestrator:
         self, sentences: Sequence[Dict]
     ) -> List[Optional[Tuple[str, List[Tuple[str, float]]]]]:
         """
-        ✅ Generate TTS for all sentences in parallel.
+        ✅ Generate TTS for all sentences in parallel with improved error handling.
         
         Returns:
             List of (audio_path, word_timings) tuples or None for failed sentences
@@ -449,7 +449,7 @@ class ShortsOrchestrator:
         results = [None] * len(sentences)
         
         def process_sentence(idx: int, sent: Dict) -> Tuple[int, Optional[Tuple[str, List[Tuple[str, float]]]]]:
-            """Process single sentence TTS."""
+            """Process single sentence TTS with retry logic."""
             text = sent.get("text", "")
             
             if not text.strip():
@@ -458,32 +458,89 @@ class ShortsOrchestrator:
             out_path = str(self.temp_dir / f"tts_{idx:03d}.wav")
             out_path = sanitize_path(out_path)
             
-            try:
-                duration, words = self.tts.synthesize(text, out_path)
-                return idx, (out_path, words)
+            # ✅ Retry logic for TTS
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    duration, words = self.tts.synthesize(text, out_path)
+                    
+                    # ✅ Verify audio file exists and has content
+                    if not os.path.exists(out_path):
+                        raise ValueError(f"Audio file not created: {out_path}")
+                    
+                    if os.path.getsize(out_path) < 1000:  # Less than 1KB
+                        raise ValueError(f"Audio file too small: {out_path}")
+                    
+                    logger.debug(f"✅ TTS success for sentence {idx}: {duration:.2f}s, {len(words)} words")
+                    return idx, (out_path, words)
+                    
+                except Exception as exc:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"⚠️ TTS attempt {attempt+1} failed for sentence {idx}: {exc}, retrying...")
+                        import time
+                        time.sleep(1)
+                    else:
+                        logger.error(f"❌ TTS failed for sentence {idx} after {max_retries} attempts: {exc}")
+                        return idx, None
+        
+        # ✅ IMPROVED: Longer timeout, sequential fallback if parallel fails
+        try:
+            futures = {}
+            for idx, sent in enumerate(sentences):
+                future = self._executor.submit(process_sentence, idx, sent)
+                futures[future] = idx
+            
+            # ✅ Collect results with longer timeout
+            completed = 0
+            for future in as_completed(futures, timeout=180):  # ✅ 3 minutes total
+                try:
+                    idx, result = future.result(timeout=60)  # ✅ 60s per sentence
+                    results[idx] = result
+                    completed += 1
+                    
+                    if completed % 10 == 0:
+                        logger.info(f"📊 TTS progress: {completed}/{len(sentences)}")
+                        
+                except Exception as exc:
+                    idx = futures[future]
+                    logger.error(f"❌ TTS future failed for sentence {idx}: {exc}")
+                    results[idx] = None
+            
+            # ✅ Check for failures
+            failed_indices = [i for i, r in enumerate(results) if r is None]
+            
+            if failed_indices:
+                logger.warning(f"⚠️ {len(failed_indices)} sentences failed parallel TTS, retrying sequentially...")
                 
-            except Exception as exc:
-                logger.error(f"TTS failed for sentence {idx}: {exc}")
-                return idx, None
+                # ✅ Retry failed ones sequentially
+                for idx in failed_indices:
+                    logger.info(f"🔄 Retrying sentence {idx} sequentially...")
+                    _, result = process_sentence(idx, sentences[idx])
+                    results[idx] = result
+                    
+                    if result:
+                        logger.info(f"✅ Sequential retry succeeded for sentence {idx}")
+                    else:
+                        logger.error(f"❌ Sequential retry failed for sentence {idx}")
         
-        # ✅ PERFORMANCE: Process sentences in parallel with timeout
-        futures = {}
-        for idx, sent in enumerate(sentences):
-            future = self._executor.submit(process_sentence, idx, sent)
-            futures[future] = idx
-        
-        # Collect results with timeout
-        for future in as_completed(futures, timeout=90):  # ✅ 90s timeout per batch
-            try:
-                idx, result = future.result(timeout=30)  # ✅ 30s timeout per sentence
+        except Exception as exc:
+            logger.error(f"❌ Parallel TTS failed completely: {exc}, falling back to sequential...")
+            
+            # ✅ Complete fallback to sequential
+            for idx, sent in enumerate(sentences):
+                logger.info(f"🔄 Sequential TTS {idx+1}/{len(sentences)}")
+                _, result = process_sentence(idx, sent)
                 results[idx] = result
-            except Exception as exc:
-                idx = futures[future]
-                logger.error(f"TTS future failed for sentence {idx}: {exc}")
-                results[idx] = None
+        
+        # ✅ Final validation
+        successful = sum(1 for r in results if r is not None)
+        logger.info(f"📊 TTS complete: {successful}/{len(sentences)} successful")
+        
+        if successful < len(sentences) * 0.8:  # Less than 80% success
+            logger.error(f"❌ Too many TTS failures: {successful}/{len(sentences)}")
+            return [None] * len(sentences)
         
         return results
-
     # ------------------------------------------------------------------
     # Main render loop
     # ------------------------------------------------------------------
