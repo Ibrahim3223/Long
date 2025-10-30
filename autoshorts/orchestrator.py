@@ -575,6 +575,22 @@ class ShortsOrchestrator:
                 skipped_scenes += 1
                 continue
 
+            # ✅ CRITICAL: Validate audio file matches expected index
+            expected_audio = str(self.temp_dir / f"tts_{idx:03d}.wav")
+            if audio_path != expected_audio:
+                logger.error(f"❌ MISMATCH: Scene {idx} expected {expected_audio}, got {audio_path}")
+                skipped_scenes += 1
+                continue
+            
+            # ✅ Validate audio file is not corrupted
+            if audio_dur < 0.5:
+                logger.error(f"❌ CORRUPT: Scene {idx} audio too short: {audio_dur:.2f}s")
+                skipped_scenes += 1
+                continue
+            
+            # ✅ Log for debugging
+            logger.debug(f"Scene {idx}: '{text[:50]}...' → {audio_dur:.2f}s")            
+
             audio_path, words = tts_result
             audio_dur = ffprobe_duration(audio_path)
             text = sent.get("text", "")
