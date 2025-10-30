@@ -97,8 +97,8 @@ def build_karaoke_ass(
     seg_dur: float,
     words: List[Tuple[str, float]],
     is_hook: bool = False,
-    style_name: Optional[str] = None,
-    **kwargs
+    style_name: str = "Style1",
+    time_offset: float = 0.0,
 ) -> str:
     """
     ✅ CapCut tarzı viral altyazı:
