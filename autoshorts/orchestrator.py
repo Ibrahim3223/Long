@@ -1181,43 +1181,50 @@ class ShortsOrchestrator:
             PADDING_END = 0
         
         try:
-            # Total duration with padding
-            total_duration = duration + PADDING_START + PADDING_END
+            # Video duration'ı hesapla
+            video_duration = ffprobe_duration(video_path)
+            audio_duration = duration + PADDING_START + PADDING_END
             
-            # FFmpeg command
-            cmd = [
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                "-i", video_path,
-                "-i", audio_with_padding,
-                "-t", f"{total_duration:.3f}",
-            ]
-            
-            # Video encoding (extend video to match audio duration)
-            if PADDING_START > 0 or PADDING_END > 0:
-                # Need to re-encode to extend video
-                cmd.extend([
+            # ✅ Video'yu loop ederek audio uzunluğuna çıkar
+            if audio_duration > video_duration:
+                loop_count = int(audio_duration / video_duration) + 1
+                
+                cmd = [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-stream_loop", str(loop_count),
+                    "-i", video_path,
+                    "-i", audio_with_padding,
+                    "-t", f"{audio_duration:.3f}",
                     "-c:v", "libx264",
                     "-preset", self.ffmpeg_preset,
                     "-crf", "23",
-                    "-vf", f"tpad=stop_mode=clone:stop_duration={PADDING_START + PADDING_END}",
-                ])
+                    "-c:a", "aac",
+                    "-b:a", "160k",
+                    "-map", "0:v:0",
+                    "-map", "1:a:0",
+                    "-shortest",
+                    "-movflags", "+faststart",
+                    str(output),
+                ]
             else:
-                # Stream copy if no padding
-                cmd.extend(["-c:v", "copy"])
-            
-            # Audio settings
-            cmd.extend([
-                "-c:a", "aac",
-                "-b:a", "160k",
-                "-map", "0:v:0",
-                "-map", "1:a:0",
-                "-movflags", "+faststart",
-                str(output),
-            ])
+                # Video zaten yeterince uzun
+                cmd = [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-i", video_path,
+                    "-i", audio_with_padding,
+                    "-t", f"{audio_duration:.3f}",
+                    "-c:v", "copy",
+                    "-c:a", "aac",
+                    "-b:a", "160k",
+                    "-map", "0:v:0",
+                    "-map", "1:a:0",
+                    "-movflags", "+faststart",
+                    str(output),
+                ]
             
             run(cmd, check=True)
             
-            logger.debug(f"✅ Scene {index} muxed (duration: {total_duration:.2f}s)")
+            logger.debug(f"✅ Scene {index} muxed (duration: {audio_duration:.2f}s)")
             
         except Exception as exc:
             logger.error("Audio mux failed: %s", exc)
