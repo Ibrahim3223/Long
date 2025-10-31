@@ -78,7 +78,7 @@ jobs:
   build-upload:
     needs: make-matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     environment: ${{ matrix.environment }}  # ✅ CRITICAL: Bu satır olmadan secrets erişilemiyor!
     
     strategy:
@@ -245,12 +245,12 @@ jobs:
 
           # ===== PERFORMANCE (Faster Rendering) =====
           FAST_MODE: "1"
-          FFMPEG_PRESET: "veryfast"
-          PARALLEL_SCENES: "1"
-          MAX_WORKERS: "4"
+          FFMPEG_PRESET: "ultrafast"
+          PARALLEL_SCENES: "2"
+          MAX_WORKERS: "6"
 
           # ===== CAPTIONS (Karaoke OFF for speed) =====
-          KARAOKE_CAPTIONS: "1"
+          KARAOKE_CAPTIONS: "0"
           CAPTION_POSITION: "bottom"
           CAPTION_STYLE: "modern"
           CAPTION_FONT_SIZE: "72"
@@ -286,10 +286,10 @@ jobs:
           PEXELS_STRICT_VERTICAL: "0"
           PEXELS_ALLOW_LANDSCAPE: "1"
           PEXELS_MIN_HEIGHT: "720"
-          PEXELS_PER_PAGE: "40"
+          PEXELS_PER_PAGE: "20"
           PEXELS_ALLOW_REUSE: "1"
           PEXELS_MAX_USES_PER_CLIP: "3"
-          PEXELS_MAX_PAGES: "5"
+          PEXELS_MAX_PAGES: "3"
           ALLOW_PIXABAY_FALLBACK: "1"
           STRICT_ENTITY_FILTER: "0"
 
