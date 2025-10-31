@@ -872,6 +872,9 @@ class ShortsOrchestrator:
             chapter_title=chapter_title,
             timeout=8
         )
+
+        # ✅ Check if rate limited
+        pexels_rate_limited = getattr(self, '_pexels_rate_limited', False)
         
         # ✅ IMPROVED: Better fallback with variety
         if not candidate:
@@ -914,12 +917,19 @@ class ShortsOrchestrator:
             import random
             random.shuffle(terms)
             
-            # Try Pexels fallback
-            for fallback_term in terms[:3]:
-                logger.info(f"🔄 Pexels fallback: {fallback_term}")
-                candidate = self._search_pexels_for_query(fallback_term)
-                if candidate:
-                    break
+            # Try Pexels fallback only if not rate limited
+            if not pexels_rate_limited:
+                for fallback_term in terms[:3]:
+                    try:
+                        logger.info(f"🔄 Pexels fallback: {fallback_term}")
+                        candidate = self._search_pexels_for_query(fallback_term)
+                        if candidate:
+                            break
+                    except Exception as e:
+                        if "RATE_LIMIT" in str(e):
+                            pexels_rate_limited = True
+                            self._pexels_rate_limited = True
+                            break
             
             # Try Pixabay fallback
             if not candidate and self.pixabay and self.pixabay.enabled:
@@ -1076,9 +1086,10 @@ class ShortsOrchestrator:
                 if candidate:
                     return candidate
             except Exception as e:
-                if "429" in str(e) or "rate limit" in str(e).lower():
+                if "429" in str(e) or "RATE_LIMIT" in str(e) or "rate limit" in str(e).lower():
                     logger.warning("⚠️ Pexels rate limited, switching to Pixabay")
                     pexels_rate_limited = True
+                    self._pexels_rate_limited = True  # ✅ Global flag set et
                     break
         
         return None
@@ -1122,10 +1133,10 @@ class ShortsOrchestrator:
             
         except Exception as exc:
             error_msg = str(exc)
-            # ✅ Detect rate limiting
+            # ✅ Re-raise 429 errors to trigger Pixabay fallback
             if "429" in error_msg or "rate limit" in error_msg.lower():
-                logger.warning(f"⚠️ Pexels rate limited for query: {query}")
-                raise  # Re-raise to trigger Pixabay fallback
+                logger.warning(f"⚠️ Pexels rate limited for '{query}'")
+                raise Exception("RATE_LIMIT_EXCEEDED")
             logger.debug(f"Pexels search error for '{query}': {exc}")
         
         return None
