@@ -3,7 +3,7 @@
 # ============================================================
 
 channels:
-  - env: wt-facts-about-countries
+  - env: wt facts about countries
     name: "WT Facts About Countries"
     topic: "Fascinating facts and trivia about countries worldwide"
     mode: "educational"
@@ -13,7 +13,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: tales-of-the-forgotten-realms
+  - env: tales of the forgotten realms
     name: "Tales of The Forgetten Realms"
     topic: "Epic fantasy stories from forgotten magical realms"
     mode: "storytelling"
@@ -23,7 +23,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: famous-quotes-explained
+  - env: famous quotes explained
     name: "Famous Quotes Explained"
     topic: "Deep analysis and context of famous historical quotes"
     mode: "educational"
@@ -33,7 +33,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: taxwise-usa
+  - env: taxwise usa
     name: "TaxWise USA"
     topic: "Practical tax tips and financial advice for Americans"
     mode: "educational"
@@ -43,7 +43,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: echo-of-the-unknown
+  - env: echo of the unknown
     name: "Echo of the Unknown"
     topic: "Mysterious phenomena and unexplained events"
     mode: "documentary"
@@ -53,7 +53,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: flashback-minute
+  - env: flashback minute
     name: "Flashback Minute"
     topic: "Quick historical moments that shaped our world"
     mode: "educational"
@@ -63,7 +63,7 @@ channels:
     lang: "en-GB"
     visibility: "public"
 
-  - env: universe-jumper
+  - env: universe jumper
     name: "Universe Jumper"
     topic: "Mind-bending sci-fi concepts and multiverse theories"
     mode: "entertainment"
@@ -73,7 +73,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: if-they-lived-today
+  - env: if they lived today
     name: "If They Lived Today"
     topic: "Historical figures reimagined in modern times"
     mode: "entertainment"
@@ -83,7 +83,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: rewind-retro-media
+  - env: rewind retro media
     name: "Rewind Retro Media"
     topic: "Nostalgic look at classic movies, TV, and pop culture"
     mode: "entertainment"
@@ -93,7 +93,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: cricket-queens
+  - env: cricket queens
     name: "Cricket Queens"
     topic: "Women's cricket highlights and player profiles"
     mode: "sports"
@@ -113,7 +113,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: cinematic-echo
+  - env: cinematic echo
     name: "Cinematic Echo"
     topic: "Film analysis and movie storytelling techniques"
     mode: "entertainment"
@@ -143,7 +143,7 @@ channels:
     lang: "en-GB"
     visibility: "public"
 
-  - env: nextgen-update
+  - env: nextgen update
     name: "NextGen Update"
     topic: "Emerging technologies and future innovations"
     mode: "educational"
@@ -173,7 +173,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: one-day-inside
+  - env: one day inside
     name: "One Day Inside"
     topic: "Immersive day-in-the-life experiences"
     mode: "vlog"
@@ -183,7 +183,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: gods-unleashed
+  - env: gods unleashed
     name: "Gods Unleashed"
     topic: "Mythology and ancient deities across cultures"
     mode: "educational"
@@ -193,7 +193,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: microworld-stories
+  - env: microworld stories
     name: "Microworld Stories"
     topic: "Fascinating tales from the microscopic realm"
     mode: "educational"
@@ -203,7 +203,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: bot-gone-wild
+  - env: bot gone wild
     name: "Bot Gone Wild"
     topic: "AI mishaps and robot fails with humor"
     mode: "entertainment"
@@ -223,7 +223,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: fixit-fast
+  - env: fixit fast
     name: "FixIt Fast"
     topic: "Quick DIY repairs and home fixes"
     mode: "educational"
@@ -233,7 +233,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: gameday-60
+  - env: gameday 60
     name: "GameDay 60"
     topic: "Sports highlights in 60 seconds"
     mode: "sports"
@@ -243,7 +243,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: planet-snapshot
+  - env: planet snapshot
     name: "Planet Snapshot"
     topic: "Stunning planetary landscapes and geology"
     mode: "documentary"
@@ -253,7 +253,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: cityframe-stories
+  - env: cityframe stories
     name: "CityFrame Stories"
     topic: "Urban tales and city life narratives"
     mode: "storytelling"
@@ -263,7 +263,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: eco-habit-hacks
+  - env: eco habit hacks
     name: "Eco Habit Hacks"
     topic: "Sustainable living tips and green habits"
     mode: "educational"
@@ -273,7 +273,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: pocket-tech-tricks
+  - env: pocket tech tricks
     name: "Pocket Tech Tricks"
     topic: "Quick tech tips and smartphone hacks"
     mode: "educational"
@@ -283,7 +283,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: spacevista-60
+  - env: spacevista 60
     name: "SpaceVista 60"
     topic: "Space imagery in 60 seconds"
     mode: "documentary"
@@ -293,7 +293,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: micronature-minute
+  - env: micronature minute
     name: "MicroNature Minute"
     topic: "Close-up nature and macro wildlife"
     mode: "documentary"
@@ -303,7 +303,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: kitchen-logic-lab
+  - env: kitchen logic lab
     name: "Kitchen Logic Lab"
     topic: "Food science and cooking chemistry"
     mode: "educational"
@@ -313,7 +313,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: weather-window-60
+  - env: weather window 60
     name: "Weather Window 60"
     topic: "Weather patterns in 60 seconds"
     mode: "educational"
@@ -323,7 +323,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: focus-rituals
+  - env: focus rituals
     name: "Focus Rituals"
     topic: "Productivity techniques and focus methods"
     mode: "educational"
@@ -333,7 +333,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: trailscape-60
+  - env: trailscape 60
     name: "TrailScape 60"
     topic: "Hiking trails and outdoor scenery"
     mode: "documentary"
@@ -343,7 +343,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: ocean-pulse
+  - env: ocean pulse
     name: "Ocean Pulse"
     topic: "Marine life and ocean ecosystems"
     mode: "documentary"
@@ -353,7 +353,7 @@ channels:
     lang: "en-GB"
     visibility: "public"
 
-  - env: timelapse-lab
+  - env: timelapse lab
     name: "Timelapse Lab"
     topic: "Mesmerizing timelapse transformations"
     mode: "visual"
@@ -363,7 +363,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: orderly-home-60
+  - env: orderly home 60
     name: "Orderly Home 60"
     topic: "Quick home organization tips"
     mode: "educational"
@@ -373,7 +373,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: roadvista-60
+  - env: roadvista 60
     name: "RoadVista 60"
     topic: "Scenic road trips and highway views"
     mode: "documentary"
@@ -383,7 +383,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: wild-pattern-atlas
+  - env: wild pattern atlas
     name: "Wild Pattern Atlas"
     topic: "Natural patterns in nature and wildlife"
     mode: "documentary"
@@ -393,7 +393,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: hidden-math-irl
+  - env: hidden math irl
     name: "Hidden Math IRL"
     topic: "Mathematical patterns in everyday life"
     mode: "educational"
@@ -403,7 +403,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: mechanism-minute
+  - env: mechanism minute
     name: "Mechanism Minute"
     topic: "How mechanical devices and machines work"
     mode: "educational"
@@ -413,7 +413,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: lightcraft-studio
+  - env: lightcraft studio
     name: "LightCraft Studio"
     topic: "Photography techniques and lighting effects"
     mode: "educational"
@@ -423,7 +423,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: bridge-tunnel-atlas
+  - env: bridge tunnel atlas
     name: "Bridge & Tunnel Atlas"
     topic: "Engineering marvels of bridges and tunnels"
     mode: "documentary"
@@ -433,7 +433,7 @@ channels:
     lang: "en-GB"
     visibility: "public"
 
-  - env: object-origins
+  - env: object origins
     name: "Object Origins"
     topic: "History and invention of everyday objects"
     mode: "educational"
@@ -443,7 +443,7 @@ channels:
     lang: "en-GB"
     visibility: "public"
 
-  - env: epic-mundane
+  - env: epic mundane
     name: "Epic Mundane"
     topic: "Making ordinary moments extraordinary"
     mode: "entertainment"
@@ -453,7 +453,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: corporate-jargon-translator
+  - env: corporate jargon translator
     name: "Corporate Jargon Translator"
     topic: "Decoding business buzzwords with humor"
     mode: "entertainment"
@@ -463,7 +463,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: pet-inner-monologue
+  - env: pet inner monologue
     name: "Pet Inner Monologue"
     topic: "Humorous pet thoughts and perspectives"
     mode: "entertainment"
@@ -473,7 +473,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: tiny-drama-dept
+  - env: tiny drama dept
     name: "Tiny Drama Dept."
     topic: "Micro dramatic stories and mini theater"
     mode: "entertainment"
@@ -483,7 +483,7 @@ channels:
     lang: "en-US"
     visibility: "public"
 
-  - env: wrong-way-first
+  - env: wrong way first
     name: "Wrong Way First"
     topic: "Learning from mistakes and trial-and-error"
     mode: "educational"
