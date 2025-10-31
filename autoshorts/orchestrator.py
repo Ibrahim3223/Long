@@ -217,6 +217,9 @@ class ShortsOrchestrator:
 
         # Track used video IDs to avoid duplicates
         self._used_video_ids: Set[str] = set()
+        
+        # ✅ Track Pexels rate limit status
+        self._pexels_rate_limited = False
 
         logger.info("ShortsOrchestrator initialized for channel: %s", channel_id)
 
@@ -1064,21 +1067,13 @@ class ShortsOrchestrator:
         
         logger.info(f"🔍 Searching with {len(queries)} queries: {queries}")
         
-        # ✅ Try Pexels first
+        # ✅ Try Pexels first with rate limit handling
         for query in queries:
+            if self._pexels_rate_limited:
+                break
+                
             query = simplify_query(query)
             if not query:
-                continue
-            
-            candidate = self._search_pexels_for_query(query)
-            if candidate:
-                return candidate
-        
-        # ✅ Try Pexels first with rate limit handling
-        pexels_rate_limited = False
-        for query in queries:
-            query = simplify_query(query)
-            if not query or pexels_rate_limited:
                 continue
             
             try:
@@ -1086,16 +1081,15 @@ class ShortsOrchestrator:
                 if candidate:
                     return candidate
             except Exception as e:
-                if "429" in str(e) or "RATE_LIMIT" in str(e) or "rate limit" in str(e).lower():
-                    logger.warning("⚠️ Pexels rate limited, switching to Pixabay")
-                    pexels_rate_limited = True
-                    self._pexels_rate_limited = True  # ✅ Global flag set et
+                if "PEXELS_RATE_LIMIT" in str(e):
+                    logger.warning("⚠️ Pexels rate limited globally, switching to Pixabay")
+                    self._pexels_rate_limited = True
                     break
         
         return None
     
     def _search_pexels_for_query(self, query: str) -> Optional[ClipCandidate]:
-        """Search Pexels for a single query with rate limit handling."""
+        """Search Pexels for a single query with rate limit detection."""
         self._pexels_rate_limiter.wait()
         
         try:
@@ -1133,10 +1127,10 @@ class ShortsOrchestrator:
             
         except Exception as exc:
             error_msg = str(exc)
-            # ✅ Re-raise 429 errors to trigger Pixabay fallback
-            if "429" in error_msg or "rate limit" in error_msg.lower():
-                logger.warning(f"⚠️ Pexels rate limited for '{query}'")
-                raise Exception("RATE_LIMIT_EXCEEDED")
+            # ✅ Detect rate limiting and raise
+            if "429" in error_msg or "rate limit" in error_msg.lower() or "too many requests" in error_msg.lower():
+                logger.warning(f"⚠️ Pexels rate limited: {query}")
+                raise Exception("PEXELS_RATE_LIMIT")
             logger.debug(f"Pexels search error for '{query}': {exc}")
         
         return None
