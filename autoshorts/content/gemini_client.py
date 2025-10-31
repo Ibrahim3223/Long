@@ -328,11 +328,10 @@ class GeminiClient:
             self.model_chain = [
                 "gemini-2.5-flash",       # Önerilen varsayılan
                 "gemini-2.0-flash-exp",   # Deneysel, farklı kota olabilir
-                "gemini-1.5-flash-8b"     # Hafif fallback
             ]
         
         self.attempts_per_model = 2
-        self.total_attempts = len(self.model_chain) * self.attempts_per_model
+        self.total_attempts = 4
         self.initial_backoff = 2.0
         self.max_backoff = 32.0
         
@@ -459,6 +458,10 @@ Return JSON with: hook, script, cta, search_queries, main_visual_focus, chapters
                     text = response.text.strip()
                     if not text:
                         raise ValueError("Empty response from Gemini")
+                    
+                    # ✅ Sanitize control characters from JSON
+                    import re
+                    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)  # Remove control chars
                     
                     logger.info(f"✅ Success with {model_name}")
                     return text
