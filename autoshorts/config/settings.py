@@ -303,6 +303,10 @@ KARAOKE_OUTLINE = _env_str("KARAOKE_OUTLINE", "#000000")
 
 CAPTION_MARGIN_V = _env_int("CAPTION_MARGIN_V", 100)
 
+# Background customization (short-video-maker'dan)
+CAPTION_BACKGROUND_COLOR = _env_str("CAPTION_BACKGROUND_COLOR", "&H80000000")  # Yarı saydam siyah
+CAPTION_BACKGROUND_ENABLED = _env_bool("CAPTION_BACKGROUND_ENABLED", True)  # Background kullan
+
 # ============================================================
 # BGM SETTINGS
 # ============================================================
