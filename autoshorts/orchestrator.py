@@ -1089,49 +1089,110 @@ class ShortsOrchestrator:
         return None
     
     def _search_pexels_for_query(self, query: str) -> Optional[ClipCandidate]:
-        """Search Pexels for a single query with rate limit detection."""
+        """Search Pexels for a single query with advanced features."""
+        if not settings.PEXELS_API_KEY:
+            return None
+        
+        # Rate limiting
         self._pexels_rate_limiter.wait()
         
-        try:
-            result = self.pexels.search_videos(query, per_page=15, page=1)
-            
-            if isinstance(result, dict):
-                videos = result.get("videos", [])
-            elif isinstance(result, list):
-                videos = result
-            else:
-                return None
-            
-            if not videos:
-                return None
-            
-            # Try to find unused video
-            for video in videos:
-                video_id = str(video.get("id", ""))
+        for attempt in range(settings.PEXELS_RETRY_ATTEMPTS):
+            try:
+                result = self.pexels.search_videos(query, per_page=80, page=1)
                 
-                if video_id in self._used_video_ids:
+                if isinstance(result, dict):
+                    videos = result.get("videos", [])
+                elif isinstance(result, list):
+                    videos = result
+                else:
+                    return None
+                
+                if not videos:
                     continue
                 
-                video_files = video.get("video_files", [])
-                for vf in video_files:
-                    if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
-                        candidate = ClipCandidate(
-                            pexels_id=video_id,
-                            path="",
-                            duration=video.get("duration", 0),
-                            url=vf.get("link", "")
-                        )
-                        self._used_video_ids.add(video_id)
-                        logger.info(f"✅ Pexels: {query} (ID: {video_id})")
-                        return candidate
+                # ✅ FİLTRELEME VE SEÇİM (short-video-maker'dan)
+                filtered_videos = []
+                
+                for video in videos:
+                    video_id = str(video.get("id", ""))
+                    
+                    # Skip used videos
+                    if video_id in self._used_video_ids:
+                        continue
+                    
+                    video_files = video.get("video_files", [])
+                    base_duration = video.get("duration", 0)
+                    
+                    if not video_files or base_duration <= 0:
+                        continue
+                    
+                    # ✅ 1. FPS NORMALIZASYONU (25 FPS'e normalize et)
+                    fps = video_files[0].get("fps", 25)
+                    if settings.PEXELS_FPS_NORMALIZE and fps < 25:
+                        # Duration ayarlama (düşük FPS daha uzun görünür)
+                        adjusted_duration = base_duration * (fps / 25)
+                    else:
+                        adjusted_duration = base_duration
+                    
+                    # ✅ 2. DURATION BUFFER (3 saniye ekstra)
+                    required_duration = settings.SCENE_MIN_DURATION
+                    if adjusted_duration < (required_duration + settings.PEXELS_DURATION_BUFFER):
+                        continue
+                    
+                    # HD quality check
+                    has_hd = False
+                    for vf in video_files:
+                        if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
+                            has_hd = True
+                            filtered_videos.append({
+                                "video": video,
+                                "video_file": vf,
+                                "adjusted_duration": adjusted_duration
+                            })
+                            break
+                    
+                    if not has_hd:
+                        continue
+                
+                # ✅ 3. RANDOM SELECTION (çeşitlilik için)
+                if filtered_videos:
+                    if settings.PEXELS_RANDOM_SELECTION:
+                        selected = random.choice(filtered_videos)
+                    else:
+                        selected = filtered_videos[0]
+                    
+                    video = selected["video"]
+                    vf = selected["video_file"]
+                    video_id = str(video.get("id", ""))
+                    
+                    candidate = ClipCandidate(
+                        pexels_id=video_id,
+                        path="",
+                        duration=video.get("duration", 0),
+                        url=vf.get("link", "")
+                    )
+                    self._used_video_ids.add(video_id)
+                    logger.info(f"✅ Pexels (attempt {attempt+1}): {query} (ID: {video_id}, FPS: {fps}, Duration: {adjusted_duration:.1f}s)")
+                    return candidate
             
-        except Exception as exc:
-            error_msg = str(exc)
-            # ✅ Detect rate limiting and raise
-            if "429" in error_msg or "rate limit" in error_msg.lower() or "too many requests" in error_msg.lower():
-                logger.warning(f"⚠️ Pexels rate limited: {query}")
-                raise Exception("PEXELS_RATE_LIMIT")
-            logger.debug(f"Pexels search error for '{query}': {exc}")
+            except Exception as exc:
+                error_msg = str(exc)
+                
+                # ✅ 4. BETTER ERROR HANDLING
+                if "429" in error_msg or "rate limit" in error_msg.lower() or "too many requests" in error_msg.lower():
+                    logger.warning(f"⚠️ Pexels rate limited: {query} (attempt {attempt+1}/{settings.PEXELS_RETRY_ATTEMPTS})")
+                    raise Exception("PEXELS_RATE_LIMIT")
+                
+                if "timeout" in error_msg.lower():
+                    logger.warning(f"⚠️ Pexels timeout: {query} (attempt {attempt+1}/{settings.PEXELS_RETRY_ATTEMPTS})")
+                    if attempt < settings.PEXELS_RETRY_ATTEMPTS - 1:
+                        import time
+                        time.sleep(1)  # 1 saniye bekle
+                        continue
+                
+                logger.debug(f"Pexels search error for '{query}' (attempt {attempt+1}): {exc}")
+                if attempt < settings.PEXELS_RETRY_ATTEMPTS - 1:
+                    continue
         
         return None
     
