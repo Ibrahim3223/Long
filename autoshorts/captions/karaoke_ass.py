@@ -50,7 +50,7 @@ CAPTION_STYLES: Dict[str, Dict[str, Any]] = {
     },
     "capcut_bebas": {
         "name": "CapCut Bebas",
-        "fontname": "Bebas Neue",  # Yüksek ve dikkat çekici
+        "fontname": "Bebas Neue",  
         "fontsize_normal": 54,
         "fontsize_hook": 60,
         "bold": -1,
@@ -59,7 +59,32 @@ CAPTION_STYLES: Dict[str, Dict[str, Any]] = {
         "color_outline": "&H00000000",
         "color_shadow": "&H80000000",
         "margin_v": 80
-    }
+    },
+    # ✅ SHORT-VIDEO-MAKER MINIMAL STYLES (daha temiz, profesyonel)
+    "minimal_clean": {
+        "name": "Minimal Clean",
+        "fontname": "Arial",  
+        "fontsize_normal": 46,  # Daha küçük, dikkat dağıtmıyor
+        "fontsize_hook": 52,
+        "bold": 0,  # Normal kalınlık
+        "outline": 3,  # İnce outline
+        "shadow": "2",  # Hafif gölge
+        "color_outline": "&H00000000",  
+        "color_shadow": "&H50000000",   # Çok hafif gölge
+        "margin_v": 100,  
+    },
+    "modern_subtle": {
+        "name": "Modern Subtle",
+        "fontname": "Roboto",  
+        "fontsize_normal": 48,
+        "fontsize_hook": 54,
+        "bold": -1,  
+        "outline": 4,  
+        "shadow": "2",
+        "color_outline": "&H00000000",
+        "color_shadow": "&H60000000",
+        "margin_v": 90,
+    },
 }
 
 # Font fallback sırası (eğer yoksa)
@@ -74,9 +99,11 @@ FONT_FALLBACK = [
 ]
 
 STYLE_WEIGHTS = {
-    "capcut_impact": 0.5,       # En popüler
-    "capcut_montserrat": 0.3,
-    "capcut_bebas": 0.2,
+    "capcut_impact": 0.30,       # Viral, kalın
+    "capcut_montserrat": 0.20,   # Modern kalın
+    "capcut_bebas": 0.15,        # Yüksek ve dikkat çekici
+    "minimal_clean": 0.20,       # ✅ Short-video-maker tarzı (temiz)
+    "modern_subtle": 0.15,       # ✅ Modern, profesyonel
 }
 
 def get_random_style() -> str:
@@ -134,7 +161,12 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{primary_font},{fontsize},{color_code},{color_code},{style['color_outline']},{style['color_shadow']},{style['bold']},0,0,0,100,100,1.5,0,1,{style['outline']},{style['shadow']},2,50,50,{style['margin_v']},1
+# ✅ Background color (short-video-maker'dan)
+from autoshorts.config import settings
+back_color = settings.CAPTION_BACKGROUND_COLOR if settings.CAPTION_BACKGROUND_ENABLED else "&H00000000"
+
+# Style satırında BackColour'u güncelle
+Style: Default,{primary_font},{fontsize},{color_code},{color_code},{style['color_outline']},{back_color},{style['bold']},0,0,0,100,100,1.5,0,1,{style['outline']},{style['shadow']},2,50,50,{style['margin_v']},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
