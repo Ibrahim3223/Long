@@ -19,6 +19,13 @@ def _env_int(key: str, default: int) -> int:
     except ValueError:
         return default
 
+def _env_list(key: str, default: List[str]) -> List[str]:
+    """Get list from environment variable (comma-separated)."""
+    val = os.getenv(key, "")
+    if not val:
+        return default
+    return [item.strip() for item in val.split(",") if item.strip()]
+
 
 def _env_float(key: str, default: float) -> float:
     try:
