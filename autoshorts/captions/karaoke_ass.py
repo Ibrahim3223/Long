@@ -151,6 +151,10 @@ def build_karaoke_ass(
     # ✅ Font fallback ile dene
     primary_font = style["fontname"]
     
+    # ✅ Background color - style'dan al (Python kodu, ASS'den önce!)
+    back_color = style.get('color_shadow', '&H80000000')
+    
+    # ✅ ASS header oluştur (artık back_color tanımlı)
     header = f"""[Script Info]
 Title: CapCut Viral Captions - NO KARAOKE
 ScriptType: v4.00+
@@ -161,17 +165,11 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-# ✅ Background color (short-video-maker'dan)
-from autoshorts.config import settings
-back_color = settings.CAPTION_BACKGROUND_COLOR if settings.CAPTION_BACKGROUND_ENABLED else "&H00000000"
-
-# Style satırında BackColour'u güncelle
 Style: Default,{primary_font},{fontsize},{color_code},{color_code},{style['color_outline']},{back_color},{style['bold']},0,0,0,100,100,1.5,0,1,{style['outline']},{style['shadow']},2,50,50,{style['margin_v']},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    
     
     # ✅ SADE ALTYAZI - Tüm metin aynı anda, aynı renkte
     # Karaoke \k tag'leri YOK
