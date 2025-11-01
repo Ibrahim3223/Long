@@ -266,6 +266,16 @@ PEXELS_MAX_PAGES = _env_int("PEXELS_MAX_PAGES", 25)
 # Prefer smaller files to speed up downloads (can set to 'hd' if desired)
 PEXELS_PREFERRED_QUALITY = _env_str("PEXELS_PREFERRED_QUALITY", "sd")
 
+# ============================================================
+# PEXELS SETTINGS - ADVANCED FEATURES (from short-video-maker)
+# ============================================================
+PEXELS_DURATION_BUFFER = _env_int("PEXELS_DURATION_BUFFER", 3)  # 3 saniye buffer
+PEXELS_FPS_NORMALIZE = _env_bool("PEXELS_FPS_NORMALIZE", True)  # FPS normalizasyonu
+PEXELS_RANDOM_SELECTION = _env_bool("PEXELS_RANDOM_SELECTION", True)  # Rastgele seçim
+PEXELS_RETRY_ATTEMPTS = _env_int("PEXELS_RETRY_ATTEMPTS", 3)  # Retry sayısı
+PEXELS_TIMEOUT_SECONDS = _env_int("PEXELS_TIMEOUT_SECONDS", 10)  # Timeout süresi
+PEXELS_JOKER_TERMS = _env_list("PEXELS_JOKER_TERMS", ["nature", "globe", "space", "ocean", "abstract", "technology"])  # Fallback terimler
+
 ALLOW_PIXABAY_FALLBACK = _env_bool("ALLOW_PIXABAY_FALLBACK", True)
 STRICT_ENTITY_FILTER = _env_bool("STRICT_ENTITY_FILTER", False)
 
