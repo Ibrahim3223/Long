@@ -773,27 +773,28 @@ class ShortsOrchestrator:
 
     def _generate_thumbnail(self, script: Dict, video_path: str) -> Optional[str]:
         """
-        Generate thumbnail from Pexels image.
-        
+        Generate thumbnail from Pexels image with VIRAL text overlay.
+
         Args:
             script: Script dictionary
             video_path: Path to video file
-            
+
         Returns:
             Path to thumbnail image or None
         """
         try:
             import requests
-            from PIL import Image, ImageDraw, ImageFont
+            from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
             from io import BytesIO
-            
+            import textwrap
+
             # Extract keywords from title
             title = script.get("title", "")
             keywords = extract_keywords(title, lang=getattr(settings, "LANG", "en"))
             search_query = simplify_query(" ".join(keywords[:3]))
-            
+
             logger.info(f"🔍 Searching Pexels for thumbnail: {search_query}")
-            
+
             # Search Pexels for images
             url = "https://api.pexels.com/v1/search"
             params = {
@@ -801,51 +802,184 @@ class ShortsOrchestrator:
                 "per_page": 5,
                 "orientation": "landscape"
             }
-            
+
             response = requests.get(
                 url,
                 headers={"Authorization": self.pexels_key},
                 params=params,
                 timeout=10
             )
-            
+
             if response.status_code != 200:
                 logger.warning(f"Pexels image search failed: {response.status_code}")
                 return None
-                
+
             data = response.json()
             photos = data.get("photos", [])
-            
+
             if not photos:
                 logger.warning("No thumbnail images found")
                 return None
-            
+
             # Get first image
             photo = photos[0]
             image_url = photo.get("src", {}).get("large2x") or photo.get("src", {}).get("large")
-            
+
             if not image_url:
                 logger.warning("No image URL found")
                 return None
-            
+
             logger.info(f"⬇️ Downloading thumbnail from: {image_url}")
-            
+
             # Download image
             img_response = requests.get(image_url, timeout=15)
             img_response.raise_for_status()
-            
+
             # Open and resize to YouTube thumbnail size (1280x720)
             img = Image.open(BytesIO(img_response.content))
             img = img.resize((1280, 720), Image.Resampling.LANCZOS)
             img = img.convert("RGB")
-            
+
+            # ✅ VIRAL ENHANCEMENT: Increase contrast & saturation for eye-catching effect
+            enhancer = ImageEnhance.Contrast(img)
+            img = enhancer.enhance(1.2)
+            enhancer = ImageEnhance.Color(img)
+            img = enhancer.enhance(1.15)
+
+            # ✅ Add semi-transparent dark overlay for text readability
+            overlay = Image.new('RGBA', img.size, (0, 0, 0, 100))
+            img_rgba = img.convert('RGBA')
+            img = Image.alpha_composite(img_rgba, overlay).convert('RGB')
+
+            # ✅ Add viral text overlay
+            draw = ImageDraw.Draw(img)
+
+            # Extract key words from title for thumbnail text (max 3-4 words)
+            title_words = title.upper().split()
+
+            # ✅ Smart text selection: Pick most impactful words
+            # Priority: numbers, "why", "how", "secret", adjectives
+            priority_words = []
+            for word in title_words:
+                if any(char.isdigit() for char in word):  # Numbers
+                    priority_words.insert(0, word)
+                elif word.lower() in ['why', 'how', 'what', 'secret', 'hidden', 'truth']:
+                    priority_words.insert(0, word)
+                elif len(word) > 4:  # Longer words are usually more meaningful
+                    priority_words.append(word)
+
+            # Take top 3-4 words, max 35 chars
+            thumbnail_text = " ".join(priority_words[:4])
+            if len(thumbnail_text) > 35:
+                thumbnail_text = " ".join(priority_words[:3])
+            if len(thumbnail_text) > 35:
+                thumbnail_text = thumbnail_text[:32] + "..."
+
+            # ✅ Try to load system fonts (fallback to default)
+            font_size = 90
+            stroke_width = 8
+
+            try:
+                # Try common bold fonts
+                for font_path in [
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                    "/System/Library/Fonts/Helvetica.ttc",
+                    "/Windows/Fonts/impact.ttf"
+                ]:
+                    try:
+                        font = ImageFont.truetype(font_path, font_size)
+                        break
+                    except:
+                        continue
+                else:
+                    # Fallback to default
+                    font = ImageFont.load_default()
+                    font_size = 40
+                    stroke_width = 3
+            except:
+                font = ImageFont.load_default()
+                font_size = 40
+                stroke_width = 3
+
+            # ✅ Wrap text if too long
+            wrapped_lines = textwrap.wrap(thumbnail_text, width=20)
+
+            # Calculate total text height
+            line_heights = []
+            for line in wrapped_lines:
+                bbox = draw.textbbox((0, 0), line, font=font)
+                line_heights.append(bbox[3] - bbox[1])
+
+            total_text_height = sum(line_heights) + (len(wrapped_lines) - 1) * 20
+
+            # ✅ Position text in center (slightly upper for better composition)
+            y_position = (720 - total_text_height) // 2 - 50
+
+            # ✅ Draw text with viral styling (white text + thick black outline)
+            for line in wrapped_lines:
+                # Get text bounding box for centering
+                bbox = draw.textbbox((0, 0), line, font=font)
+                text_width = bbox[2] - bbox[0]
+                x_position = (1280 - text_width) // 2
+
+                # Draw black outline (stroke)
+                draw.text(
+                    (x_position, y_position),
+                    line,
+                    font=font,
+                    fill='white',
+                    stroke_width=stroke_width,
+                    stroke_fill='black'
+                )
+
+                y_position += line_heights[wrapped_lines.index(line)] + 20
+
+            # ✅ Optional: Add colored accent bar behind text for extra pop
+            if len(wrapped_lines) == 1:
+                text_bbox = draw.textbbox((0, 0), wrapped_lines[0], font=font)
+                bar_width = text_bbox[2] - text_bbox[0] + 60
+                bar_height = text_bbox[3] - text_bbox[1] + 30
+                bar_x = (1280 - bar_width) // 2
+                bar_y = (720 - total_text_height) // 2 - 65
+
+                # Semi-transparent colored bar (red/yellow for attention)
+                bar_overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+                bar_draw = ImageDraw.Draw(bar_overlay)
+
+                # Use channel-specific color or default red
+                bar_color = (255, 50, 50, 180)  # Red with transparency
+
+                bar_draw.rounded_rectangle(
+                    [(bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height)],
+                    radius=15,
+                    fill=bar_color
+                )
+
+                img = img.convert('RGBA')
+                img = Image.alpha_composite(img, bar_overlay).convert('RGB')
+
+                # Redraw text on top of bar
+                draw = ImageDraw.Draw(img)
+                text_x = (1280 - (text_bbox[2] - text_bbox[0])) // 2
+                text_y = (720 - total_text_height) // 2 - 50
+
+                draw.text(
+                    (text_x, text_y),
+                    wrapped_lines[0],
+                    font=font,
+                    fill='white',
+                    stroke_width=stroke_width,
+                    stroke_fill='black'
+                )
+
             # Save thumbnail
             thumbnail_path = str(self.temp_dir / "thumbnail_final.jpg")
             img.save(thumbnail_path, "JPEG", quality=95)
-            
-            logger.info(f"✅ Thumbnail created: {thumbnail_path} (1280x720)")
+
+            logger.info(f"✅ Viral thumbnail created: {thumbnail_path} (1280x720) - Text: '{thumbnail_text}'")
             return thumbnail_path
-            
+
         except Exception as exc:
             logger.warning(f"Thumbnail generation failed: {exc}")
             logger.debug("", exc_info=True)

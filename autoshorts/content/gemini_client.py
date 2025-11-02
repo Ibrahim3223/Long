@@ -208,17 +208,33 @@ VIDEO STRUCTURE:
 
 ✅ CRITICAL SEO REQUIREMENTS:
 
-**metadata.title** (50-60 chars):
+**metadata.title** (50-60 chars) - VIRAL OPTIMIZATION:
 - MUST be SPECIFIC to the exact topic you chose
 - NOT generic channel description
 - UNIQUE for THIS video
-- Include key subject + angle
-- Examples for different modes:
-  * country_facts: "Japan's Rail System: 99.9% On-Time Record"
-  * history_story: "Cleopatra's Naval Victory at Actium"
-  * space_news: "Webb Telescope Finds Water on Exoplanet K2-18b"
-  * movie_secrets: "How Inception Created Zero-G Hallway Fight"
-  * design_history: "Paper Clip: Johan Vaaler's 1899 Revolution"
+- Use proven viral title formulas:
+
+FORMULA OPTIONS (choose one that fits your content):
+  1. NUMBER + ADJECTIVE: "7 Bizarre Facts About [topic]"
+  2. HOW/WHY: "How [entity] [shocking action] Without [expected thing]"
+  3. TIMEFRAME: "What Happens When You [action] for 30 Days"
+  4. COMPARISON: "[Thing] vs [Thing]: The Truth Will Shock You"
+  5. REVEALED/EXPOSED: "The [adjective] Truth About [topic] Revealed"
+  6. BANNED/FORBIDDEN: "Why [topic] is Banned in [number] Countries"
+  7. MISTAKE: "You've Been [doing X] Wrong Your Whole Life"
+  8. SECRET: "The Hidden Secret of [famous entity]"
+  9. BEFORE/AFTER: "What [place/thing] Looked Like 100 Years Ago"
+  10. UNEXPECTED: "[Topic] That Will Change How You See [broader topic]"
+
+Real Examples:
+  * country_facts: "7 Countries That Disappeared Overnight"
+  * country_facts: "Why Japan's Trains Are Never Late (The Secret)"
+  * history_story: "How Cleopatra Won Without Fighting"
+  * space_news: "NASA Found Water Where Nobody Expected"
+  * movie_secrets: "The $2 Trick That Saved Inception's Budget"
+  * design_history: "Why Paper Clips Haven't Changed in 124 Years"
+
+CRITICAL: Title MUST create curiosity gap + promise value + be specific
 
 **chapters** (5-7 chapters):
 - TITLE: SHORT (max 50 chars) - keyword-rich
@@ -365,16 +381,37 @@ class GeminiClient:
         target_sentences = int((target_seconds * words_per_second) / words_per_sentence)
         target_sentences = max(40, min(70, target_sentences))
         
-        # Generate hooks and CTAs
+        # ✅ VIRAL HOOKS - Enhanced for engagement
         hooks = [
-            "The story behind this is more fascinating than you'd imagine.",
-            "What if I told you this changed the world?",
-            "This has a hidden history most people never learn.",
-            "The evolution reveals surprising innovations.",
-            "Behind this lies an unexpected journey of ingenuity.",
-            "The transformation tells a remarkable story.",
-            "Few people know the revolutionary origins of this.",
-            "This development reveals fascinating insights."
+            # Shock/Surprise
+            "Nobody expected what happened next.",
+            "This fact will completely change how you see the world.",
+            "What scientists discovered will blow your mind.",
+
+            # Curiosity gap
+            "The truth behind this is stranger than fiction.",
+            "What if I told you everything you know is wrong?",
+            "This secret has been hidden for decades.",
+
+            # Numbers & specifics
+            "This changed the lives of 2 billion people.",
+            "In just 3 minutes, this will make you smarter.",
+            "99% of people don't know this exists.",
+
+            # Controversy/Mystery
+            "Experts can't explain why this works.",
+            "This is banned in 12 countries, but why?",
+            "The government doesn't want you to know this.",
+
+            # Personal/Relatable
+            "You've been doing this wrong your entire life.",
+            "This happens every day, but nobody notices.",
+            "Your parents never told you about this.",
+
+            # Urgency/Timing
+            "This will disappear by 2030.",
+            "Scientists say we have 10 years left.",
+            "This is happening right now and nobody's talking about it."
         ]
         hook = random.choice(hooks)
         
