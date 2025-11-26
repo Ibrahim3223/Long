@@ -419,7 +419,7 @@ class GeminiClient:
                 additional_context=additional_context,
             )
 
-        # ✅ Generate viral hooks and CTA
+        # ✅ Generate viral hooks and CTA (only for legacy prompts)
         if not use_enhanced_prompts:
             # Legacy system uses predefined hooks
             hooks = [
@@ -438,45 +438,50 @@ class GeminiClient:
                 "In just 3 minutes, this will make you smarter.",
                 "99% of people don't know this exists.",
 
-            # Controversy/Mystery
-            "Experts can't explain why this works.",
-            "This is banned in 12 countries, but why?",
-            "The government doesn't want you to know this.",
+                # Controversy/Mystery
+                "Experts can't explain why this works.",
+                "This is banned in 12 countries, but why?",
+                "The government doesn't want you to know this.",
 
-            # Personal/Relatable
-            "You've been doing this wrong your entire life.",
-            "This happens every day, but nobody notices.",
-            "Your parents never told you about this.",
+                # Personal/Relatable
+                "You've been doing this wrong your entire life.",
+                "This happens every day, but nobody notices.",
+                "Your parents never told you about this.",
 
-            # Urgency/Timing
-            "This will disappear by 2030.",
-            "Scientists say we have 10 years left.",
-            "This is happening right now and nobody's talking about it."
-        ]
-        hook = random.choice(hooks)
-        
-        ctas = [
-            "Thanks for watching! Subscribe to explore more fascinating stories.",
-            "If you enjoyed this, hit subscribe for more deep dives.",
-            "Want to learn more? Subscribe and join our community.",
-            "Subscribe for more in-depth explorations."
-        ]
-        cta = random.choice(ctas)
-        
-        # ✅ Build mode-specific prompt
-        if mode and sub_topic:
-            logger.info(f"📝 Generating {mode} content with sub-topic: {sub_topic}")
-            prompt = _build_mode_specific_prompt(
-                mode=mode,
-                topic=topic,
-                sub_topic=sub_topic,
-                target_sentences=target_sentences,
-                hook=hook,
-                cta=cta
-            )
+                # Urgency/Timing
+                "This will disappear by 2030.",
+                "Scientists say we have 10 years left.",
+                "This is happening right now and nobody's talking about it."
+            ]
+            hook = random.choice(hooks)
+
+            ctas = [
+                "Thanks for watching! Subscribe to explore more fascinating stories.",
+                "If you enjoyed this, hit subscribe for more deep dives.",
+                "Want to learn more? Subscribe and join our community.",
+                "Subscribe for more in-depth explorations."
+            ]
+            cta = random.choice(ctas)
         else:
-            logger.warning("⚠️ No mode/sub_topic provided, using generic prompt")
-            prompt = f"""Create a video script about: {topic}
+            # Enhanced prompts: Gemini will generate hooks and CTA in the script
+            hook = None
+            cta = None
+        
+        # ✅ Build mode-specific prompt (only for legacy system)
+        if not use_enhanced_prompts:
+            if mode and sub_topic:
+                logger.info(f"📝 Generating {mode} content with sub-topic: {sub_topic}")
+                prompt = _build_mode_specific_prompt(
+                    mode=mode,
+                    topic=topic,
+                    sub_topic=sub_topic,
+                    target_sentences=target_sentences,
+                    hook=hook,
+                    cta=cta
+                )
+            else:
+                logger.warning("⚠️ No mode/sub_topic provided, using generic prompt")
+                prompt = f"""Create a video script about: {topic}
 Target: {target_sentences} sentences
 Hook: {hook}
 CTA: {cta}
