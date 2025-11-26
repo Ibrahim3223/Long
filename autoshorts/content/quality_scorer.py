@@ -258,9 +258,9 @@ class QualityScorer:
             r"\b(recently|nowadays|currently|today'?s|right now|this year|last year|next year)\b",
             r"\b(this month|last month|next month|this week|last week)\b",
             r"\b(modern|contemporary)\b",
-            # Implied recency
+            # Implied recency (context-aware)
             r"\b(just (released|announced|discovered))\b",
-            r"\b(breaking|latest|new|upcoming)\b",
+            r"\b(breaking (news|story|update)|latest (news|update|release)|brand new|newly (released|announced|discovered)|upcoming (event|release))\b",
         ]
 
         violations_found = []
@@ -421,6 +421,7 @@ class QualityScorer:
             0.0, min(10.0, results["overall_score"] * (quality_scores["overall"] / 10.0))
         )
 
-        results["valid"] = results["overall_score"] >= 6.5 and len(results["issues"]) < 5
+        # Lower threshold from 6.5 to 5.5 (production calibration)
+        results["valid"] = results["overall_score"] >= 5.5 and len(results["issues"]) < 5
 
         return results

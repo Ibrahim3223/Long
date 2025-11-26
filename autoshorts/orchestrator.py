@@ -509,7 +509,7 @@ class ShortsOrchestrator:
 
                     # Reject low-quality scripts
                     if not validation_results["valid"]:
-                        logger.error(f"❌ Script rejected: Quality score {validation_results['overall_score']:.1f} < 6.5")
+                        logger.error(f"❌ Script rejected: Quality score {validation_results['overall_score']:.1f} < 5.5")
                         return None
 
                 except Exception as e:
