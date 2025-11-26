@@ -1413,16 +1413,47 @@ class ShortsOrchestrator:
             queries = self._build_legacy_queries(keywords, search_queries, chapter_title)
 
         logger.info(f"🔍 Queries: {queries[:3]}")
-        
-        # ✅ Try Pexels first with rate limit handling
+
+        # ✅ ENHANCED: Try multi-provider search first (Pexels + Pixabay + Free providers)
+        try:
+            from autoshorts.video.multi_provider import MultiProviderVideoSearch
+
+            multi_search = MultiProviderVideoSearch(
+                pexels_key=self.pexels_client.api_key if hasattr(self, 'pexels_client') and self.pexels_client else None,
+                pixabay_key=self.pixabay_client.api_key if hasattr(self, 'pixabay_client') and self.pixabay_client else None
+            )
+
+            for query in queries:
+                query = simplify_query(query)
+                if not query:
+                    continue
+
+                videos = multi_search.search(query, min_duration=5, max_results=10)
+
+                if videos:
+                    # Get first video (best match)
+                    video = videos[0]
+                    logger.info(f"✅ Multi-provider: found video from {video.get('provider', 'unknown')}")
+
+                    # Convert to expected format
+                    candidate = self._download_video_from_provider(video)
+                    if candidate:
+                        return candidate
+
+            logger.warning("⚠️ Multi-provider search: no videos found")
+
+        except Exception as e:
+            logger.warning(f"⚠️ Multi-provider search failed: {e}, falling back to Pexels only")
+
+        # ✅ Fallback: Try Pexels only (original method)
         for query in queries:
             if self._pexels_rate_limited:
                 break
-                
+
             query = simplify_query(query)
             if not query:
                 continue
-            
+
             try:
                 candidate = self._search_pexels_for_query(query)
                 if candidate:
@@ -1432,7 +1463,7 @@ class ShortsOrchestrator:
                     logger.warning("⚠️ Pexels rate limited globally, switching to Pixabay")
                     self._pexels_rate_limited = True
                     break
-        
+
         return None
 
     def _build_legacy_queries(
@@ -1468,6 +1499,54 @@ class ShortsOrchestrator:
                 unique_queries.append(q)
 
         return unique_queries[:5]
+
+    def _download_video_from_provider(self, video: Dict) -> Optional[ClipCandidate]:
+        """
+        Download video from any provider (Pexels, Pixabay, Mixkit, Videezy, Coverr).
+
+        Args:
+            video: Video dict from multi-provider search
+
+        Returns:
+            ClipCandidate or None
+        """
+        try:
+            provider = video.get('provider', 'unknown')
+            video_url = video.get('url', '')
+
+            if not video_url:
+                logger.warning(f"No URL for {provider} video")
+                return None
+
+            # Download video
+            import requests
+            import tempfile
+
+            response = requests.get(video_url, timeout=30, stream=True)
+            response.raise_for_status()
+
+            # Save to temp file
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp:
+                for chunk in response.iter_content(chunk_size=8192):
+                    tmp.write(chunk)
+                temp_path = tmp.name
+
+            # Create ClipCandidate
+            candidate = ClipCandidate(
+                pexels_id=f"{provider}_{hash(video_url)}",
+                path=temp_path,
+                url=video_url,
+                width=video.get('width', 1920),
+                height=video.get('height', 1080),
+                duration=float(video.get('duration', 10))
+            )
+
+            logger.info(f"✅ Downloaded video from {provider}: {candidate.duration:.1f}s")
+            return candidate
+
+        except Exception as e:
+            logger.warning(f"Failed to download from {provider}: {e}")
+            return None
 
     def _search_pexels_for_query(self, query: str) -> Optional[ClipCandidate]:
         """Search Pexels for a single query with advanced features."""
