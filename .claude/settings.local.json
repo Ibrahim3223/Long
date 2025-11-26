@@ -4,7 +4,8 @@
       "Bash(python validate_system.py:*)",
       "Bash(python:*)",
       "Bash(git add:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfix: Define channel_settings for enhanced system (YouTube upload)\n\n🔧 Bug Fix #3: YouTube upload failing with UnboundLocalError\n\nRoot Cause:\n- Enhanced system didn''t define channel_settings\n- YouTube upload code (line 277) tried to access channel_settings\n- Error: \"local variable 'channel_settings' referenced before assignment\"\n\nChanges (main.py:167-173):\n✅ Extract channel_settings from config object in enhanced system\n✅ Now both enhanced and legacy systems define channel_settings\n✅ YouTube upload works for both systems\n\nResult:\n- Video generation: ✅ Working\n- YouTube upload: ✅ Fixed (was failing)\n- Both systems: ✅ Compatible\n\n🎯 Deployment: Ready for immediate deploy\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []
