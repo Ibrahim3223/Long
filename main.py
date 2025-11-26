@@ -164,6 +164,14 @@ def main():
             print(f"📝 Topic: {config.channel.topic[:80]}...")
             print(f"📁 Temp dir: {orchestrator_adapter.get_temp_dir()}")
 
+            # ✅ Extract channel settings for YouTube upload
+            channel_settings = {
+                "CHANNEL_MODE": config.channel.mode,
+                "CHANNEL_LANG": config.channel.lang,
+                "CHANNEL_TOPIC": config.channel.topic,
+                "CHANNEL_NAME": config.channel.name,
+            }
+
             print("\n🎬 Starting video generation...\n")
 
             # Generate video (uses channel topic from config)
