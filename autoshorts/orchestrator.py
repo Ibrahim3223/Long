@@ -545,12 +545,92 @@ class ShortsOrchestrator:
             logger.debug("", exc_info=True)
             return None
 
+    def _split_continuous_audio(
+        self,
+        continuous_audio_path: str,
+        segments: List[Dict],
+        sentences: Sequence[Dict]
+    ) -> List[Optional[Tuple[str, List[Tuple[str, float]]]]]:
+        """
+        Split continuous audio file into individual sentence files.
+
+        Args:
+            continuous_audio_path: Path to continuous audio file
+            segments: List of segment dicts with start/end times
+            sentences: Original sentence dicts
+
+        Returns:
+            List of (audio_path, word_timings) tuples
+        """
+        from autoshorts.utils.ffmpeg_utils import run
+
+        results = [None] * len(segments)
+
+        for idx, segment in enumerate(segments):
+            try:
+                start_time = segment["start"]
+                duration = segment["duration"]
+
+                # Output path for this segment
+                out_path = str(self.temp_dir / f"tts_{idx:03d}.wav")
+
+                # Extract segment using FFmpeg
+                run([
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-i", continuous_audio_path,
+                    "-ss", f"{start_time:.3f}",
+                    "-t", f"{duration:.3f}",
+                    "-ar", "48000", "-ac", "1",
+                    out_path
+                ])
+
+                # Validate
+                if not os.path.exists(out_path):
+                    logger.error(f"Segment {idx}: Failed to create audio file")
+                    continue
+
+                file_size = os.path.getsize(out_path)
+                if file_size < 1000:
+                    logger.error(f"Segment {idx}: Audio file too small ({file_size} bytes)")
+                    continue
+
+                # For continuous mode, we don't have word timings per segment
+                # (they're for the entire continuous audio)
+                # This is OK - word timings are optional for most use cases
+                results[idx] = (out_path, [])
+
+                logger.debug(f"✅ Segment {idx}: {duration:.2f}s extracted")
+
+            except Exception as e:
+                logger.error(f"Failed to extract segment {idx}: {e}")
+                results[idx] = None
+
+        return results
+
     def _generate_all_tts(
         self, sentences: Sequence[Dict]
     ) -> List[Optional[Tuple[str, List[Tuple[str, float]]]]]:
         """
         ✅ Generate TTS with improved reliability and resource management.
+        ✅ NEW: Continuous speech mode for natural flow between sentences
         """
+        # ✅ Try continuous speech mode first (more natural)
+        try:
+            from autoshorts.tts.continuous_speech import ContinuousSpeechGenerator
+
+            continuous_gen = ContinuousSpeechGenerator(self.tts)
+            audio_path, word_timings, segments = continuous_gen.generate_continuous_script(sentences)
+
+            # ✅ Split continuous audio into sentence files
+            results = self._split_continuous_audio(audio_path, segments, sentences)
+
+            logger.info(f"✅ Continuous speech mode successful: {len(results)} segments")
+            return results
+
+        except Exception as e:
+            logger.warning(f"⚠️ Continuous speech failed ({e}), falling back to sentence-by-sentence")
+
+        # ✅ Fallback: Original sentence-by-sentence method
         results = [None] * len(sentences)
         
         def process_sentence_safe(idx: int, sent: Dict) -> Tuple[int, Optional[Tuple[str, List[Tuple[str, float]]]]]:
