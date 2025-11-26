@@ -70,12 +70,25 @@ if not os.path.exists(init_file):
 
 print(f"✅ autoshorts module found at {autoshorts_path}")
 
+# ============================================================
+# 🆕 NEW: Modern import with adapter pattern
+# ============================================================
+# Try to use new ConfigManager-based system first
+USE_NEW_SYSTEM = os.getenv("USE_NEW_SYSTEM", "true").lower() == "true"
+
 # Now safe to import
 try:
-    from autoshorts.orchestrator import ShortsOrchestrator
-    from autoshorts.config.channel_loader import apply_channel_settings
-    from autoshorts.config import settings
-    print("✅ Successfully imported ShortsOrchestrator")
+    if USE_NEW_SYSTEM:
+        # 🆕 NEW: Modern approach with ConfigManager
+        from autoshorts.orchestrator_adapter import create_orchestrator
+        from autoshorts.config.config_manager import ConfigManager
+        print("✅ Successfully imported OrchestratorAdapter (NEW SYSTEM)")
+    else:
+        # 🔄 OLD: Legacy approach (still supported)
+        from autoshorts.orchestrator import ShortsOrchestrator
+        from autoshorts.config.channel_loader import apply_channel_settings
+        from autoshorts.config import settings
+        print("✅ Successfully imported ShortsOrchestrator (LEGACY SYSTEM)")
 except ImportError as e:
     print(f"❌ Import error: {e}")
     print("\n[DEBUG] Directory structure:")
@@ -114,14 +127,14 @@ def _import_youtube_uploader():
 def main():
     """Main entry point"""
     print("=" * 60)
-    print("  YouTube Video Generator v2.0")
+    print("  YouTube Video Generator v2.1 (Hybrid System)")
     print("=" * 60)
-    
+
     logging.basicConfig(
         level=logging.INFO,
         format='%(message)s'
     )
-    
+
     try:
         # Get channel name
         channel_name = os.environ.get("CHANNEL_NAME") or os.environ.get("ENV")
@@ -129,44 +142,76 @@ def main():
             print("⚠️ No CHANNEL_NAME or ENV variable found, using 'default'")
             channel_name = "default"
         print(f"\n📺 Channel: {channel_name}")
-        
-        # ✅ Load channel-specific settings
-        channel_settings = apply_channel_settings(channel_name)
-        
-        # ✅ Set MODE as environment variable (CRITICAL for Gemini prompting)
-        channel_mode = channel_settings.get("CHANNEL_MODE", "general")
-        os.environ["MODE"] = channel_mode
-        print(f"🎯 Mode: {channel_mode}")
-        
-        # ✅ Set other channel-specific env vars
-        os.environ["LANG"] = channel_settings.get("CHANNEL_LANG", "en")
-        os.environ["TOPIC"] = channel_settings.get("CHANNEL_TOPIC", "Interesting content")
-        
-        print(f"🌐 Language: {os.environ['LANG']}")
-        print(f"📝 Topic: {os.environ['TOPIC'][:80]}...")
-        
-        # Create temp directory
-        temp_dir_name = channel_name.replace(" ", "_")  # ✅ Boşlukları kaldır
-        temp_dir = os.path.join(tempfile.gettempdir(), f"autoshorts_{temp_dir_name}")
-        os.makedirs(temp_dir, exist_ok=True)
-        print(f"📁 Temp dir: {temp_dir}")
-        
-        print("\n🔧 Creating orchestrator...")
-        
-        # Initialize orchestrator
-        orchestrator = ShortsOrchestrator(
-            channel_id=channel_name,
-            temp_dir=temp_dir,
-            api_key=settings.GEMINI_API_KEY,
-            pexels_key=settings.PEXELS_API_KEY,
-            pixabay_key=settings.PIXABAY_API_KEY
-        )
-        
-        print("\n🎬 Starting video generation...\n")
-        
-        # Generate video using channel topic
-        topic_prompt = channel_settings.get("CHANNEL_TOPIC", "Create an interesting video")
-        video_path, metadata = orchestrator.produce_video(topic_prompt)
+
+        # ============================================================
+        # 🆕 NEW SYSTEM: ConfigManager-based approach
+        # ============================================================
+        if USE_NEW_SYSTEM:
+            print("🆕 Using NEW SYSTEM (ConfigManager + Adapter)")
+
+            # Create orchestrator using new system
+            print("\n🔧 Creating orchestrator adapter...")
+            orchestrator_adapter = create_orchestrator(
+                channel_name=channel_name,
+                temp_dir=None  # Auto-creates
+            )
+
+            # Get config for info
+            config = orchestrator_adapter.get_config()
+
+            print(f"🎯 Mode: {config.channel.mode}")
+            print(f"🌐 Language: {config.channel.lang}")
+            print(f"📝 Topic: {config.channel.topic[:80]}...")
+            print(f"📁 Temp dir: {orchestrator_adapter.get_temp_dir()}")
+
+            print("\n🎬 Starting video generation...\n")
+
+            # Generate video (uses channel topic from config)
+            video_path, metadata = orchestrator_adapter.produce_video()
+
+        # ============================================================
+        # 🔄 LEGACY SYSTEM: Old approach (still supported)
+        # ============================================================
+        else:
+            print("🔄 Using LEGACY SYSTEM (backward compatible)")
+
+            # ✅ Load channel-specific settings
+            channel_settings = apply_channel_settings(channel_name)
+
+            # ✅ Set MODE as environment variable (CRITICAL for Gemini prompting)
+            channel_mode = channel_settings.get("CHANNEL_MODE", "general")
+            os.environ["MODE"] = channel_mode
+            print(f"🎯 Mode: {channel_mode}")
+
+            # ✅ Set other channel-specific env vars
+            os.environ["LANG"] = channel_settings.get("CHANNEL_LANG", "en")
+            os.environ["TOPIC"] = channel_settings.get("CHANNEL_TOPIC", "Interesting content")
+
+            print(f"🌐 Language: {os.environ['LANG']}")
+            print(f"📝 Topic: {os.environ['TOPIC'][:80]}...")
+
+            # Create temp directory
+            temp_dir_name = channel_name.replace(" ", "_")  # ✅ Boşlukları kaldır
+            temp_dir = os.path.join(tempfile.gettempdir(), f"autoshorts_{temp_dir_name}")
+            os.makedirs(temp_dir, exist_ok=True)
+            print(f"📁 Temp dir: {temp_dir}")
+
+            print("\n🔧 Creating orchestrator...")
+
+            # Initialize orchestrator
+            orchestrator = ShortsOrchestrator(
+                channel_id=channel_name,
+                temp_dir=temp_dir,
+                api_key=settings.GEMINI_API_KEY,
+                pexels_key=settings.PEXELS_API_KEY,
+                pixabay_key=settings.PIXABAY_API_KEY
+            )
+
+            print("\n🎬 Starting video generation...\n")
+
+            # Generate video using channel topic
+            topic_prompt = channel_settings.get("CHANNEL_TOPIC", "Create an interesting video")
+            video_path, metadata = orchestrator.produce_video(topic_prompt)
         
         if video_path and metadata:
             # ✅ Create output directory

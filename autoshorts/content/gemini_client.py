@@ -38,7 +38,7 @@ class ContentResponse:
     chapters: List[Dict[str, Any]]
 
 
-def _build_mode_specific_prompt(
+def _build_legacy_mode_prompt(
     mode: str,
     topic: str,
     sub_topic: str,
@@ -360,11 +360,12 @@ class GeminiClient:
         duration: int = 180,
         mode: Optional[str] = None,
         sub_topic: Optional[str] = None,
-        additional_context: Optional[str] = None
+        additional_context: Optional[str] = None,
+        script_style_config: Optional[Dict[str, Any]] = None,
     ) -> ContentResponse:
         """
-        Generate content for a topic with mode and sub_topic support
-        
+        Generate content for a topic with mode and sub_topic support.
+
         Args:
             topic: Main channel topic/description
             style: Content style
@@ -372,31 +373,70 @@ class GeminiClient:
             mode: Content mode (country_facts, history_story, etc.)
             sub_topic: Specific angle to focus on
             additional_context: Extra context for prompt
+            script_style_config: ScriptStyleConfig as dict (NEW - for enhanced prompts)
         """
-        
+
         # Calculate target sentences
         target_seconds = duration
         words_per_second = 2.5
         words_per_sentence = 10
         target_sentences = int((target_seconds * words_per_second) / words_per_sentence)
         target_sentences = max(40, min(70, target_sentences))
-        
-        # ✅ VIRAL HOOKS - Enhanced for engagement
-        hooks = [
-            # Shock/Surprise
-            "Nobody expected what happened next.",
-            "This fact will completely change how you see the world.",
-            "What scientists discovered will blow your mind.",
 
-            # Curiosity gap
-            "The truth behind this is stranger than fiction.",
-            "What if I told you everything you know is wrong?",
-            "This secret has been hidden for decades.",
+        # ✅ NEW: Use enhanced prompts if config provided
+        use_enhanced_prompts = script_style_config is not None
 
-            # Numbers & specifics
-            "This changed the lives of 2 billion people.",
-            "In just 3 minutes, this will make you smarter.",
-            "99% of people don't know this exists.",
+        if use_enhanced_prompts:
+            logger.info("🆕 Using ENHANCED PROMPTS for high-quality script generation")
+            from autoshorts.content.prompts.enhanced_prompts import (
+                build_enhanced_prompt,
+                add_mode_specific_instructions,
+            )
+
+            # Build enhanced prompt
+            prompt = build_enhanced_prompt(
+                topic=topic,
+                mode=mode or "educational",
+                sub_topic=sub_topic,
+                target_sentences=target_sentences,
+                script_style_config=script_style_config,
+            )
+
+            # Add mode-specific instructions
+            if mode:
+                prompt = add_mode_specific_instructions(prompt, mode, sub_topic)
+
+            logger.debug(f"Enhanced prompt built: {len(prompt)} chars")
+        else:
+            # ✅ FALLBACK: Use legacy prompt system
+            logger.info("🔄 Using LEGACY PROMPTS (backward compatible)")
+            prompt = self._build_legacy_prompt(
+                topic=topic,
+                mode=mode,
+                sub_topic=sub_topic,
+                target_sentences=target_sentences,
+                style=style,
+                additional_context=additional_context,
+            )
+
+        # ✅ Generate viral hooks and CTA
+        if not use_enhanced_prompts:
+            # Legacy system uses predefined hooks
+            hooks = [
+                # Shock/Surprise
+                "Nobody expected what happened next.",
+                "This fact will completely change how you see the world.",
+                "What scientists discovered will blow your mind.",
+
+                # Curiosity gap
+                "The truth behind this is stranger than fiction.",
+                "What if I told you everything you know is wrong?",
+                "This secret has been hidden for decades.",
+
+                # Numbers & specifics
+                "This changed the lives of 2 billion people.",
+                "In just 3 minutes, this will make you smarter.",
+                "99% of people don't know this exists.",
 
             # Controversy/Mystery
             "Experts can't explain why this works.",
@@ -563,3 +603,51 @@ Return JSON with: hook, script, cta, search_queries, main_visual_focus, chapters
             logger.error(f"Failed to parse Gemini response: {e}")
             logger.debug(f"Raw response: {raw_json[:500]}")
             raise ValueError(f"Invalid JSON response from Gemini: {e}")
+
+    def _build_legacy_prompt(
+        self,
+        topic: str,
+        mode: Optional[str],
+        sub_topic: Optional[str],
+        target_sentences: int,
+        style: str,
+        additional_context: Optional[str],
+    ) -> str:
+        """Build legacy prompt (backward compatible)."""
+        # Generate hooks and CTA
+        hooks = [
+            "Nobody expected what happened next.",
+            "This fact will completely change how you see the world.",
+            "The truth behind this is stranger than fiction.",
+        ]
+        hook = random.choice(hooks)
+
+        ctas = [
+            "That's the fascinating story behind this phenomenon.",
+            "And that's why this topic continues to amaze us.",
+            "The world is full of incredible stories like this.",
+        ]
+        cta = random.choice(ctas)
+
+        # Build mode-specific prompt if mode provided
+        if mode and sub_topic:
+            return _build_legacy_mode_prompt(
+                mode=mode,
+                topic=topic,
+                sub_topic=sub_topic,
+                target_sentences=target_sentences,
+                hook=hook,
+                cta=cta,
+            )
+        else:
+            # Generic prompt
+            return f"""
+You are creating engaging video content about: {topic}
+
+Generate a script with exactly {target_sentences} sentences.
+
+Hook: {hook}
+CTA: {cta}
+
+Return JSON with structure matching mode_specific prompts.
+"""

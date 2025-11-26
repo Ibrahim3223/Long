@@ -9,6 +9,7 @@ import pathlib
 import random
 import logging
 import requests
+from typing import Optional
 
 from autoshorts.config import settings
 from autoshorts.utils.ffmpeg_utils import run
@@ -40,6 +41,110 @@ DUCK_SETTINGS = {
 
 class BGMManager:
     """Manage background music with professional audio processing."""
+
+    def select_track(self) -> Optional[str]:
+        """
+        Select a BGM track from available sources.
+
+        Returns:
+            Path to BGM file or None
+        """
+        try:
+            # Try local BGM directory first
+            if hasattr(settings, 'BGM_DIR'):
+                p = pathlib.Path(settings.BGM_DIR)
+                if p.exists():
+                    files = list(p.glob("*.mp3")) + list(p.glob("*.wav"))
+                    if files:
+                        return str(random.choice(files))
+
+            # Fallback: Return first URL if available
+            if hasattr(settings, 'BGM_URLS') and settings.BGM_URLS:
+                return settings.BGM_URLS[0]
+
+            return None
+        except Exception as e:
+            logger.warning(f"BGM track selection failed: {e}")
+            return None
+
+    def mix_bgm(
+        self,
+        video_path: str,
+        bgm_track: str,
+        output_path: str,
+        duration: float,
+        adaptive: bool = True,
+    ) -> bool:
+        """
+        Mix BGM with video with optional adaptive processing.
+
+        Args:
+            video_path: Input video path
+            bgm_track: BGM audio file path or URL
+            output_path: Output video path
+            duration: Video duration
+            adaptive: Use adaptive ducking (default True)
+
+        Returns:
+            True if successful
+        """
+        try:
+            work_dir = pathlib.Path(video_path).parent
+            voice_track = work_dir / "video_voice.wav"
+            bgm_processed = work_dir / "bgm_loop.wav"
+            mixed_audio = work_dir / "audio_mixed.wav"
+
+            # Extract voice from video
+            run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", video_path,
+                "-vn", "-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le",
+                str(voice_track)
+            ])
+
+            if not voice_track.exists():
+                logger.warning("Failed to extract voice track")
+                return False
+
+            # Process and loop BGM
+            self._loop_and_process_bgm(bgm_track, duration, str(bgm_processed))
+
+            if not bgm_processed.exists():
+                logger.warning("Failed to process BGM")
+                return False
+
+            # Mix voice and BGM
+            self._pro_mix(str(voice_track), str(bgm_processed), str(mixed_audio))
+
+            if not mixed_audio.exists():
+                logger.warning("Failed to mix audio")
+                return False
+
+            # Combine mixed audio with video
+            run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", video_path,
+                "-i", str(mixed_audio),
+                "-map", "0:v:0", "-map", "1:a:0",
+                "-c:v", "copy",
+                "-c:a", "aac", "-b:a", "192k",
+                "-shortest", "-movflags", "+faststart",
+                output_path
+            ])
+
+            # Cleanup temp files
+            for temp_file in [voice_track, bgm_processed, mixed_audio]:
+                try:
+                    temp_file.unlink(missing_ok=True)
+                except:
+                    pass
+
+            return pathlib.Path(output_path).exists()
+
+        except Exception as e:
+            logger.error(f"BGM mixing failed: {e}")
+            logger.debug("", exc_info=True)
+            return False
 
     def get_bgm(self, duration: float, output_dir: str) -> str:
         if not settings.BGM_ENABLED:

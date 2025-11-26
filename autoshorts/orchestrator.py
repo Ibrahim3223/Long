@@ -32,6 +32,8 @@ from urllib3.util.retry import Retry  # ✅ EKLENDİ
 from autoshorts.config import settings
 from autoshorts.content.gemini_client import GeminiClient
 from autoshorts.video.pexels_client import PexelsClient
+from autoshorts.video.search_optimizer import VideoSearchOptimizer
+from autoshorts.video.shot_variety import ShotVarietyManager
 from autoshorts.tts.unified_handler import UnifiedTTSHandler as TTSHandler
 from autoshorts.captions.renderer import CaptionRenderer
 from autoshorts.audio.bgm_manager import BGMManager
@@ -40,6 +42,7 @@ from autoshorts.content.text_utils import extract_keywords, simplify_query
 from autoshorts.state.novelty_guard import NoveltyGuard
 from autoshorts.state.state_guard import StateGuard
 from autoshorts.content.quality_scorer import QualityScorer
+from autoshorts.metadata.generator import MetadataGenerator
 
 PEXELS_SEARCH_ENDPOINT = "https://api.pexels.com/videos/search"
 
@@ -177,6 +180,31 @@ class ShortsOrchestrator:
         except Exception as exc:
             logger.warning("Quality scorer init failed: %s", exc)
             self.quality_scorer = None
+
+        # Metadata generator
+        try:
+            self.metadata_generator = MetadataGenerator()
+            logger.info("Metadata generator initialized")
+        except Exception as exc:
+            logger.warning("Metadata generator init failed: %s", exc)
+            self.metadata_generator = None
+
+        # Video search optimizer
+        try:
+            self.search_optimizer = VideoSearchOptimizer()
+            logger.info("Video search optimizer initialized")
+        except Exception as exc:
+            logger.warning("Video search optimizer init failed: %s", exc)
+            self.search_optimizer = None
+
+        # Shot variety manager
+        try:
+            variety_strength = getattr(settings, "SHOT_VARIETY_STRENGTH", "medium")
+            self.shot_variety = ShotVarietyManager(variety_strength=variety_strength)
+            logger.info(f"Shot variety manager initialized (strength: {variety_strength})")
+        except Exception as exc:
+            logger.warning("Shot variety manager init failed: %s", exc)
+            self.shot_variety = None
 
         # Novelty guard
         self.use_novelty = use_novelty
@@ -351,11 +379,39 @@ class ShortsOrchestrator:
                         sub_topic = random.choice(pool)
                         logger.info(f"🎯 Using fallback sub-topic: {sub_topic}")
         
-            # ✅ Pass mode and sub_topic to Gemini
+            # ✅ NEW: Get script style config (if using new system)
+            script_style_config = None
+            try:
+                from autoshorts.config.config_manager import ConfigManager
+                config = ConfigManager.get_instance(channel_name=self.channel_id)
+                if hasattr(config, 'content') and hasattr(config.content, 'script_style'):
+                    # Convert to dict for Gemini
+                    script_style_config = {
+                        "hook_intensity": config.content.script_style.hook_intensity,
+                        "cold_open": config.content.script_style.cold_open,
+                        "hook_max_words": config.content.script_style.hook_max_words,
+                        "use_modular_structure": config.content.script_style.use_modular_structure,
+                        "cliffhanger_frequency": config.content.script_style.cliffhanger_frequency,
+                        "max_sentence_length": config.content.script_style.max_sentence_length,
+                        "conversational_tone": config.content.script_style.conversational_tone,
+                        "use_analogies": config.content.script_style.use_analogies,
+                        "evergreen_only": config.content.script_style.evergreen_only,
+                        "avoid_academic_tone": config.content.script_style.avoid_academic_tone,
+                        "show_dont_tell": config.content.script_style.show_dont_tell,
+                        "cta_softness": config.content.script_style.cta_softness,
+                        "cta_max_words": config.content.script_style.cta_max_words,
+                    }
+                    logger.info("✅ Using ENHANCED SCRIPT STYLE from ConfigManager")
+            except Exception as e:
+                logger.debug(f"ConfigManager not available or no script_style: {e}")
+                logger.info("🔄 Falling back to LEGACY script generation")
+
+            # ✅ Pass mode, sub_topic AND script_style_config to Gemini
             content_response = self.gemini.generate(
                 topic=topic_prompt,
                 mode=mode,
-                sub_topic=sub_topic
+                sub_topic=sub_topic,
+                script_style_config=script_style_config,
             )
         
             if not content_response:
@@ -424,18 +480,64 @@ class ShortsOrchestrator:
             logger.info("✅ Script generated: %d sentences", len(script["sentences"]))
             logger.info(f"📝 Title: {script['title']}")
             
-            # ✅ Score script quality
+            # ✅ ENHANCED: Comprehensive validation + scoring
             if self.quality_scorer and sentences:
                 try:
                     sentence_texts = [s["text"] for s in sentences if s.get("text")]
-                    quality_scores = self.quality_scorer.score(
+
+                    # Run comprehensive validation
+                    validation_results = self.quality_scorer.comprehensive_validation(
                         sentences=sentence_texts,
-                        title=script["title"]
+                        title=script["title"],
+                        script_style_config=script_style_config,
                     )
-                    script["quality_scores"] = quality_scores
-                    logger.info(f"📊 Quality scores - Overall: {quality_scores.get('overall', 0):.1f}/10")
+
+                    script["quality_scores"] = validation_results["scores"]
+                    script["validation"] = {
+                        "valid": validation_results["valid"],
+                        "overall_score": validation_results["overall_score"],
+                        "issues": validation_results["issues"],
+                    }
+
+                    logger.info(f"📊 Quality: {validation_results['overall_score']:.1f}/10")
+                    logger.info(f"✅ Valid: {validation_results['valid']}")
+
+                    if validation_results["issues"]:
+                        logger.warning(f"⚠️ Quality issues ({len(validation_results['issues'])}):")
+                        for issue in validation_results["issues"][:3]:
+                            logger.warning(f"  - {issue}")
+
+                    # Reject low-quality scripts
+                    if not validation_results["valid"]:
+                        logger.error(f"❌ Script rejected: Quality score {validation_results['overall_score']:.1f} < 6.5")
+                        return None
+
                 except Exception as e:
-                    logger.warning(f"Quality scoring failed: {e}")
+                    logger.warning(f"Quality validation failed: {e}")
+
+            # ✅ ENHANCED: Generate viral metadata (titles, description, thumbnail text)
+            if self.metadata_generator:
+                try:
+                    logger.info("🎯 Generating viral metadata...")
+                    enhanced_metadata = self.metadata_generator.generate_all_metadata(
+                        script=script,
+                        main_topic=topic_prompt
+                    )
+
+                    # Use enhanced metadata
+                    script["title"] = enhanced_metadata["title"]
+                    script["description"] = enhanced_metadata["description"]
+                    script["thumbnail_text"] = enhanced_metadata["thumbnail_text"]
+                    script["title_candidates"] = enhanced_metadata["title_candidates"]
+                    script["title_score"] = enhanced_metadata["title_score"]
+
+                    logger.info(f"🎯 Enhanced title: {enhanced_metadata['title']}")
+                    logger.info(f"📊 Title score: {enhanced_metadata['title_score']:.1f}/10")
+                    logger.info(f"🖼️ Thumbnail text: {enhanced_metadata['thumbnail_text']}")
+
+                except Exception as e:
+                    logger.warning(f"Metadata generation failed: {e}")
+                    logger.debug("", exc_info=True)
 
             return script
         except Exception as exc:
@@ -598,6 +700,11 @@ class ShortsOrchestrator:
             logger.error("Script has no sentences")
             return None
 
+        # ✅ Reset shot variety for new video
+        if self.shot_variety:
+            self.shot_variety.reset()
+            logger.debug("Shot variety manager reset for new video")
+
         logger.info("🎙️ Generating TTS for %d sentences", len(sentences))
         tts_results = self._generate_all_tts(sentences)
 
@@ -648,6 +755,7 @@ class ShortsOrchestrator:
                 sentence_type=sentence_type,
                 search_queries=search_queries,
                 chapter_title=current_chapter,
+                total_sentences=len(sentences),
             )
 
             if not scene_path:
@@ -854,26 +962,33 @@ class ShortsOrchestrator:
             # ✅ Add viral text overlay
             draw = ImageDraw.Draw(img)
 
-            # Extract key words from title for thumbnail text (max 3-4 words)
-            title_words = title.upper().split()
+            # ✅ Use pre-generated thumbnail_text if available, otherwise extract from title
+            thumbnail_text = script.get("thumbnail_text", "")
 
-            # ✅ Smart text selection: Pick most impactful words
-            # Priority: numbers, "why", "how", "secret", adjectives
-            priority_words = []
-            for word in title_words:
-                if any(char.isdigit() for char in word):  # Numbers
-                    priority_words.insert(0, word)
-                elif word.lower() in ['why', 'how', 'what', 'secret', 'hidden', 'truth']:
-                    priority_words.insert(0, word)
-                elif len(word) > 4:  # Longer words are usually more meaningful
-                    priority_words.append(word)
+            if not thumbnail_text:
+                # Fallback: Extract key words from title for thumbnail text (max 3-4 words)
+                title_words = title.upper().split()
 
-            # Take top 3-4 words, max 35 chars
-            thumbnail_text = " ".join(priority_words[:4])
-            if len(thumbnail_text) > 35:
-                thumbnail_text = " ".join(priority_words[:3])
-            if len(thumbnail_text) > 35:
-                thumbnail_text = thumbnail_text[:32] + "..."
+                # ✅ Smart text selection: Pick most impactful words
+                # Priority: numbers, "why", "how", "secret", adjectives
+                priority_words = []
+                for word in title_words:
+                    if any(char.isdigit() for char in word):  # Numbers
+                        priority_words.insert(0, word)
+                    elif word.lower() in ['why', 'how', 'what', 'secret', 'hidden', 'truth']:
+                        priority_words.insert(0, word)
+                    elif len(word) > 4:  # Longer words are usually more meaningful
+                        priority_words.append(word)
+
+                # Take top 3-4 words, max 35 chars
+                thumbnail_text = " ".join(priority_words[:4])
+                if len(thumbnail_text) > 35:
+                    thumbnail_text = " ".join(priority_words[:3])
+                if len(thumbnail_text) > 35:
+                    thumbnail_text = thumbnail_text[:32] + "..."
+            else:
+                # Ensure uppercase for viral effect
+                thumbnail_text = thumbnail_text.upper()
 
             # ✅ Try to load system fonts (fallback to default)
             font_size = 90
@@ -998,15 +1113,39 @@ class ShortsOrchestrator:
         sentence_type: str = "content",
         search_queries: Optional[List[str]] = None,
         chapter_title: Optional[str] = None,
+        total_sentences: int = 1,
     ) -> Optional[str]:
         """Prepare video clip for a scene."""
-        
-        # ✅ PERFORMANCE: Reduce video search timeout
+
+        # ✅ ENHANCED: Plan shot variety and pacing
+        enhanced_keywords = keywords
+        if self.shot_variety:
+            try:
+                shot_plan = self.shot_variety.plan_shot(
+                    sentence=text,
+                    sentence_index=index,
+                    sentence_type=sentence_type,
+                    total_sentences=total_sentences,
+                    keywords=keywords,
+                )
+                # Use shot-specific keywords
+                enhanced_keywords = shot_plan.search_keywords
+                logger.debug(
+                    f"Scene {index}: {shot_plan.shot_type.value} shot, "
+                    f"{shot_plan.pacing_style.value} pacing"
+                )
+            except Exception as e:
+                logger.debug(f"Shot planning failed: {e}")
+                enhanced_keywords = keywords
+
+        # ✅ ENHANCED: Context-aware video search
         candidate = self._find_best_video(
-            keywords=keywords,
+            sentence=text,
+            keywords=enhanced_keywords,
             duration=duration,
             search_queries=search_queries,
             chapter_title=chapter_title,
+            sentence_type=sentence_type,
             timeout=8
         )
 
@@ -1163,43 +1302,37 @@ class ShortsOrchestrator:
 
     def _find_best_video(
         self,
+        sentence: str,
         keywords: List[str],
         duration: float,
         search_queries: Optional[List[str]] = None,
         chapter_title: Optional[str] = None,
+        sentence_type: str = "content",
         timeout: int = 10
     ) -> Optional[ClipCandidate]:
-        """Find best matching video clip from Pexels/Pixabay."""
-        
-        # ✅ Build diverse query list
-        queries = []
-        
-        # 1. Use search queries (highest priority)
-        if search_queries:
-            queries.extend(search_queries[:3])  # Use top 3
-        
-        # 2. Use chapter title
-        if chapter_title and chapter_title not in queries:
-            queries.append(chapter_title)
-        
-        # 3. Use keywords
-        if keywords:
-            # Combine keywords for better results
-            queries.append(" ".join(keywords[:2]))
-            queries.extend(keywords[:3])
-        
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_queries = []
-        for q in queries:
-            normalized = simplify_query(q).lower()
-            if normalized and normalized not in seen:
-                seen.add(normalized)
-                unique_queries.append(q)
-        
-        queries = unique_queries[:3]  # Limit to 5 queries
-        
-        logger.info(f"🔍 Searching with {len(queries)} queries: {queries}")
+        """Find best matching video clip from Pexels/Pixabay with context awareness."""
+
+        # ✅ ENHANCED: Use VideoSearchOptimizer for better queries
+        if self.search_optimizer:
+            try:
+                search_query_objects = self.search_optimizer.build_search_queries(
+                    sentence=sentence,
+                    keywords=keywords,
+                    chapter_title=chapter_title,
+                    search_queries=search_queries,
+                    sentence_type=sentence_type,
+                )
+                queries = [q.text for q in search_query_objects[:5]]
+                logger.info(f"🔍 Context-aware search: {len(queries)} queries")
+            except Exception as e:
+                logger.warning(f"Search optimizer failed: {e}, using fallback")
+                # Fallback to legacy query building
+                queries = self._build_legacy_queries(keywords, search_queries, chapter_title)
+        else:
+            # Legacy query building
+            queries = self._build_legacy_queries(keywords, search_queries, chapter_title)
+
+        logger.info(f"🔍 Queries: {queries[:3]}")
         
         # ✅ Try Pexels first with rate limit handling
         for query in queries:
@@ -1221,7 +1354,41 @@ class ShortsOrchestrator:
                     break
         
         return None
-    
+
+    def _build_legacy_queries(
+        self,
+        keywords: List[str],
+        search_queries: Optional[List[str]],
+        chapter_title: Optional[str]
+    ) -> List[str]:
+        """Build search queries using legacy method (fallback)."""
+        queries = []
+
+        # 1. Use search queries (highest priority)
+        if search_queries:
+            queries.extend(search_queries[:3])
+
+        # 2. Use chapter title
+        if chapter_title and chapter_title not in queries:
+            queries.append(chapter_title)
+
+        # 3. Use keywords
+        if keywords:
+            # Combine keywords for better results
+            queries.append(" ".join(keywords[:2]))
+            queries.extend(keywords[:3])
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_queries = []
+        for q in queries:
+            normalized = simplify_query(q).lower()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                unique_queries.append(q)
+
+        return unique_queries[:5]
+
     def _search_pexels_for_query(self, query: str) -> Optional[ClipCandidate]:
         """Search Pexels for a single query with advanced features."""
         if not settings.PEXELS_API_KEY:

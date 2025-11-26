@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 Universal content quality scoring.
+✅ ENHANCED: Hook strength, evergreen check, cold open validation
 Works for all topics without topic-specific rules.
 """
 import re
-from typing import List, Dict
+from typing import List, Dict, Tuple, Optional
 
 
 class QualityScorer:
     """Score content quality, viral potential, and retention."""
-    
+
     def score(self, sentences: List[str], title: str = "") -> Dict[str, float]:
         """
         Score content across multiple dimensions.
@@ -176,5 +177,250 @@ class QualityScorer:
             "i'm going", "we're going", 'subscribe', 'like'
         ]
         penalty += sum(0.6 for m in meta if m in text_all)
-        
+
         return penalty
+
+    # ========== NEW: Enhanced Validation Methods ==========
+
+    def validate_hook(self, hook: str) -> Tuple[bool, List[str]]:
+        """
+        Validate hook strength and cold open rules.
+
+        Returns:
+            (is_valid, issues_list)
+        """
+        issues = []
+        hook_lower = hook.lower().strip()
+
+        # Cold open violations
+        cold_open_violations = [
+            "this video",
+            "today we",
+            "in this video",
+            "let me show you",
+            "welcome to",
+            "hey guys",
+            "before we start",
+        ]
+
+        for violation in cold_open_violations:
+            if violation in hook_lower:
+                issues.append(f"Cold open violation: '{violation}'")
+
+        # Hook too long
+        word_count = len(hook.split())
+        if word_count > 20:
+            issues.append(f"Hook too long: {word_count} words (max 20)")
+
+        # Hook too generic
+        generic_patterns = [
+            r"^let'?s (explore|talk about|discuss|look at)",
+            r"^(have you|did you) ever (wonder|think)",
+            r"^(today|this time)",
+        ]
+        for pattern in generic_patterns:
+            if re.search(pattern, hook_lower):
+                issues.append(f"Generic hook pattern: {pattern}")
+
+        # Hook has no hook (too bland)
+        if not any(
+            marker in hook_lower
+            for marker in [
+                "?",  # Question
+                "!",  # Exclamation
+                " but ",  # Contrast
+                "never",
+                "nobody",
+                "no one",
+                "impossible",
+                "unbelievable",
+                "shocking",
+            ]
+        ):
+            # Check for numbers (also engaging)
+            if not re.search(r"\d+", hook):
+                issues.append("Hook lacks engagement markers (?, !, contrast, surprise)")
+
+        return len(issues) == 0, issues
+
+    def validate_evergreen(self, text: str) -> Tuple[bool, List[str]]:
+        """
+        Validate content is evergreen (no temporal references).
+
+        Returns:
+            (is_evergreen, temporal_refs_found)
+        """
+        temporal_violations = [
+            # Specific dates
+            r"\b20\d{2}\b",  # Years like 2024
+            r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}",
+            # Temporal words
+            r"\b(recently|nowadays|currently|today'?s|right now|this year|last year|next year)\b",
+            r"\b(this month|last month|next month|this week|last week)\b",
+            r"\b(modern|contemporary)\b",
+            # Implied recency
+            r"\b(just (released|announced|discovered))\b",
+            r"\b(breaking|latest|new|upcoming)\b",
+        ]
+
+        violations_found = []
+        text_lower = text.lower()
+
+        for pattern in temporal_violations:
+            matches = re.findall(pattern, text_lower)
+            if matches:
+                violations_found.extend(matches)
+
+        return len(violations_found) == 0, violations_found
+
+    def validate_sentence_length(
+        self, sentences: List[str], max_length: int = 20
+    ) -> Tuple[bool, List[Tuple[int, int]]]:
+        """
+        Validate all sentences are within length limit.
+
+        Returns:
+            (all_valid, [(sentence_index, word_count)])
+        """
+        violations = []
+
+        for idx, sentence in enumerate(sentences):
+            word_count = len(sentence.split())
+            if word_count > max_length:
+                violations.append((idx, word_count))
+
+        return len(violations) == 0, violations
+
+    def validate_flow(self, sentences: List[str]) -> Tuple[bool, float, List[str]]:
+        """
+        Validate sentence flow and coherence.
+
+        Returns:
+            (is_good_flow, flow_score, issues)
+        """
+        issues = []
+        flow_score = 10.0
+
+        if len(sentences) < 5:
+            return True, flow_score, []
+
+        # Check for monotonous structure (same start word 3x in a row)
+        for i in range(len(sentences) - 2):
+            first_words = [
+                s.split()[0].lower() if s.split() else "" for s in sentences[i : i + 3]
+            ]
+            if len(set(first_words)) == 1 and first_words[0]:
+                issues.append(f"Monotonous structure at sentences {i}-{i+2}: all start with '{first_words[0]}'")
+                flow_score -= 2.0
+
+        # Check for missing transitions
+        transition_words = {
+            "but",
+            "however",
+            "so",
+            "because",
+            "therefore",
+            "then",
+            "next",
+            "first",
+            "finally",
+            "meanwhile",
+            "instead",
+        }
+
+        transition_count = 0
+        for sentence in sentences:
+            if any(word in sentence.lower().split()[:3] for word in transition_words):
+                transition_count += 1
+
+        expected_transitions = len(sentences) // 4  # Expect ~25% transition sentences
+        if transition_count < expected_transitions:
+            issues.append(f"Low transition usage: {transition_count}/{expected_transitions} expected")
+            flow_score -= 1.5
+
+        # Check for variety in sentence length
+        lengths = [len(s.split()) for s in sentences]
+        if max(lengths) - min(lengths) < 5:
+            issues.append("Low sentence length variety (all similar length)")
+            flow_score -= 1.0
+
+        flow_score = max(0.0, min(10.0, flow_score))
+
+        return flow_score >= 7.0, flow_score, issues
+
+    def comprehensive_validation(
+        self, sentences: List[str], title: str = "", script_style_config: Optional[Dict] = None
+    ) -> Dict[str, any]:
+        """
+        Run comprehensive validation on script.
+
+        Args:
+            sentences: Script sentences
+            title: Video title
+            script_style_config: Script style configuration
+
+        Returns:
+            Dict with validation results
+        """
+        if not sentences:
+            return {
+                "valid": False,
+                "overall_score": 0.0,
+                "issues": ["No sentences provided"],
+                "scores": {},
+            }
+
+        # Get config values
+        config = script_style_config or {}
+        max_length = config.get("max_sentence_length", 20)
+        require_evergreen = config.get("evergreen_only", True)
+        require_cold_open = config.get("cold_open", True)
+
+        # Run validations
+        results = {
+            "valid": True,
+            "overall_score": 10.0,
+            "issues": [],
+            "scores": {},
+        }
+
+        # 1. Hook validation
+        if require_cold_open and sentences:
+            hook_valid, hook_issues = self.validate_hook(sentences[0])
+            if not hook_valid:
+                results["issues"].extend([f"Hook: {issue}" for issue in hook_issues])
+                results["overall_score"] -= 2.0
+
+        # 2. Evergreen validation
+        if require_evergreen:
+            full_text = " ".join(sentences) + " " + title
+            is_evergreen, violations = self.validate_evergreen(full_text)
+            if not is_evergreen:
+                results["issues"].append(f"Temporal references found: {violations[:3]}")
+                results["overall_score"] -= 3.0
+
+        # 3. Sentence length validation
+        length_valid, length_violations = self.validate_sentence_length(sentences, max_length)
+        if not length_valid:
+            results["issues"].append(f"{len(length_violations)} sentences exceed {max_length} words")
+            results["overall_score"] -= min(2.0, len(length_violations) * 0.3)
+
+        # 4. Flow validation
+        flow_valid, flow_score, flow_issues = self.validate_flow(sentences)
+        results["scores"]["flow"] = flow_score
+        if not flow_valid:
+            results["issues"].extend([f"Flow: {issue}" for issue in flow_issues])
+            results["overall_score"] -= (10.0 - flow_score) * 0.3
+
+        # 5. Quality scoring
+        quality_scores = self.score(sentences, title)
+        results["scores"].update(quality_scores)
+
+        # Final score
+        results["overall_score"] = max(
+            0.0, min(10.0, results["overall_score"] * (quality_scores["overall"] / 10.0))
+        )
+
+        results["valid"] = results["overall_score"] >= 6.5 and len(results["issues"]) < 5
+
+        return results

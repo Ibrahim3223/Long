@@ -106,9 +106,29 @@ STYLE_WEIGHTS = {
     "modern_subtle": 0.15,       # ✅ Modern, profesyonel
 }
 
-def get_random_style() -> str:
-    """Rastgele CapCut stili seç"""
-    return random.choices(list(STYLE_WEIGHTS.keys()), weights=list(STYLE_WEIGHTS.values()))[0]
+# ✅ NEW: Sentence type'a göre stil tercihleri
+STYLE_BY_SENTENCE_TYPE = {
+    "hook": ["capcut_impact", "capcut_bebas", "capcut_montserrat"],  # Viral, dikkat çekici
+    "content": ["minimal_clean", "modern_subtle", "capcut_montserrat"],  # Temiz, okunabilir
+    "cta": ["capcut_impact", "capcut_montserrat"],  # Vurgulu, net
+}
+
+def get_random_style(sentence_type: str = "content") -> str:
+    """
+    Sentence type'a göre optimized stil seç.
+
+    Args:
+        sentence_type: "hook", "content", or "cta"
+
+    Returns:
+        Style name
+    """
+    # Sentence type'a göre stil listesi al
+    preferred_styles = STYLE_BY_SENTENCE_TYPE.get(sentence_type, list(STYLE_WEIGHTS.keys()))
+
+    # Tercih edilen stiller arasından ağırlıklı seçim
+    weights = [STYLE_WEIGHTS.get(s, 0.1) for s in preferred_styles]
+    return random.choices(preferred_styles, weights=weights)[0]
 
 def get_random_color() -> Tuple[str, str]:
     """Rastgele viral renk seç (renk adı, ASS kodu)"""
