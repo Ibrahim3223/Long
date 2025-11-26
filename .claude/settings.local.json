@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(python validate_system.py:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git add:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []
