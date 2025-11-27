@@ -614,23 +614,12 @@ class ShortsOrchestrator:
         ✅ Generate TTS with improved reliability and resource management.
         ✅ NEW: Continuous speech mode for natural flow between sentences
         """
-        # ✅ Try continuous speech mode first (more natural)
-        try:
-            from autoshorts.tts.continuous_speech import ContinuousSpeechGenerator
+        # ⚠️ DISABLED: Continuous speech causing sync issues
+        # TODO: Re-enable after fixing timing bugs
+        # Reason: Video-audio-caption timing drift causing poor UX
 
-            continuous_gen = ContinuousSpeechGenerator(self.tts)
-            audio_path, word_timings, segments = continuous_gen.generate_continuous_script(sentences)
+        logger.info("🎙️ Using sentence-by-sentence TTS (stable timing)")
 
-            # ✅ Split continuous audio into sentence files
-            results = self._split_continuous_audio(audio_path, segments, sentences)
-
-            logger.info(f"✅ Continuous speech mode successful: {len(results)} segments")
-            return results
-
-        except Exception as e:
-            logger.warning(f"⚠️ Continuous speech failed ({e}), falling back to sentence-by-sentence")
-
-        # ✅ Fallback: Original sentence-by-sentence method
         results = [None] * len(sentences)
         
         def process_sentence_safe(idx: int, sent: Dict) -> Tuple[int, Optional[Tuple[str, List[Tuple[str, float]]]]]:

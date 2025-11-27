@@ -357,7 +357,7 @@ class GeminiClient:
         self,
         topic: str,
         style: str = "educational",
-        duration: int = 180,
+        duration: int = 600,  # ✅ CHANGED: 180 → 600 seconds (10 minutes for monetization)
         mode: Optional[str] = None,
         sub_topic: Optional[str] = None,
         additional_context: Optional[str] = None,
@@ -381,7 +381,8 @@ class GeminiClient:
         words_per_second = 2.5
         words_per_sentence = 10
         target_sentences = int((target_seconds * words_per_second) / words_per_sentence)
-        target_sentences = max(40, min(70, target_sentences))
+        # ✅ CHANGED: 40-70 → 80-150 sentences (10+ minute videos for YouTube monetization)
+        target_sentences = max(80, min(150, target_sentences))
 
         # ✅ NEW: Use enhanced prompts if config provided
         use_enhanced_prompts = script_style_config is not None
