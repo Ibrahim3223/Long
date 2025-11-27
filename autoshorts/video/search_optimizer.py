@@ -108,9 +108,95 @@ class VideoSearchQuery:
 class VideoSearchOptimizer:
     """Optimize video search with context awareness and relevance scoring."""
 
-    def __init__(self):
-        """Initialize search optimizer."""
+    def __init__(self, use_simple_queries: bool = True):
+        """
+        Initialize search optimizer.
+
+        Args:
+            use_simple_queries: If True, use simple 1-2 keyword queries (better match rates).
+                                If False, use complex contextual queries.
+        """
         self.expansion_cache: Dict[str, List[str]] = {}
+        self.use_simple_queries = use_simple_queries
+
+        if use_simple_queries:
+            logger.info("🔍 Using SIMPLE search queries (1-2 keywords for better matches)")
+        else:
+            logger.info("🔍 Using COMPLEX search queries (contextual phrases)")
+
+    def build_simple_queries(
+        self,
+        keywords: List[str],
+        sentence: str,
+    ) -> List[VideoSearchQuery]:
+        """
+        Build SIMPLE search queries (1-2 keywords).
+
+        User feedback: "her sahneyi basit bir kelime veya 2 kelime ile aratırsak
+        daha iyi sonuçlara ulaşacağımızdan eminim"
+
+        Args:
+            keywords: Extracted keywords from sentence
+            sentence: Original sentence (for context)
+
+        Returns:
+            List of simple VideoSearchQuery objects (max 5 queries, 1-2 words each)
+        """
+        queries: List[VideoSearchQuery] = []
+        seen_queries: Set[str] = set()
+
+        # Extract only NOUNS (most important words) from keywords
+        nouns = []
+        for kw in keywords[:5]:  # Top 5 keywords max
+            # Filter out common verbs/adjectives (keep nouns)
+            kw_lower = kw.lower()
+            if kw_lower not in {"is", "are", "was", "were", "become", "has", "have", "been", "being"}:
+                if len(kw) >= 3:  # Min 3 chars
+                    nouns.append(kw)
+
+        # 1. Single most important keyword (highest priority)
+        if nouns:
+            main_keyword = nouns[0]
+            normalized = self._normalize_query(main_keyword)
+            if normalized and normalized not in seen_queries:
+                seen_queries.add(normalized)
+                queries.append(VideoSearchQuery(
+                    text=main_keyword,
+                    priority=1,
+                    source="simple_main",
+                    relevance_keywords={main_keyword.lower()},
+                ))
+
+        # 2. Two-keyword combination (if available)
+        if len(nouns) >= 2:
+            combined = f"{nouns[0]} {nouns[1]}"
+            normalized = self._normalize_query(combined)
+            if normalized and normalized not in seen_queries:
+                seen_queries.add(normalized)
+                queries.append(VideoSearchQuery(
+                    text=combined,
+                    priority=2,
+                    source="simple_combined",
+                    relevance_keywords={nouns[0].lower(), nouns[1].lower()},
+                ))
+
+        # 3. Alternative single keywords (lower priority)
+        for noun in nouns[1:3]:  # 2nd and 3rd keywords
+            normalized = self._normalize_query(noun)
+            if normalized and normalized not in seen_queries:
+                seen_queries.add(normalized)
+                queries.append(VideoSearchQuery(
+                    text=noun,
+                    priority=3,
+                    source="simple_alternative",
+                    relevance_keywords={noun.lower()},
+                ))
+
+        # Limit to 5 queries max (simple is better)
+        queries = queries[:5]
+
+        logger.debug(f"🔍 Simple queries: {[q.text for q in queries]}")
+        return queries
 
     def build_search_queries(
         self,
@@ -133,6 +219,11 @@ class VideoSearchOptimizer:
         Returns:
             List of VideoSearchQuery objects, ordered by priority
         """
+        # ✅ USE SIMPLE QUERIES (user requested)
+        if self.use_simple_queries:
+            return self.build_simple_queries(keywords, sentence)
+
+        # ⚠️ COMPLEX QUERIES (legacy, not recommended)
         queries: List[VideoSearchQuery] = []
         seen_queries: Set[str] = set()
 
