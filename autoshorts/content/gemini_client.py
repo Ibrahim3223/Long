@@ -381,8 +381,9 @@ class GeminiClient:
         words_per_second = 2.5
         words_per_sentence = 10
         target_sentences = int((target_seconds * words_per_second) / words_per_sentence)
-        # ✅ CHANGED: 40-70 → 80-150 sentences (10+ minute videos for YouTube monetization)
-        target_sentences = max(80, min(150, target_sentences))
+        # ✅ OPTIMIZED: 60-80 sentences (10-12 min videos, performance balanced)
+        # 80-150 was TOO SLOW (30+ min generation time)
+        target_sentences = max(60, min(80, target_sentences))
 
         # ✅ NEW: Use enhanced prompts if config provided
         use_enhanced_prompts = script_style_config is not None
