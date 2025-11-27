@@ -191,10 +191,13 @@ TODAY'S FOCUS: {sub_topic}
 {mode_specific}
 
 STRUCTURE REQUIREMENTS:
-- EXACTLY {target_sentences} sentences (40-70 range)
-- Each sentence: 8-12 words (clear, concise, engaging)
+- EXACTLY {target_sentences} sentences (90-120 range for optimal performance)
+- Each sentence: 12-15 words (detailed, engaging, optimal pacing)
+- IMPORTANT: Write full, complete sentences with context
 - Educational but conversational tone
 - Divided into 5-7 logical chapters
+
+PERFORMANCE NOTE: Longer sentences (12-15 words) allow for richer storytelling while reducing total scene count for faster processing.
 
 VIDEO STRUCTURE:
 1. HOOK (1-2 sentences): {hook}
@@ -379,14 +382,20 @@ class GeminiClient:
         # Calculate target sentences
         target_seconds = duration
         words_per_second = 2.5
-        # ⚠️ ADJUSTED: Gemini generates shorter sentences (~7 words instead of 10)
-        # So we need more sentences to hit target duration
-        words_per_sentence = 7  # Realistic average from testing
+
+        # ✅ PERFORMANCE OPTIMIZATION: Fewer scenes for faster processing
+        # Problem: 170 scenes × (video download + processing) = 1.5+ hours (timeout!)
+        # Solution: 100 scenes × longer sentences = same duration, faster processing
+        words_per_sentence = 12  # Ask Gemini for 12-15 word sentences (was 7)
         target_sentences = int((target_seconds * words_per_second) / words_per_sentence)
-        # ✅ UPDATED: 140-180 sentences for 10+ minute videos
-        # Based on actual testing: 130 sentences = 7 min, need ~180 for 10 min
-        # Target: 10-15 minutes (600-900 seconds)
-        target_sentences = max(140, min(180, target_sentences))
+
+        # ✅ OPTIMIZED: 90-120 sentences for 10+ minute videos
+        # Math: 100 sentences × 12 words × 0.4s/word = 480s = 8 min
+        #       + pauses (100 × 0.6s) = 60s
+        #       + intro/outro = 30s
+        #       Total: ~570s = 9.5 min ✓
+        # Performance: 100 scenes vs 170 scenes = 40% faster processing!
+        target_sentences = max(90, min(120, target_sentences))
 
         # ✅ NEW: Use enhanced prompts if config provided
         use_enhanced_prompts = script_style_config is not None
