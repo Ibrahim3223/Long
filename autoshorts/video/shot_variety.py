@@ -274,15 +274,21 @@ class ShotVarietyManager:
     def _build_shot_keywords(
         self, shot_type: ShotType, content_keywords: List[str]
     ) -> List[str]:
-        """Build search keywords combining shot type and content."""
+        """
+        Build search keywords combining shot type and content.
+
+        ✅ FIXED: Content keywords FIRST (for video matching)
+        Shot type keywords SECOND (optional framing context)
+        """
         keywords = []
 
-        # Add shot type keywords (2-3)
+        # ✅ Add content keywords FIRST (highest priority for search)
+        keywords.extend(content_keywords[:3])
+
+        # ✅ Add shot type keywords LAST (optional framing hints)
+        # These provide visual variety context but don't override content
         shot_keywords = SHOT_TYPE_KEYWORDS.get(shot_type, [])
         keywords.extend(shot_keywords[:2])
-
-        # Add content keywords
-        keywords.extend(content_keywords[:3])
 
         return keywords
 
