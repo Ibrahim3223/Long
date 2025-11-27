@@ -379,12 +379,14 @@ class GeminiClient:
         # Calculate target sentences
         target_seconds = duration
         words_per_second = 2.5
-        words_per_sentence = 10
+        # ⚠️ ADJUSTED: Gemini generates shorter sentences (~7 words instead of 10)
+        # So we need more sentences to hit target duration
+        words_per_sentence = 7  # Realistic average from testing
         target_sentences = int((target_seconds * words_per_second) / words_per_sentence)
-        # ✅ UPDATED: 100-130 sentences for 10+ minute videos
-        # Accounting for pauses between sentences (~0.5s each)
+        # ✅ UPDATED: 140-180 sentences for 10+ minute videos
+        # Based on actual testing: 130 sentences = 7 min, need ~180 for 10 min
         # Target: 10-15 minutes (600-900 seconds)
-        target_sentences = max(100, min(130, target_sentences))
+        target_sentences = max(140, min(180, target_sentences))
 
         # ✅ NEW: Use enhanced prompts if config provided
         use_enhanced_prompts = script_style_config is not None

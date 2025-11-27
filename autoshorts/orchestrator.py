@@ -1515,18 +1515,65 @@ class ShortsOrchestrator:
                 logger.warning(f"No URL for {provider} video")
                 return None
 
-            # Download video
+            # Download video with verification
             import requests
             import tempfile
+            import os
 
-            response = requests.get(video_url, timeout=30, stream=True)
+            # ✅ Get expected file size if available
+            head_response = None
+            try:
+                head_response = requests.head(video_url, timeout=5)
+                expected_size = int(head_response.headers.get('Content-Length', 0))
+            except:
+                expected_size = 0
+
+            # ✅ Download with longer timeout for large files
+            response = requests.get(video_url, timeout=60, stream=True)
             response.raise_for_status()
 
             # Save to temp file
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp:
+                total_downloaded = 0
                 for chunk in response.iter_content(chunk_size=8192):
-                    tmp.write(chunk)
+                    if chunk:  # filter out keep-alive chunks
+                        tmp.write(chunk)
+                        total_downloaded += len(chunk)
                 temp_path = tmp.name
+
+            # ✅ Verify download completed
+            actual_size = os.path.getsize(temp_path)
+
+            # Check if file is too small (likely corrupted)
+            if actual_size < 10000:  # Less than 10KB
+                logger.warning(f"❌ Downloaded file too small ({actual_size} bytes), likely corrupted")
+                os.remove(temp_path)
+                return None
+
+            # Check if size matches expected (if we got Content-Length)
+            if expected_size > 0 and abs(actual_size - expected_size) > 1000:
+                logger.warning(f"⚠️ Size mismatch: expected {expected_size}, got {actual_size}")
+                # Don't fail, just warn - some servers don't send accurate Content-Length
+
+            # ✅ Verify moov atom exists (basic MP4 validation)
+            try:
+                with open(temp_path, 'rb') as f:
+                    f.seek(0, 2)  # Seek to end
+                    file_size = f.tell()
+
+                    # Check last 1KB for moov atom
+                    search_size = min(100000, file_size)  # Check last 100KB
+                    f.seek(max(0, file_size - search_size))
+                    tail_data = f.read()
+
+                    if b'moov' not in tail_data:
+                        logger.warning(f"❌ moov atom not found - file likely incomplete")
+                        os.remove(temp_path)
+                        return None
+            except Exception as verify_err:
+                logger.warning(f"⚠️ MP4 verification failed: {verify_err}")
+                os.remove(temp_path)
+                return None
 
             # Create ClipCandidate (width/height not needed - ClipCandidate only has 4 fields)
             candidate = ClipCandidate(
@@ -1536,7 +1583,7 @@ class ShortsOrchestrator:
                 duration=float(video.get('duration', 10))
             )
 
-            logger.info(f"✅ Downloaded video from {provider}: {candidate.duration:.1f}s")
+            logger.info(f"✅ Downloaded video from {provider}: {candidate.duration:.1f}s ({actual_size} bytes)")
             return candidate
 
         except Exception as e:

@@ -127,15 +127,35 @@ CRITICAL RULES:
 - Output ONLY valid JSON, nothing else
 """
 
-            # Call Gemini
+            # Call Gemini with safety settings
+            import google.generativeai as genai
+
+            safety_settings = {
+                genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+            }
+
             response = self.gemini_model.generate_content(
                 prompt,
                 generation_config={
                     "temperature": 0.8,
                     "top_p": 0.95,
                     "max_output_tokens": 1000,
-                }
+                },
+                safety_settings=safety_settings
             )
+
+            # ✅ Check if response was blocked
+            if not response.candidates:
+                logger.warning("⚠️ Gemini metadata blocked (no candidates), using fallback")
+                return None
+
+            candidate = response.candidates[0]
+            if candidate.finish_reason != 1:  # 1 = STOP (normal completion)
+                logger.warning(f"⚠️ Gemini metadata blocked (finish_reason={candidate.finish_reason}), using fallback")
+                return None
 
             # Parse response
             response_text = response.text.strip()
