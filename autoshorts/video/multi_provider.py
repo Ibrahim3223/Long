@@ -43,15 +43,21 @@ class MultiProviderVideoSearch:
             except Exception as e:
                 logger.warning(f"Pixabay init failed: {e}")
 
-        # Free providers (no API key needed)
-        if FREE_PROVIDERS_AVAILABLE:
-            try:
-                self.providers.append(('mixkit', MixkitClient()))
-                self.providers.append(('videezy', VideezyClient()))
-                self.providers.append(('coverr', CoverRClient()))
-                logger.info("✅ Free providers initialized (Mixkit, Videezy, Coverr)")
-            except Exception as e:
-                logger.warning(f"Free providers init failed: {e}")
+        # ⚠️ DISABLED: Free providers are too slow and unreliable
+        # User feedback: "pexels ve pixabay harici seçenekleri kaldıralım, sadece video yapımını yavaşlatıyor"
+        # Issues:
+        # - Mixkit: 429 Too Many Requests (rate limited constantly)
+        # - Videezy: Always returns 0 results
+        # - Coverr: Always returns 0 results (404 errors)
+        # - All three: Add 10-15 min overhead with no benefit
+        # if FREE_PROVIDERS_AVAILABLE:
+        #     try:
+        #         self.providers.append(('mixkit', MixkitClient()))
+        #         self.providers.append(('videezy', VideezyClient()))
+        #         self.providers.append(('coverr', CoverRClient()))
+        #         logger.info("✅ Free providers initialized (Mixkit, Videezy, Coverr)")
+        #     except Exception as e:
+        #         logger.warning(f"Free providers init failed: {e}")
 
         logger.info(f"🎬 Multi-provider search: {len(self.providers)} providers active")
 
