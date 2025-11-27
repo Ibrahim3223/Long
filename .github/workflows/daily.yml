@@ -204,6 +204,10 @@ jobs:
           SCENE_MIN_DURATION: "8.0"
           SCENE_MAX_DURATION: "15.0"
 
+          # ===== VIDEO TRANSITIONS (Smooth Crossfade) =====
+          VIDEO_TRANSITIONS: "1"
+          TRANSITION_DURATION: "0.3"
+
           # ===== QUALITY THRESHOLDS =====
           MIN_QUALITY_SCORE: "6.5"
           MIN_VIRAL_SCORE: "6.0"

@@ -1839,67 +1839,149 @@ class ShortsOrchestrator:
         
         return str(output) if output.exists() else None
 
-    def _concat_segments(self, segments: Iterable[str], output: str) -> None:
-        """Concatenate video segments."""
+    def _concat_segments_with_crossfade(self, segments: List[str], output: str, fade_duration: float = 0.3) -> None:
+        """
+        Concatenate video segments with crossfade transitions.
+
+        User feedback: "sahneler arası geçiş efektleri yok, daha smooth ve efektli geçiler gerekiyordu"
+
+        Args:
+            segments: List of video file paths
+            output: Output file path
+            fade_duration: Crossfade duration in seconds (default: 0.3s)
+        """
+        if len(segments) < 2:
+            # No transitions needed for single segment
+            logger.info("Single segment, skipping transitions")
+            import shutil
+            shutil.copy(segments[0], output)
+            return
+
+        logger.info(f"🎬 Concatenating {len(segments)} scenes with crossfade transitions ({fade_duration}s)")
+
+        try:
+            # Build FFmpeg filter_complex for xfade transitions
+            # Example: [0:v][1:v]xfade=transition=fade:duration=0.3:offset=4.7[v01];[v01][2:v]xfade=...
+
+            # Get durations of all segments
+            durations = []
+            for seg in segments:
+                try:
+                    dur = ffprobe_duration(seg)
+                    durations.append(dur)
+                except:
+                    logger.warning(f"Failed to get duration for {seg}, using 5.0s")
+                    durations.append(5.0)
+
+            # Build input list
+            inputs = []
+            for seg in segments:
+                inputs.extend(["-i", seg])
+
+            # Build filter_complex
+            filter_parts = []
+            video_label = "0:v"
+            audio_maps = []
+
+            # Calculate offsets (cumulative duration - fade_duration for overlap)
+            offset = 0.0
+            for i in range(len(segments) - 1):
+                next_label = f"v{i:02d}" if i < len(segments) - 2 else "vout"
+
+                # Offset is when the next clip starts (accounting for fade overlap)
+                offset += durations[i] - fade_duration
+
+                # xfade syntax: [input1][input2]xfade=transition=fade:duration=X:offset=Y[output]
+                filter_parts.append(
+                    f"[{video_label}][{i+1}:v]xfade=transition=fade:duration={fade_duration}:offset={offset:.2f}[{next_label}]"
+                )
+
+                video_label = next_label
+
+            # Audio: concatenate all audio streams
+            audio_filter = "".join([f"[{i}:a]" for i in range(len(segments))]) + f"concat=n={len(segments)}:v=0:a=1[aout]"
+            filter_parts.append(audio_filter)
+
+            filter_complex = ";".join(filter_parts)
+
+            # Build ffmpeg command
+            cmd = [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
+                *inputs,
+                "-filter_complex", filter_complex,
+                "-map", "[vout]",
+                "-map", "[aout]",
+                "-c:v", "libx264",
+                "-preset", self.ffmpeg_preset,
+                "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-ar", "48000",
+                "-ac", "2",
+                "-movflags", "+faststart",
+                output
+            ]
+
+            run(cmd, check=True)
+            logger.info(f"✅ Crossfade concatenation successful ({len(segments)} scenes)")
+
+        except Exception as exc:
+            logger.warning(f"⚠️ Crossfade concat failed: {exc}, falling back to simple concat")
+            # Fallback to simple concat
+            self._concat_segments_simple(segments, output)
+
+    def _concat_segments_simple(self, segments: Iterable[str], output: str) -> None:
+        """Concatenate video segments without transitions (simple concat)."""
         import pathlib
-        
+
         concat_file = pathlib.Path(output).with_suffix(".txt")
         try:
             with open(concat_file, "w", encoding="utf-8") as handle:
                 for segment in segments:
                     handle.write(f"file '{segment}'\n")
-            
-            logger.info(f"🔗 Concatenating {len(list(segments))} scenes")
-            
-            # Try stream-copy concat (fast)
-            try:
-                run([
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
-                    "-f", "concat",
-                    "-safe", "0",
-                    "-i", str(concat_file),
-                    "-c:v", "libx264",
-                    "-preset", self.ffmpeg_preset,
-                    "-crf", "23",
-                    "-pix_fmt", "yuv420p",
-                    "-c:a", "aac",
-                    "-b:a", "192k",
-                    "-ar", "48000",
-                    "-ac", "2",
-                    "-movflags", "+faststart",
-                    output
-                ], check=True)
-                logger.info("✅ Concatenation successful (re-encoded for compatibility)")
-                
-            except Exception as e:
-                # Fallback to re-encode
-                logger.info("Stream-copy concat failed, re-encoding...")
-                run([
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-f", "concat",
-                    "-safe", "0",
-                    "-i", str(concat_file),
-                    "-c:v", "libx264",
-                    "-preset", self.ffmpeg_preset,
-                    "-crf", "23",
-                    "-c:a", "aac",
-                    "-b:a", "160k",
-                    "-movflags", "+faststart",
-                    output
-                ], check=True)
-                logger.info("✅ Concatenation successful (re-encode)")
-                
+
+            logger.info(f"🔗 Simple concatenation: {len(list(segments))} scenes")
+
+            run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(concat_file),
+                "-c:v", "libx264",
+                "-preset", self.ffmpeg_preset,
+                "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-ar", "48000",
+                "-ac", "2",
+                "-movflags", "+faststart",
+                output
+            ], check=True)
+            logger.info("✅ Simple concatenation successful")
+
         except Exception as exc:
             logger.error(f"Concatenation failed: {exc}")
             logger.debug("", exc_info=True)
             raise
-            
-        finally:
-            if concat_file.exists():
-                try:
-                    concat_file.unlink()
-                except Exception:
-                    pass
+
+    def _concat_segments(self, segments: List[str], output: str) -> None:
+        """
+        Concatenate video segments (with or without transitions).
+
+        Checks VIDEO_TRANSITIONS environment variable to decide which method to use.
+        """
+        use_transitions = os.getenv("VIDEO_TRANSITIONS", "1") == "1"
+        fade_duration = float(os.getenv("TRANSITION_DURATION", "0.3"))
+
+        if use_transitions and len(segments) > 1:
+            logger.info("🎬 Using crossfade transitions")
+            self._concat_segments_with_crossfade(segments, output, fade_duration)
+        else:
+            if not use_transitions:
+                logger.info("Video transitions disabled (VIDEO_TRANSITIONS=0)")
+            self._concat_segments_simple(segments, output)
 
     # ------------------------------------------------------------------
     # Helpers for novelty/state
