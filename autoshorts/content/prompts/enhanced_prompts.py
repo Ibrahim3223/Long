@@ -102,10 +102,18 @@ SCRIPT STRUCTURE (Modular 5-Act):
    - Emotional or intellectual payoff
 
 5. CONCLUSION ({distribution.get('conclusion', 2)} sentences)
-   - Key takeaway
-   - Soft CTA (no hard sell)
-   - Leave with wonder
+   - Key takeaway sentence (wrap up the topic)
+   - CTA sentence with subscribe/like reminder
    - Softness: {cta_softness}
+
+   CRITICAL CTA REQUIREMENTS:
+   - MUST include: subscribe reminder ("subscribe for more")
+   - SHOULD include: like/comment encouragement
+   - Keep natural tone (not pushy/salesy)
+   - Examples:
+     * "If you found this fascinating, subscribe for more incredible stories like this."
+     * "Subscribe to explore more amazing discoveries. And let me know in the comments what fascinates you most."
+     * "Want more mind-blowing facts? Hit subscribe and join our journey of discovery."
 
 """)
 
@@ -189,7 +197,7 @@ QUALITY CHECKLIST before submitting:
 ✓ Conversational tone (contractions, "you", active voice)
 ✓ Specific examples and analogies
 ✓ Mini cliffhangers every 4-6 sentences
-✓ Soft CTA (no hard sell)
+✓ CTA includes "subscribe" + engagement (like/comment)
 ✓ {target_sentences} total sentences
 
 """)
