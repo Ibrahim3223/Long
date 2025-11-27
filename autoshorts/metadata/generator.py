@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Metadata Generator - Title, Description, Thumbnail Text
+✅ Gemini AI-powered SEO optimization
 ✅ Multiple title candidates with scoring
 ✅ SEO-optimized descriptions
 ✅ Mobile-readable thumbnail text
@@ -8,6 +9,7 @@ Metadata Generator - Title, Description, Thumbnail Text
 """
 import re
 import logging
+import os
 from typing import List, Dict, Tuple, Optional
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,139 @@ TITLE_FORMULAS = {
 
 class MetadataGenerator:
     """Generate optimized YouTube metadata."""
+
+    def __init__(self, gemini_api_key: Optional[str] = None):
+        """Initialize with optional Gemini API key for AI-powered metadata."""
+        self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
+        self.use_gemini = bool(self.gemini_api_key)
+
+        if self.use_gemini:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=self.gemini_api_key)
+                self.gemini_model = genai.GenerativeModel("gemini-1.5-flash-8b")
+                logger.info("✅ Gemini AI metadata generation enabled")
+            except Exception as e:
+                logger.warning(f"⚠️ Gemini init failed: {e}, using template-based fallback")
+                self.use_gemini = False
+                self.gemini_model = None
+        else:
+            logger.info("Using template-based metadata generation")
+            self.gemini_model = None
+
+    def generate_gemini_metadata(
+        self, script: Dict, main_topic: str, lang: str = "en"
+    ) -> Optional[Dict[str, any]]:
+        """
+        Generate SEO-optimized metadata using Gemini AI.
+
+        Args:
+            script: Video script with sentences
+            main_topic: Main topic/theme
+            lang: Language code (en, tr, etc.)
+
+        Returns:
+            Dict with title, description, keywords or None if failed
+        """
+        if not self.use_gemini or not self.gemini_model:
+            return None
+
+        try:
+            # Extract script content
+            sentences = [s.get("text", "") for s in script.get("sentences", [])]
+            full_script = "\n".join(sentences[:20])  # First 20 sentences for context
+
+            # Build Gemini prompt for SEO metadata
+            prompt = f"""You are a YouTube SEO expert specializing in viral content optimization.
+
+VIDEO SCRIPT PREVIEW (first part):
+{full_script}
+
+TOPIC: {main_topic}
+LANGUAGE: {lang}
+
+Generate HIGHLY SEO-OPTIMIZED YouTube metadata for this video:
+
+1. TITLE (50-70 characters):
+   - Must be attention-grabbing and click-worthy
+   - Include power words (shocking, secret, revealed, incredible, etc.)
+   - Include numbers if relevant to content
+   - Must accurately reflect video content
+   - Must be SEO-optimized for search
+   - Examples of GOOD titles:
+     * "The Shocking Truth About [Topic] Nobody Tells You"
+     * "7 Incredible Facts That Will Change How You See [Topic]"
+     * "Why [Topic] is More Dangerous Than You Think"
+   - Examples of BAD titles:
+     * "1 Amazing Facts..." (grammatically incorrect)
+     * "Video About [Topic]" (generic, boring)
+     * "[Topic] Information" (not engaging)
+
+2. DESCRIPTION (300-500 characters):
+   - First 150 chars MUST be a compelling hook (shows in search results)
+   - Include key topics covered in the video
+   - Add 3-5 relevant questions viewers might search for
+   - Natural keyword integration for SEO
+   - Include soft CTA (subscribe, like, comment)
+   - Must be informative and engaging
+
+3. TAGS/KEYWORDS (5-10 keywords):
+   - Mix of broad and specific keywords
+   - Include long-tail keywords (3-5 word phrases)
+   - Based on actual video content
+
+Return ONLY a valid JSON object with this EXACT structure:
+{{
+  "title": "Your SEO-optimized title here",
+  "description": "Your compelling description here...",
+  "keywords": ["keyword1", "keyword2", "keyword3", "long tail keyword phrase"]
+}}
+
+CRITICAL RULES:
+- Title MUST be grammatically correct
+- Title MUST accurately describe video content
+- Description first 150 chars MUST hook viewers
+- NO placeholders, NO generic content
+- Output ONLY valid JSON, nothing else
+"""
+
+            # Call Gemini
+            response = self.gemini_model.generate_content(
+                prompt,
+                generation_config={
+                    "temperature": 0.8,
+                    "top_p": 0.95,
+                    "max_output_tokens": 1000,
+                }
+            )
+
+            # Parse response
+            response_text = response.text.strip()
+
+            # Extract JSON from response (handle markdown code blocks)
+            import json
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+
+            metadata = json.loads(response_text)
+
+            # Validate response
+            if not metadata.get("title") or not metadata.get("description"):
+                logger.warning("⚠️ Gemini metadata incomplete, using fallback")
+                return None
+
+            logger.info(f"✅ Gemini generated metadata:")
+            logger.info(f"  Title: {metadata['title']}")
+            logger.info(f"  Description: {len(metadata.get('description', ''))} chars")
+            logger.info(f"  Keywords: {len(metadata.get('keywords', []))} tags")
+
+            return metadata
+
+        except Exception as e:
+            logger.warning(f"⚠️ Gemini metadata generation failed: {e}, using fallback")
+            return None
 
     def generate_title_candidates(
         self, script: Dict, hook: str, main_topic: str
@@ -263,16 +398,52 @@ class MetadataGenerator:
         return thumbnail_text
 
     def generate_all_metadata(
-        self, script: Dict, main_topic: str
+        self, script: Dict, main_topic: str, lang: str = "en"
     ) -> Dict[str, any]:
         """
         Generate complete metadata package.
+
+        Args:
+            script: Video script
+            main_topic: Main topic
+            lang: Language code (en, tr, etc.)
 
         Returns:
             Dict with title, description, thumbnail_text, title_candidates
         """
         hook = script.get("hook", "")
         chapters = script.get("chapters", [])
+
+        # ✅ TRY GEMINI FIRST (SEO-optimized, context-aware)
+        gemini_metadata = self.generate_gemini_metadata(script, main_topic, lang)
+
+        if gemini_metadata:
+            # Use Gemini-generated metadata
+            best_title = gemini_metadata["title"]
+            description = gemini_metadata["description"]
+            keywords = gemini_metadata.get("keywords", [])
+
+            # Generate thumbnail text from Gemini title
+            thumbnail_text = self.generate_thumbnail_text(best_title, hook)
+
+            logger.info(f"📝 Generated metadata (Gemini AI):")
+            logger.info(f"  Title: {best_title}")
+            logger.info(f"  Thumbnail: {thumbnail_text}")
+            logger.info(f"  Description: {len(description)} chars")
+            logger.info(f"  Keywords: {', '.join(keywords[:5])}")
+
+            return {
+                "title": best_title,
+                "description": description,
+                "thumbnail_text": thumbnail_text,
+                "keywords": keywords,
+                "title_candidates": [{"title": best_title, "score": 9.0, "formula": "gemini_ai"}],
+                "title_score": 9.0,
+                "source": "gemini"
+            }
+
+        # ⚠️ FALLBACK: Template-based generation
+        logger.info("Using template-based metadata fallback")
 
         # Generate title candidates
         title_candidates = self.generate_title_candidates(script, hook, main_topic)
@@ -286,7 +457,7 @@ class MetadataGenerator:
         # Generate thumbnail text
         thumbnail_text = self.generate_thumbnail_text(best_title, hook)
 
-        logger.info(f"📝 Generated metadata:")
+        logger.info(f"📝 Generated metadata (template-based):")
         logger.info(f"  Title: {best_title} (score: {title_candidates[0]['score']:.1f}/10)")
         logger.info(f"  Thumbnail: {thumbnail_text}")
         logger.info(f"  Description: {len(description)} chars")
@@ -297,4 +468,5 @@ class MetadataGenerator:
             "thumbnail_text": thumbnail_text,
             "title_candidates": title_candidates,
             "title_score": title_candidates[0]["score"] if title_candidates else 0,
+            "source": "template"
         }

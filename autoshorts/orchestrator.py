@@ -518,21 +518,28 @@ class ShortsOrchestrator:
             # ✅ ENHANCED: Generate viral metadata (titles, description, thumbnail text)
             if self.metadata_generator:
                 try:
-                    logger.info("🎯 Generating viral metadata...")
+                    # Get language from settings/environment
+                    lang = os.getenv("LANG") or getattr(settings, "LANG", "en")
+
+                    logger.info(f"🎯 Generating viral metadata (lang: {lang})...")
                     enhanced_metadata = self.metadata_generator.generate_all_metadata(
                         script=script,
-                        main_topic=topic_prompt
+                        main_topic=topic_prompt,
+                        lang=lang
                     )
 
                     # Use enhanced metadata
                     script["title"] = enhanced_metadata["title"]
                     script["description"] = enhanced_metadata["description"]
                     script["thumbnail_text"] = enhanced_metadata["thumbnail_text"]
-                    script["title_candidates"] = enhanced_metadata["title_candidates"]
-                    script["title_score"] = enhanced_metadata["title_score"]
+                    script["title_candidates"] = enhanced_metadata.get("title_candidates", [])
+                    script["title_score"] = enhanced_metadata.get("title_score", 0)
+                    if "keywords" in enhanced_metadata:
+                        script["keywords"] = enhanced_metadata["keywords"]
 
-                    logger.info(f"🎯 Enhanced title: {enhanced_metadata['title']}")
-                    logger.info(f"📊 Title score: {enhanced_metadata['title_score']:.1f}/10")
+                    source = enhanced_metadata.get("source", "unknown")
+                    logger.info(f"🎯 Enhanced title ({source}): {enhanced_metadata['title']}")
+                    logger.info(f"📊 Title score: {enhanced_metadata.get('title_score', 0):.1f}/10")
                     logger.info(f"🖼️ Thumbnail text: {enhanced_metadata['thumbnail_text']}")
 
                 except Exception as e:
