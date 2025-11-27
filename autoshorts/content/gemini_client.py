@@ -191,13 +191,14 @@ TODAY'S FOCUS: {sub_topic}
 {mode_specific}
 
 STRUCTURE REQUIREMENTS:
-- EXACTLY {target_sentences} sentences (90-120 range for optimal performance)
-- Each sentence: 12-15 words (detailed, engaging, optimal pacing)
-- IMPORTANT: Write full, complete sentences with context
+- EXACTLY {target_sentences} sentences (70-90 range - CRITICAL for 1-hour timeout!)
+- Each sentence: 15-18 words (REQUIRED - longer sentences reduce scene count!)
+- CRITICAL: Write detailed, information-rich sentences with full context
+- Pack more information per sentence (not choppy short sentences!)
 - Educational but conversational tone
 - Divided into 5-7 logical chapters
 
-PERFORMANCE NOTE: Longer sentences (12-15 words) allow for richer storytelling while reducing total scene count for faster processing.
+CRITICAL PERFORMANCE NOTE: 15-18 word sentences are MANDATORY for GitHub Actions timeout prevention. Target ~80 scenes total (not 120+). Longer sentences = fewer scenes = faster processing = no timeout!
 
 VIDEO STRUCTURE:
 1. HOOK (1-2 sentences): {hook}
@@ -383,19 +384,21 @@ class GeminiClient:
         target_seconds = duration
         words_per_second = 2.5
 
-        # ✅ PERFORMANCE OPTIMIZATION: Fewer scenes for faster processing
-        # Problem: 170 scenes × (video download + processing) = 1.5+ hours (timeout!)
-        # Solution: 100 scenes × longer sentences = same duration, faster processing
-        words_per_sentence = 12  # Ask Gemini for 12-15 word sentences (was 7)
+        # ✅ AGGRESSIVE PERFORMANCE OPTIMIZATION: Minimal scenes for 1-hour timeout
+        # Problem: 120 scenes still hit 1-hour timeout (stuck at concatenation)
+        # Test result: 120 scenes = 55-65 min (too close to timeout!)
+        # Solution: 80 scenes × longer sentences = same duration, much faster!
+        words_per_sentence = 15  # Ask Gemini for 15-18 word sentences (was 12)
         target_sentences = int((target_seconds * words_per_second) / words_per_sentence)
 
-        # ✅ OPTIMIZED: 90-120 sentences for 10+ minute videos
-        # Math: 100 sentences × 12 words × 0.4s/word = 480s = 8 min
-        #       + pauses (100 × 0.6s) = 60s
+        # ✅ AGGRESSIVE: 70-90 sentences (target ~80 for 10-minute videos)
+        # Math: 80 sentences × 15 words × 0.4s/word = 480s = 8 min
+        #       + pauses (80 × 0.8s) = 64s
         #       + intro/outro = 30s
-        #       Total: ~570s = 9.5 min ✓
-        # Performance: 100 scenes vs 170 scenes = 40% faster processing!
-        target_sentences = max(90, min(120, target_sentences))
+        #       Total: ~574s = 9.6 min ✓
+        # Performance: 80 scenes vs 120 scenes = 33% faster (critical for timeout!)
+        #              80 scenes × 45s/scene = 60 min → 80 × 30s = 40 min ✓
+        target_sentences = max(70, min(90, target_sentences))
 
         # ✅ NEW: Use enhanced prompts if config provided
         use_enhanced_prompts = script_style_config is not None

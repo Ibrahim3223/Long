@@ -122,26 +122,27 @@ SCRIPT STRUCTURE (Modular 5-Act):
 SENTENCE STYLE RULES (CRITICAL):
 
 ✅ DO:
-- TARGET 12-15 words per sentence (optimal for pacing & performance!)
+- TARGET 15-18 words per sentence (CRITICAL for performance - fewer scenes!)
 - MAX {max_sentence_length} words per sentence (caption-friendly!)
-- IMPORTANT: Write full, complete sentences with context
-- Each sentence should convey a complete thought
+- IMPORTANT: Write full, complete, detailed sentences with rich context
+- Each sentence should convey a complete thought with supporting details
+- Pack more information per sentence for engaging, flowing narrative
 - Use conversational tone: "you", "it's" (contractions), active voice
 - Show, don't tell: "crystal-clear blue water" NOT "beautiful water"
 - Use specific examples: "explodes with force of billion nuclear bombs" NOT "very powerful"
 - Use analogies: "Imagine a grain of sand containing an entire library"
-- Vary sentence rhythm: mix short punchy (8-10 words) + medium descriptive (12-15 words)
+- Vary sentence rhythm: mix medium (12-15 words) + longer detailed (15-18 words)
 - Active voice: "Scientists discovered X" NOT "X was discovered"
 
 ❌ DON'T:
-- Write too-short sentences (less than 8 words) - they feel choppy
+- Write too-short sentences (less than 12 words) - we need longer, richer sentences!
 - Academic/formal tone: "one can observe" → use "you can see"
 - Abstract concepts without examples
 - Passive voice
 - Jargon without explanation
 - Monotonous rhythm (same length/structure 3x in row)
 
-PERFORMANCE NOTE: 12-15 word sentences create better pacing and allow for more detailed, engaging storytelling while keeping processing efficient.
+CRITICAL PERFORMANCE NOTE: 15-18 word sentences are ESSENTIAL for timeout prevention. Longer sentences = fewer scenes = faster processing (40 min vs 60 min!). This is NOT optional - we MUST reduce total scene count to meet 1-hour GitHub Actions limit.
 
 """)
 
