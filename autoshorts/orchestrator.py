@@ -1528,13 +1528,11 @@ class ShortsOrchestrator:
                     tmp.write(chunk)
                 temp_path = tmp.name
 
-            # Create ClipCandidate
+            # Create ClipCandidate (width/height not needed - ClipCandidate only has 4 fields)
             candidate = ClipCandidate(
                 pexels_id=f"{provider}_{hash(video_url)}",
                 path=temp_path,
                 url=video_url,
-                width=video.get('width', 1920),
-                height=video.get('height', 1080),
                 duration=float(video.get('duration', 10))
             )
 
