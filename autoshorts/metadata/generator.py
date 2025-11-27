@@ -41,7 +41,7 @@ class MetadataGenerator:
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=self.gemini_api_key)
-                self.gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+                self.gemini_model = genai.GenerativeModel("gemini-2.5-flash")
                 logger.info("✅ Gemini AI metadata generation enabled")
             except Exception as e:
                 logger.warning(f"⚠️ Gemini init failed: {e}, using template-based fallback")
