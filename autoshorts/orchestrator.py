@@ -793,8 +793,16 @@ class ShortsOrchestrator:
 
         logger.info("📊 Total audio duration: %.2fs", total_audio_duration)
 
+        # ✅ NEW: Build video pool upfront (user request: collect videos once, not per-scene)
+        # User feedback: "videonun ana konusu hakkında sahne sayısı kadar video toplarız"
+        video_pool = self._build_video_pool(script, len(sentences))
+        if not video_pool:
+            logger.error("❌ Failed to build video pool")
+            return None
+        logger.info(f"✅ Video pool ready: {len(video_pool)} videos for {len(sentences)} scenes")
+
         chapters = script.get("chapters", [])
-        
+
         logger.info("🎥 Rendering %d scenes", len(sentences))
         scene_paths = []
         skipped_scenes = 0
@@ -802,11 +810,11 @@ class ShortsOrchestrator:
         for idx, (sent, tts_result) in enumerate(zip(sentences, tts_results)):
             audio_path = None
             scene_path = None
-            captioned = None            
+            captioned = None
             if not tts_result:
                 logger.warning("Skipping scene %d (no TTS)", idx)
                 skipped_scenes += 1
-                continue          
+                continue
 
             audio_path, words = tts_result
             audio_dur = ffprobe_duration(audio_path)
@@ -824,6 +832,7 @@ class ShortsOrchestrator:
                     search_queries = chapter.get("search_queries", [])
                     break
 
+            # ✅ MODIFIED: Use video pool instead of per-scene search
             scene_path = self._prepare_scene_clip(
                 text=text,
                 keywords=extract_keywords(text, lang=getattr(settings, "LANG", "en")),
@@ -833,6 +842,7 @@ class ShortsOrchestrator:
                 search_queries=search_queries,
                 chapter_title=current_chapter,
                 total_sentences=len(sentences),
+                video_pool=video_pool,  # ✅ NEW: Pass video pool
             )
 
             if not scene_path:
@@ -1181,6 +1191,174 @@ class ShortsOrchestrator:
     # Video building
     # ------------------------------------------------------------------
 
+    def _build_video_pool(self, script: Dict, target_count: int) -> List[ClipCandidate]:
+        """
+        ✅ NEW: Build video pool upfront (user request).
+
+        User feedback: "Şöyle yapabiliriz belki, videonun ana konusu hakkında sahne
+        sayısı kadar video toplarız pexels ve pixabaydan. sonra bu videoları her
+        sahnede biri olacak şekilde kullanırız."
+
+        Strategy:
+        1. Extract 2-3 main keywords from script topic/title
+        2. Search Pexels + Pixabay ONCE with these keywords
+        3. Collect 100-150 videos into pool
+        4. Shuffle for variety
+        5. Use throughout video (one per scene)
+
+        Args:
+            script: Video script with title, sentences
+            target_count: Number of videos needed (scene count)
+
+        Returns:
+            List of ClipCandidate objects (shuffled and ready)
+        """
+        try:
+            # 1. Extract main topic keywords (2-3 words)
+            title = script.get("title", "")
+            main_visual_focus = script.get("main_visual_focus", "")
+
+            # Combine title + main_visual_focus for better keyword extraction
+            search_text = f"{title} {main_visual_focus}".strip()
+
+            keywords = extract_keywords(search_text, lang=getattr(settings, "LANG", "en"))
+
+            # Take top 2-3 keywords
+            main_keywords = keywords[:3]
+
+            if not main_keywords:
+                # Fallback: use title words
+                main_keywords = title.split()[:3]
+
+            # Simplify for search
+            search_query = simplify_query(" ".join(main_keywords))
+
+            logger.info(f"🎬 Building video pool for: '{search_query}' (target: {target_count} videos)")
+
+            # 2. Collect videos from Pexels + Pixabay
+            video_pool = []
+
+            # Calculate how many videos to fetch (150% of target for safety margin)
+            fetch_count = int(target_count * 1.5)
+            fetch_count = max(100, min(200, fetch_count))  # Clamp to 100-200
+
+            # Try Pexels first (primary source)
+            if not self._pexels_rate_limited:
+                try:
+                    logger.info(f"📥 Fetching from Pexels: {search_query} (requesting {fetch_count})")
+                    result = self.pexels.search_videos(search_query, per_page=fetch_count, page=1)
+
+                    if isinstance(result, dict):
+                        videos = result.get("videos", [])
+                    elif isinstance(result, list):
+                        videos = result
+                    else:
+                        videos = []
+
+                    logger.info(f"✅ Pexels returned {len(videos)} videos")
+
+                    # Convert to ClipCandidates
+                    for video in videos:
+                        video_id = str(video.get("id", ""))
+
+                        # Skip if already used in previous videos
+                        if video_id in self._used_video_ids:
+                            continue
+
+                        video_files = video.get("video_files", [])
+                        base_duration = video.get("duration", 0)
+
+                        if not video_files or base_duration <= 0:
+                            continue
+
+                        # Find HD quality
+                        for vf in video_files:
+                            if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
+                                candidate = ClipCandidate(
+                                    pexels_id=video_id,
+                                    path="",
+                                    duration=base_duration,
+                                    url=vf.get("link", "")
+                                )
+                                video_pool.append(candidate)
+                                self._used_video_ids.add(video_id)
+                                break
+
+                        # Stop if we have enough
+                        if len(video_pool) >= fetch_count:
+                            break
+
+                    logger.info(f"✅ Collected {len(video_pool)} HD videos from Pexels")
+
+                except Exception as e:
+                    if "429" in str(e) or "rate limit" in str(e).lower():
+                        logger.warning("⚠️ Pexels rate limited during pool build")
+                        self._pexels_rate_limited = True
+                    else:
+                        logger.warning(f"⚠️ Pexels pool build failed: {e}")
+
+            # Try Pixabay if we need more videos
+            if len(video_pool) < target_count and self.pixabay and self.pixabay.enabled:
+                try:
+                    needed = fetch_count - len(video_pool)
+                    logger.info(f"📥 Fetching from Pixabay: {search_query} (requesting {needed})")
+
+                    result = self.pixabay.search_videos(search_query, per_page=min(needed, 200), page=1)
+                    hits = result.get("hits", [])
+
+                    logger.info(f"✅ Pixabay returned {len(hits)} videos")
+
+                    for video in hits:
+                        video_id = f"pixabay_{video.get('id', '')}"
+
+                        if video_id in self._used_video_ids:
+                            continue
+
+                        video_url = self.pixabay.get_video_url(video, quality="large")
+                        if not video_url:
+                            continue
+
+                        candidate = ClipCandidate(
+                            pexels_id=video_id,
+                            path="",
+                            duration=video.get("duration", 0),
+                            url=video_url
+                        )
+                        video_pool.append(candidate)
+                        self._used_video_ids.add(video_id)
+
+                        if len(video_pool) >= fetch_count:
+                            break
+
+                    logger.info(f"✅ Total pool size after Pixabay: {len(video_pool)}")
+
+                except Exception as e:
+                    logger.warning(f"⚠️ Pixabay pool build failed: {e}")
+
+            # 3. Check if we have enough videos
+            if len(video_pool) < target_count:
+                logger.warning(f"⚠️ Video pool has only {len(video_pool)}/{target_count} videos")
+
+                # If we have less than 50% of target, fail
+                if len(video_pool) < target_count * 0.5:
+                    logger.error(f"❌ Insufficient videos in pool: {len(video_pool)} < {target_count * 0.5}")
+                    return []
+
+                logger.info("✅ Continuing with reduced pool (will reuse videos if needed)")
+
+            # 4. Shuffle for variety
+            random.shuffle(video_pool)
+
+            logger.info(f"🎲 Shuffled pool: {len(video_pool)} videos ready")
+            logger.info(f"📊 Pool coverage: {len(video_pool)}/{target_count} scenes ({len(video_pool)/target_count*100:.1f}%)")
+
+            return video_pool
+
+        except Exception as exc:
+            logger.error(f"❌ Video pool build failed: {exc}")
+            logger.debug("", exc_info=True)
+            return []
+
     def _prepare_scene_clip(
         self,
         text: str,
@@ -1191,169 +1369,63 @@ class ShortsOrchestrator:
         search_queries: Optional[List[str]] = None,
         chapter_title: Optional[str] = None,
         total_sentences: int = 1,
+        video_pool: Optional[List[ClipCandidate]] = None,  # ✅ NEW: Video pool
     ) -> Optional[str]:
-        """Prepare video clip for a scene."""
+        """
+        Prepare video clip for a scene.
 
-        # ✅ ENHANCED: Plan shot variety and pacing
-        enhanced_keywords = keywords
-        if self.shot_variety:
-            try:
-                shot_plan = self.shot_variety.plan_shot(
-                    sentence=text,
-                    sentence_index=index,
-                    sentence_type=sentence_type,
-                    total_sentences=total_sentences,
-                    keywords=keywords,
-                )
-                # Use shot-specific keywords
-                enhanced_keywords = shot_plan.search_keywords
-                logger.debug(
-                    f"Scene {index}: {shot_plan.shot_type.value} shot, "
-                    f"{shot_plan.pacing_style.value} pacing"
-                )
-            except Exception as e:
-                logger.debug(f"Shot planning failed: {e}")
-                enhanced_keywords = keywords
+        ✅ MODIFIED: Now uses video pool instead of per-scene search.
+        """
 
-        # ✅ ENHANCED: Context-aware video search
-        candidate = self._find_best_video(
-            sentence=text,
-            keywords=enhanced_keywords,
-            duration=duration,
-            search_queries=search_queries,
-            chapter_title=chapter_title,
-            sentence_type=sentence_type,
-            timeout=8
-        )
+        # ✅ NEW: Use video pool if available
+        if video_pool:
+            # Calculate which video to use from pool
+            # Use modulo to loop if we have fewer videos than scenes
+            pool_index = index % len(video_pool)
+            candidate = video_pool[pool_index]
 
-        # ✅ Check if rate limited
-        pexels_rate_limited = getattr(self, '_pexels_rate_limited', False)
-        
-        # ✅ IMPROVED: Better fallback with variety
+            logger.debug(f"Scene {index}: Using video from pool[{pool_index}] (ID: {candidate.pexels_id})")
+
+        else:
+            # ⚠️ FALLBACK: Old per-scene search (should rarely happen)
+            logger.warning(f"Scene {index}: No video pool, falling back to per-scene search")
+
+            # ✅ ENHANCED: Plan shot variety and pacing
+            enhanced_keywords = keywords
+            if self.shot_variety:
+                try:
+                    shot_plan = self.shot_variety.plan_shot(
+                        sentence=text,
+                        sentence_index=index,
+                        sentence_type=sentence_type,
+                        total_sentences=total_sentences,
+                        keywords=keywords,
+                    )
+                    # Use shot-specific keywords
+                    enhanced_keywords = shot_plan.search_keywords
+                    logger.debug(
+                        f"Scene {index}: {shot_plan.shot_type.value} shot, "
+                        f"{shot_plan.pacing_style.value} pacing"
+                    )
+                except Exception as e:
+                    logger.debug(f"Shot planning failed: {e}")
+                    enhanced_keywords = keywords
+
+            # ✅ ENHANCED: Context-aware video search
+            candidate = self._find_best_video(
+                sentence=text,
+                keywords=enhanced_keywords,
+                duration=duration,
+                search_queries=search_queries,
+                chapter_title=chapter_title,
+                sentence_type=sentence_type,
+                timeout=8
+            )
+
+        # ✅ Check if we got a candidate (should always have one from pool)
         if not candidate:
-            mode = os.getenv("MODE") or "general"
-        # ✅ OPTIMIZED: Minimal fallback with cache priority
-        if not candidate:
-            mode = os.getenv("MODE") or "general"
-            
-        # ✅ IMPROVED: Diverse fallback categories
-        if not candidate:
-            mode = os.getenv("MODE") or "general"
-            
-            # ✅ More diverse fallback terms for each mode
-            fallback_terms = {
-                "country_facts": [
-                    "urban cityscape", "cultural festival", "traditional market",
-                    "countryside village", "mountain landscape", "coastal town"
-                ],
-                "history_story": [
-                    "ancient architecture", "historical monument", "old library",
-                    "museum artifacts", "vintage documents", "classical art"
-                ],
-                "science": [
-                    "laboratory research", "scientific experiment", "technology innovation",
-                    "microscope view", "data visualization", "modern workspace"
-                ],
-                "kids_educational": [
-                    "colorful animation", "nature closeup", "animals wildlife",
-                    "underwater scene", "space stars", "playground activity"
-                ],
-                "_default": [
-                    "urban life", "people working", "nature landscape",
-                    "technology modern", "creative workspace", "travel destination"
-                ]
-            }
-            
-            terms = fallback_terms.get(mode, fallback_terms["_default"])
-            
-            # ✅ Shuffle for variety
-            import random
-            random.shuffle(terms)
-            
-            # Try Pexels fallback only if not rate limited
-            if not pexels_rate_limited:
-                for fallback_term in terms[:3]:
-                    try:
-                        logger.info(f"🔄 Pexels fallback: {fallback_term}")
-                        candidate = self._search_pexels_for_query(fallback_term)
-                        if candidate:
-                            break
-                    except Exception as e:
-                        if "RATE_LIMIT" in str(e):
-                            pexels_rate_limited = True
-                            self._pexels_rate_limited = True
-                            break
-            
-            # Try Pixabay fallback
-            if not candidate and self.pixabay and self.pixabay.enabled:
-                for fallback_term in terms[:3]:
-                    logger.info(f"🔄 Pixabay fallback: {fallback_term}")
-                    candidate = self._search_pixabay_for_query(fallback_term)
-                    if candidate:
-                        break
-            
-            # ✅ EMERGENCY: Allow video reuse only as last resort
-            if not candidate:
-                logger.warning("⚠️ Emergency: Allowing video reuse")
-                for fallback_term in terms[:1]:
-                    try:
-                        result = self.pexels.search_videos(fallback_term, per_page=15, page=1)
-                        videos = result.get("videos", []) if isinstance(result, dict) else result
-                        
-                        if videos:
-                            video = videos[0]
-                            video_id = str(video.get("id", ""))
-                            video_files = video.get("video_files", [])
-                            
-                            for vf in video_files:
-                                if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
-                                    candidate = ClipCandidate(
-                                        pexels_id=video_id,
-                                        path="",
-                                        duration=video.get("duration", 0),
-                                        url=vf.get("link", "")
-                                    )
-                                    logger.info(f"✅ Reusing video: {fallback_term}")
-                                    break
-                            if candidate:
-                                break
-                    except:
-                        continue
-            
-            # ✅ EMERGENCY: Eğer hala video yoksa, kullanılmış videoları tekrar kullan
-            if not candidate:
-                logger.warning("⚠️ No unused videos found, allowing video reuse for this scene")
-                
-                for fallback_term in terms[:1]:  # Sadece ilk terimi dene
-                    try:
-                        result = self.pexels.search_videos(fallback_term, per_page=15, page=1)
-                        videos = result.get("videos", []) if isinstance(result, dict) else result
-                        
-                        if videos:
-                            # ✅ İlk bulduğu videoyu kullan (kullanılmış olsa bile)
-                            video = videos[0]
-                            video_id = str(video.get("id", ""))
-                            video_files = video.get("video_files", [])
-                            
-                            for vf in video_files:
-                                if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
-                                    candidate = ClipCandidate(
-                                        pexels_id=video_id,
-                                        path="",
-                                        duration=video.get("duration", 0),
-                                        url=vf.get("link", "")
-                                    )
-                                    logger.info(f"✅ Reusing video: {fallback_term} (ID: {video_id})")
-                                    break
-                            
-                            if candidate:
-                                break
-                    except Exception as e:
-                        logger.debug(f"Emergency fallback failed: {e}")
-                        continue
-            
-            if not candidate:
-                logger.error("❌ All fallback attempts failed (including emergency reuse)")
+            logger.error(f"❌ Scene {index}: No candidate video available")
+            return None
 
         local_path = self._download_clip(candidate)
         if not local_path:
