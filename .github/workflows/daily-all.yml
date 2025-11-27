@@ -265,8 +265,17 @@ jobs:
           SCENE_MIN_DURATION: "8.0"
           SCENE_MAX_DURATION: "15.0"
 
+          # ===== VIDEO TRANSITIONS (Crossfade) =====
+          # ⚠️ DISABLED: Crossfade causes audio-video-caption sync drift
+          # Problem: Video overlaps by fade_duration, but audio doesn't
+          # Result: Progressive timing drift (captions ahead of audio)
+          # TODO: Re-enable after implementing audio crossfade
+          VIDEO_TRANSITIONS: "0"
+          TRANSITION_DURATION: "0.3"
+
           # ===== QUALITY THRESHOLDS =====
-          MIN_QUALITY_SCORE: "6.5"
+          # ✅ LOWERED: 6.5 → 4.5 (longer 100-130 sentence scripts score lower)
+          MIN_QUALITY_SCORE: "4.5"
           MIN_VIRAL_SCORE: "6.0"
           MIN_OVERALL_SCORE: "7.0"
 

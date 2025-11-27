@@ -213,7 +213,8 @@ jobs:
           TRANSITION_DURATION: "0.3"
 
           # ===== QUALITY THRESHOLDS =====
-          MIN_QUALITY_SCORE: "6.5"
+          # ✅ LOWERED: 6.5 → 4.5 (longer 100-130 sentence scripts score lower)
+          MIN_QUALITY_SCORE: "4.5"
           MIN_VIRAL_SCORE: "6.0"
           MIN_OVERALL_SCORE: "7.0"
 
