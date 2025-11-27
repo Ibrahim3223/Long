@@ -205,7 +205,11 @@ jobs:
           SCENE_MAX_DURATION: "15.0"
 
           # ===== VIDEO TRANSITIONS (Smooth Crossfade) =====
-          VIDEO_TRANSITIONS: "1"
+          # ⚠️ DISABLED: Crossfade causes audio-video-caption sync drift
+          # Problem: Video overlaps by fade_duration, but audio doesn't
+          # Result: Progressive timing drift (captions ahead of audio)
+          # TODO: Re-enable after implementing audio crossfade
+          VIDEO_TRANSITIONS: "0"
           TRANSITION_DURATION: "0.3"
 
           # ===== QUALITY THRESHOLDS =====
