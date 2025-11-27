@@ -73,58 +73,31 @@ class MetadataGenerator:
             sentences = [s.get("text", "") for s in script.get("sentences", [])]
             full_script = "\n".join(sentences[:20])  # First 20 sentences for context
 
-            # Build Gemini prompt for SEO metadata
-            prompt = f"""You are a YouTube SEO expert specializing in viral content optimization.
-
-VIDEO SCRIPT PREVIEW (first part):
-{full_script}
+            # Build Gemini prompt for SEO metadata (✅ SIMPLIFIED for token efficiency)
+            prompt = f"""You are a YouTube SEO expert. Generate viral metadata for this video.
 
 TOPIC: {main_topic}
 LANGUAGE: {lang}
+SCRIPT START: {full_script[:500]}...
 
-Generate HIGHLY SEO-OPTIMIZED YouTube metadata for this video:
+Generate JSON with:
+1. TITLE (50-70 chars): Click-worthy + SEO-optimized. Use power words (shocking/secret/revealed), numbers if relevant. Must be grammatically correct and accurately describe content.
 
-1. TITLE (50-70 characters):
-   - Must be attention-grabbing and click-worthy
-   - Include power words (shocking, secret, revealed, incredible, etc.)
-   - Include numbers if relevant to content
-   - Must accurately reflect video content
-   - Must be SEO-optimized for search
-   - Examples of GOOD titles:
-     * "The Shocking Truth About [Topic] Nobody Tells You"
-     * "7 Incredible Facts That Will Change How You See [Topic]"
-     * "Why [Topic] is More Dangerous Than You Think"
-   - Examples of BAD titles:
-     * "1 Amazing Facts..." (grammatically incorrect)
-     * "Video About [Topic]" (generic, boring)
-     * "[Topic] Information" (not engaging)
+   GOOD: "7 Shocking Facts About [Topic] That Will Blow Your Mind"
+   BAD: "1 Amazing Facts..." (wrong grammar), "Video About Topic" (boring)
 
-2. DESCRIPTION (300-500 characters):
-   - First 150 chars MUST be a compelling hook (shows in search results)
-   - Include key topics covered in the video
-   - Add 3-5 relevant questions viewers might search for
-   - Natural keyword integration for SEO
-   - Include soft CTA (subscribe, like, comment)
-   - Must be informative and engaging
+2. DESCRIPTION (300-500 chars): First 150 chars = hook (shows in search). Include key topics + 3-5 search questions + soft CTA.
 
-3. TAGS/KEYWORDS (5-10 keywords):
-   - Mix of broad and specific keywords
-   - Include long-tail keywords (3-5 word phrases)
-   - Based on actual video content
+3. KEYWORDS (5-10 tags): Mix broad + specific + long-tail phrases from actual content.
 
-Return ONLY a valid JSON object with this EXACT structure:
+Return ONLY valid JSON (no markdown):
 {{
-  "title": "Your SEO-optimized title here",
-  "description": "Your compelling description here...",
-  "keywords": ["keyword1", "keyword2", "keyword3", "long tail keyword phrase"]
+  "title": "Your optimized title",
+  "description": "Hook in first 150 chars. Key topics covered. Related questions: What is X? How does X work? Explore more on our channel!",
+  "keywords": ["keyword1", "keyword2", "long tail phrase"]
 }}
 
-CRITICAL RULES:
-- Title MUST be grammatically correct
-- Title MUST accurately describe video content
-- Description first 150 chars MUST hook viewers
-- NO placeholders, NO generic content
-- Output ONLY valid JSON, nothing else
+CRITICAL: Title must be grammatically correct. No placeholders. Output ONLY JSON.
 """
 
             # Call Gemini with safety settings
@@ -142,7 +115,7 @@ CRITICAL RULES:
                 generation_config={
                     "temperature": 0.8,
                     "top_p": 0.95,
-                    "max_output_tokens": 1000,
+                    "max_output_tokens": 2048,  # ✅ INCREASED: 1000 → 2048 (fix finish_reason=2)
                 },
                 safety_settings=safety_settings
             )
@@ -153,9 +126,25 @@ CRITICAL RULES:
                 return None
 
             candidate = response.candidates[0]
-            if candidate.finish_reason != 1:  # 1 = STOP (normal completion)
-                logger.warning(f"⚠️ Gemini metadata blocked (finish_reason={candidate.finish_reason}), using fallback")
-                return None
+            finish_reason = candidate.finish_reason
+
+            # ✅ IMPROVED: Better error messages for different finish reasons
+            # 1 = STOP (normal), 2 = MAX_TOKENS, 3 = SAFETY, 4 = RECITATION
+            if finish_reason != 1:
+                reason_names = {
+                    2: "MAX_TOKENS (response cut off - increase max_output_tokens)",
+                    3: "SAFETY (blocked by safety filter)",
+                    4: "RECITATION (blocked due to recitation)",
+                }
+                reason_name = reason_names.get(finish_reason, f"UNKNOWN ({finish_reason})")
+                logger.warning(f"⚠️ Gemini metadata incomplete (finish_reason={reason_name})")
+
+                # ✅ NEW: Try to use partial response if available (for MAX_TOKENS)
+                if finish_reason == 2 and response.text:
+                    logger.info("🔄 Attempting to parse partial response...")
+                    # Continue to parsing (might work if JSON is complete)
+                else:
+                    return None
 
             # Parse response
             response_text = response.text.strip()
