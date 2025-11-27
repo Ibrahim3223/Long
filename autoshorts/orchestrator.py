@@ -181,9 +181,10 @@ class ShortsOrchestrator:
             logger.warning("Quality scorer init failed: %s", exc)
             self.quality_scorer = None
 
-        # Metadata generator
+        # Metadata generator (pass Gemini API key for AI-powered metadata)
         try:
-            self.metadata_generator = MetadataGenerator()
+            gemini_api_key = os.getenv("GEMINI_API_KEY")
+            self.metadata_generator = MetadataGenerator(gemini_api_key=gemini_api_key)
             logger.info("Metadata generator initialized")
         except Exception as exc:
             logger.warning("Metadata generator init failed: %s", exc)
