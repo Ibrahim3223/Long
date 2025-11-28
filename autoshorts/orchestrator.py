@@ -269,6 +269,16 @@ class ShortsOrchestrator:
         logger.info("🎬 START VIDEO PRODUCTION")
         logger.info("=" * 70)
         logger.info("📝 Topic: %s", topic_prompt[:120])
+
+        # ✅ DEBUG: Show video settings for shorts vs long detection
+        is_shorts = settings.UPLOAD_AS_SHORTS or settings.TARGET_DURATION <= 120
+        logger.info("📊 VIDEO FORMAT: %s", "SHORTS (9:16)" if is_shorts else "LONG (16:9)")
+        logger.info("   • Resolution: %dx%d", settings.VIDEO_WIDTH, settings.VIDEO_HEIGHT)
+        logger.info("   • Duration: %ds (min: %ds, max: %ds)",
+                   settings.TARGET_DURATION, settings.TARGET_MIN_SEC, settings.TARGET_MAX_SEC)
+        logger.info("   • Sentences: %d-%d (target: %d)",
+                   settings.MIN_SENTENCES, settings.MAX_SENTENCES, settings.TARGET_SENTENCES)
+        logger.info("   • Upload as shorts: %s", "YES" if settings.UPLOAD_AS_SHORTS else "NO")
     
         # ✅ Track sub_topic for this production session
         selected_sub_topic = None
@@ -1910,12 +1920,16 @@ class ShortsOrchestrator:
             max_start = max(0, clip_duration - target_duration)
             start_time = random.uniform(0, max_start) if max_start > 0 else 0
             
+            # ✅ FIXED: Use settings for video dimensions (supports shorts 1080x1920 and long 1920x1080)
+            video_width = settings.VIDEO_WIDTH
+            video_height = settings.VIDEO_HEIGHT
+
             run([
                 "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                 "-ss", f"{start_time:.3f}",
                 "-i", input_path,
                 "-t", f"{target_duration:.3f}",
-                "-vf", f"scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080",
+                "-vf", f"scale={video_width}:{video_height}:force_original_aspect_ratio=increase,crop={video_width}:{video_height}",
                 "-r", "30",
                 "-c:v", "libx264",
                 "-preset", self.ffmpeg_preset,
