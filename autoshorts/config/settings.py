@@ -124,25 +124,28 @@ USE_GEMINI = _env_bool("USE_GEMINI", True)
 ADDITIONAL_PROMPT_CONTEXT = _env_str("ADDITIONAL_PROMPT_CONTEXT", "")
 
 # ============================================================
-# ✅ ULTIMATE VIDEO SETTINGS - 4-7 MINUTE LONG-FORM
+# ✅ ULTIMATE VIDEO SETTINGS - LONG-FORM & SHORTS
 # ============================================================
 
-TARGET_DURATION = 360  # 6 minutes
-TARGET_MIN_SEC = 240.0
-TARGET_MAX_SEC = 480.0
+# Target duration (seconds) - configurable for shorts (60s) vs long (360s)
+TARGET_DURATION = _env_int("TARGET_DURATION", 360)  # 6 minutes for long, 60s for shorts
+TARGET_MIN_SEC = _env_float("MIN_DURATION", 240.0)  # Min duration
+TARGET_MAX_SEC = _env_float("MAX_DURATION", 480.0)  # Max duration
 
-VIDEO_WIDTH = 1920
-VIDEO_HEIGHT = 1080
-ASPECT_RATIO = "16:9"
+# Video dimensions - configurable for shorts (9:16) vs long (16:9)
+VIDEO_WIDTH = _env_int("VIDEO_WIDTH", 1920)
+VIDEO_HEIGHT = _env_int("VIDEO_HEIGHT", 1080)
+ASPECT_RATIO = "16:9"  # Default for long-form; shorts use 9:16 (1080x1920)
 
 TARGET_FPS = 30
 CRF_VISUAL = 18
 
-VIDEO_MOTION = True
-MOTION_INTENSITY = 1.08
+VIDEO_MOTION = _env_bool("VIDEO_MOTION", True)
+MOTION_INTENSITY = _env_float("MOTION_INTENSITY", 1.08)
 
-SCENE_MIN_DURATION = 8.0
-SCENE_MAX_DURATION = 15.0
+# Scene duration - configurable for shorts (3-6s) vs long (8-15s)
+SCENE_MIN_DURATION = _env_float("SCENE_MIN_DURATION", 8.0)
+SCENE_MAX_DURATION = _env_float("SCENE_MAX_DURATION", 15.0)
 
 # ============================================================
 # TTS SETTINGS - ENHANCED WITH KOKORO SUPPORT
@@ -362,7 +365,7 @@ MAX_GENERATION_ATTEMPTS = _env_int("MAX_GENERATION_ATTEMPTS", 5)
 
 UPLOAD_TO_YT = _env_bool("UPLOAD_TO_YT", True)
 VISIBILITY = _env_str("VISIBILITY", "public")
-UPLOAD_AS_SHORTS = False
+UPLOAD_AS_SHORTS = _env_bool("UPLOAD_AS_SHORTS", False)  # Enable for shorts (9:16 vertical)
 
 ENABLE_CHAPTERS = _env_bool("ENABLE_CHAPTERS", False)
 MIN_CHAPTER_DURATION = _env_int("MIN_CHAPTER_DURATION", 30)
@@ -371,9 +374,10 @@ MIN_CHAPTER_DURATION = _env_int("MIN_CHAPTER_DURATION", 30)
 # CONTENT STRUCTURE
 # ============================================================
 
-MIN_SENTENCES = 40
-MAX_SENTENCES = 70
-TARGET_SENTENCES = 55
+# Sentence counts - configurable for shorts (15) vs long (40-70)
+MIN_SENTENCES = _env_int("MIN_SENTENCES", 40)
+MAX_SENTENCES = _env_int("MAX_SENTENCES", 70)
+TARGET_SENTENCES = _env_int("TARGET_SENTENCES", 55)
 
 CHAPTERS_ENABLED = True
 MIN_CHAPTER_SENTENCES = 5
