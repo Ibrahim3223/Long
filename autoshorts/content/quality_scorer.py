@@ -7,6 +7,9 @@ Works for all topics without topic-specific rules.
 import re
 from typing import List, Dict, Tuple, Optional
 
+# ✅ Import settings to detect shorts mode
+from autoshorts.config import settings
+
 
 class QualityScorer:
     """Score content quality, viral potential, and retention."""
@@ -442,8 +445,13 @@ class QualityScorer:
             0.0, min(10.0, results["overall_score"] * (quality_scores["overall"] / 10.0))
         )
 
-        # ✅ LOWERED THRESHOLD: 6.5 → 5.5 → 4.5 (production calibration for longer scripts)
-        # Longer scripts (100-130 sentences) naturally score lower, so we need a lower threshold
-        results["valid"] = results["overall_score"] >= 4.5 and len(results["issues"]) < 5
+        # ✅ DYNAMIC THRESHOLD: Lower for shorts, higher for long videos
+        # Shorts: 3.0 threshold (fast volume, algorithm-driven discovery)
+        # Long: 4.5 threshold (quality matters more for watch time)
+        is_shorts = settings.UPLOAD_AS_SHORTS or settings.TARGET_DURATION <= 120
+        quality_threshold = 3.0 if is_shorts else 4.5
+        max_issues = 8 if is_shorts else 5  # More lenient for shorts
+
+        results["valid"] = results["overall_score"] >= quality_threshold and len(results["issues"]) < max_issues
 
         return results

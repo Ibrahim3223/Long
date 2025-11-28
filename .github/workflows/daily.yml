@@ -286,6 +286,21 @@ jobs:
           echo "✅ Video artifacts located:"
           find out -type f -name '*.mp4'
 
+      - name: Cleanup intermediate files
+        if: always()
+        run: |
+          echo "🧹 Cleaning up intermediate files to free disk space..."
+          echo "📊 Disk usage before cleanup:"
+          df -h / || true
+          rm -rf .temp/ temp/ /tmp/*.mp4 /tmp/*.mp3 /tmp/*.wav || true
+          rm -rf ~/.cache/huggingface/hub/models--* || true
+          rm -rf ~/.cache/kokoro/*.onnx || true
+          find . -type f -name 'scene_*.mp4' ! -path './out/*' -delete || true
+          find . -type f -name 'audio_*.mp3' ! -path './out/*' -delete || true
+          echo "📊 Disk usage after cleanup:"
+          df -h / || true
+          echo "✅ Cleanup complete"
+
       - name: Upload artifact (mp4)
         if: always()
         uses: actions/upload-artifact@v4

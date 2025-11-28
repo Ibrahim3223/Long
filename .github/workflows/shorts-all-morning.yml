@@ -275,6 +275,14 @@ jobs:
           echo "✅ Shorts video artifacts located:"
           find out -type f -name '*.mp4'
 
+      - name: Cleanup intermediate files
+        if: always()
+        run: |
+          echo "🧹 Cleaning up intermediate files..."
+          rm -rf .temp/ temp/ /tmp/*.mp4 /tmp/*.mp3 || true
+          find . -type f -name 'scene_*.mp4' ! -path './out/*' -delete || true
+          echo "✅ Cleanup complete"
+
       - name: Upload artifact (shorts mp4)
         if: always()
         uses: actions/upload-artifact@v4

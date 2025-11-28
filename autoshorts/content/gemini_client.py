@@ -23,6 +23,9 @@ except ImportError as e:
         "google-genai paketi bulunamadı. Lütfen yükleyin: pip install google-genai>=0.2.0"
     ) from e
 
+# ✅ Import settings for TARGET_DURATION, MIN_SENTENCES, MAX_SENTENCES
+from autoshorts.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -361,7 +364,7 @@ class GeminiClient:
         self,
         topic: str,
         style: str = "educational",
-        duration: int = 600,  # ✅ CHANGED: 180 → 600 seconds (10 minutes for monetization)
+        duration: Optional[int] = None,  # ✅ FIXED: Read from settings if not provided
         mode: Optional[str] = None,
         sub_topic: Optional[str] = None,
         additional_context: Optional[str] = None,
@@ -373,32 +376,35 @@ class GeminiClient:
         Args:
             topic: Main channel topic/description
             style: Content style
-            duration: Target duration in seconds
+            duration: Target duration in seconds (defaults to settings.TARGET_DURATION)
             mode: Content mode (country_facts, history_story, etc.)
             sub_topic: Specific angle to focus on
             additional_context: Extra context for prompt
             script_style_config: ScriptStyleConfig as dict (NEW - for enhanced prompts)
         """
 
+        # ✅ FIXED: Read from settings if not provided (supports shorts vs long)
+        if duration is None:
+            duration = settings.TARGET_DURATION
+            logger.debug(f"Using TARGET_DURATION from settings: {duration}s")
+
         # Calculate target sentences
         target_seconds = duration
         words_per_second = 2.5
 
-        # ✅ AGGRESSIVE PERFORMANCE OPTIMIZATION: Minimal scenes for 1-hour timeout
-        # Problem: 120 scenes still hit 1-hour timeout (stuck at concatenation)
-        # Test result: 120 scenes = 55-65 min (too close to timeout!)
-        # Solution: 80 scenes × longer sentences = same duration, much faster!
-        words_per_sentence = 15  # Ask Gemini for 15-18 word sentences (was 12)
+        # ✅ PERFORMANCE OPTIMIZATION: Fewer scenes for faster processing
+        # Long videos: 70-90 sentences (10 min)
+        # Shorts: 10-20 sentences (60s)
+        words_per_sentence = 15  # Ask Gemini for 15-18 word sentences
         target_sentences = int((target_seconds * words_per_second) / words_per_sentence)
 
-        # ✅ AGGRESSIVE: 70-90 sentences (target ~80 for 10-minute videos)
-        # Math: 80 sentences × 15 words × 0.4s/word = 480s = 8 min
-        #       + pauses (80 × 0.8s) = 64s
-        #       + intro/outro = 30s
-        #       Total: ~574s = 9.6 min ✓
-        # Performance: 80 scenes vs 120 scenes = 33% faster (critical for timeout!)
-        #              80 scenes × 45s/scene = 60 min → 80 × 30s = 40 min ✓
-        target_sentences = max(70, min(90, target_sentences))
+        # ✅ FIXED: Use MIN_SENTENCES and MAX_SENTENCES from settings
+        # This allows shorts (15) vs long (70-90) to work correctly
+        min_sentences = settings.MIN_SENTENCES
+        max_sentences = settings.MAX_SENTENCES
+        target_sentences = max(min_sentences, min(max_sentences, target_sentences))
+
+        logger.info(f"📊 Target sentences: {target_sentences} (range: {min_sentences}-{max_sentences}, duration: {duration}s)")
 
         # ✅ NEW: Use enhanced prompts if config provided
         use_enhanced_prompts = script_style_config is not None
