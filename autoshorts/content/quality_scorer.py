@@ -446,11 +446,13 @@ class QualityScorer:
         )
 
         # ✅ DYNAMIC THRESHOLD: Lower for shorts, higher for long videos
-        # Shorts: 3.0 threshold (fast volume, algorithm-driven discovery)
-        # Long: 4.5 threshold (quality matters more for watch time)
+        # Shorts: 2.5 threshold (fast volume, algorithm-driven discovery)
+        # Long: 3.0 threshold (balanced - allows good content while filtering garbage)
+        # Note: Lowered from 4.5 → 3.0 because specific topics (zipper, button, etc.)
+        #       naturally score lower but are still engaging educational content
         is_shorts = settings.UPLOAD_AS_SHORTS or settings.TARGET_DURATION <= 120
-        quality_threshold = 3.0 if is_shorts else 4.5
-        max_issues = 8 if is_shorts else 5  # More lenient for shorts
+        quality_threshold = 2.5 if is_shorts else 3.0
+        max_issues = 8 if is_shorts else 6  # More lenient for both
 
         results["valid"] = results["overall_score"] >= quality_threshold and len(results["issues"]) < max_issues
 

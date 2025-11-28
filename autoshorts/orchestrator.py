@@ -520,7 +520,10 @@ class ShortsOrchestrator:
 
                     # Reject low-quality scripts
                     if not validation_results["valid"]:
-                        logger.error(f"❌ Script rejected: Quality score {validation_results['overall_score']:.1f} < 5.5")
+                        # Show actual threshold (dynamic based on video type)
+                        is_shorts = settings.UPLOAD_AS_SHORTS or settings.TARGET_DURATION <= 120
+                        threshold = 2.5 if is_shorts else 3.0
+                        logger.error(f"❌ Script rejected: Quality score {validation_results['overall_score']:.1f} < {threshold}")
                         return None
 
                 except Exception as e:
