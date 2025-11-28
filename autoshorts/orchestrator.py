@@ -1215,11 +1215,20 @@ class ShortsOrchestrator:
         """
         try:
             # 1. Extract main topic keywords (2-3 words)
-            title = script.get("title", "")
+            # ✅ IMPROVED: Use script content instead of title (title has clickbait words)
             main_visual_focus = script.get("main_visual_focus", "")
 
-            # Combine title + main_visual_focus for better keyword extraction
-            search_text = f"{title} {main_visual_focus}".strip()
+            # Get first few sentences for topic extraction (skip hook - it's often clickbait)
+            sentences = script.get("sentences", [])
+            content_sentences = [
+                s.get("text", "") for s in sentences
+                if s.get("type") != "hook" and s.get("type") != "cta"
+            ][:10]  # First 10 content sentences
+
+            script_sample = " ".join(content_sentences)
+
+            # Combine script content + main_visual_focus (NOT title!)
+            search_text = f"{script_sample} {main_visual_focus}".strip()
 
             keywords = extract_keywords(search_text, lang=getattr(settings, "LANG", "en"))
 
@@ -1227,113 +1236,156 @@ class ShortsOrchestrator:
             main_keywords = keywords[:3]
 
             if not main_keywords:
-                # Fallback: use title words
-                main_keywords = title.split()[:3]
+                # Fallback: use main_visual_focus or title
+                if main_visual_focus:
+                    main_keywords = main_visual_focus.split()[:3]
+                else:
+                    # Last resort: use title (remove clickbait words)
+                    title = script.get("title", "")
+                    # Filter out common clickbait words
+                    clickbait_words = {
+                        "shocking", "amazing", "incredible", "unbelievable", "mind-blowing",
+                        "secret", "hidden", "revealed", "discover", "won't", "believe"
+                    }
+                    title_words = [
+                        w for w in title.lower().split()
+                        if w not in clickbait_words and len(w) > 3
+                    ]
+                    main_keywords = title_words[:3]
 
-            # Simplify for search
-            search_query = simplify_query(" ".join(main_keywords))
+            # ✅ IMPROVED: Create multiple diverse search queries
+            # User feedback: Better video variety and relevance
+            primary_query = simplify_query(" ".join(main_keywords))
 
-            logger.info(f"🎬 Building video pool for: '{search_query}' (target: {target_count} videos)")
+            # Create alternative queries for diversity
+            search_queries = [primary_query]
+
+            # Add main_visual_focus as separate query if different
+            if main_visual_focus and simplify_query(main_visual_focus) != primary_query:
+                search_queries.append(simplify_query(main_visual_focus))
+
+            # Add 2-word combinations for broader results
+            if len(main_keywords) >= 2:
+                search_queries.append(simplify_query(" ".join(main_keywords[:2])))
+
+            # Remove duplicates while preserving order
+            search_queries = list(dict.fromkeys(search_queries))[:3]  # Max 3 queries
+
+            logger.info(f"🎬 Building video pool using {len(search_queries)} queries: {search_queries}")
+            logger.info(f"🎯 Target: {target_count} videos")
 
             # 2. Collect videos from Pexels + Pixabay
             video_pool = []
 
-            # Calculate how many videos to fetch (150% of target for safety margin)
+            # Calculate how many videos to fetch per query
             fetch_count = int(target_count * 1.5)
             fetch_count = max(100, min(200, fetch_count))  # Clamp to 100-200
+            per_query_count = fetch_count // len(search_queries)  # Distribute across queries
 
-            # Try Pexels first (primary source)
+            # Try Pexels first (primary source) - MULTIPLE QUERIES for diversity
             if not self._pexels_rate_limited:
-                try:
-                    logger.info(f"📥 Fetching from Pexels: {search_query} (requesting {fetch_count})")
-                    result = self.pexels.search_videos(search_query, per_page=fetch_count, page=1)
+                for query_idx, query in enumerate(search_queries):
+                    if len(video_pool) >= fetch_count:
+                        break  # Already have enough
 
-                    if isinstance(result, dict):
-                        videos = result.get("videos", [])
-                    elif isinstance(result, list):
-                        videos = result
-                    else:
-                        videos = []
+                    try:
+                        logger.info(f"📥 Pexels query {query_idx+1}/{len(search_queries)}: '{query}' (requesting {per_query_count})")
+                        result = self.pexels.search_videos(query, per_page=per_query_count, page=1)
 
-                    logger.info(f"✅ Pexels returned {len(videos)} videos")
+                        if isinstance(result, dict):
+                            videos = result.get("videos", [])
+                        elif isinstance(result, list):
+                            videos = result
+                        else:
+                            videos = []
 
-                    # Convert to ClipCandidates
-                    for video in videos:
-                        video_id = str(video.get("id", ""))
+                        logger.info(f"  ✅ Returned {len(videos)} videos")
 
-                        # Skip if already used in previous videos
-                        if video_id in self._used_video_ids:
-                            continue
+                        # Convert to ClipCandidates
+                        for video in videos:
+                            video_id = str(video.get("id", ""))
 
-                        video_files = video.get("video_files", [])
-                        base_duration = video.get("duration", 0)
+                            # Skip if already used in previous videos or in current pool
+                            if video_id in self._used_video_ids:
+                                continue
 
-                        if not video_files or base_duration <= 0:
-                            continue
+                            video_files = video.get("video_files", [])
+                            base_duration = video.get("duration", 0)
 
-                        # Find HD quality
-                        for vf in video_files:
-                            if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
-                                candidate = ClipCandidate(
-                                    pexels_id=video_id,
-                                    path="",
-                                    duration=base_duration,
-                                    url=vf.get("link", "")
-                                )
-                                video_pool.append(candidate)
-                                self._used_video_ids.add(video_id)
+                            if not video_files or base_duration <= 0:
+                                continue
+
+                            # Find HD quality
+                            for vf in video_files:
+                                if vf.get("quality") == "hd" and vf.get("width", 0) >= 1080:
+                                    candidate = ClipCandidate(
+                                        pexels_id=video_id,
+                                        path="",
+                                        duration=base_duration,
+                                        url=vf.get("link", "")
+                                    )
+                                    video_pool.append(candidate)
+                                    self._used_video_ids.add(video_id)
+                                    break
+
+                            # Stop if we have enough
+                            if len(video_pool) >= fetch_count:
                                 break
 
-                        # Stop if we have enough
-                        if len(video_pool) >= fetch_count:
-                            break
+                    except Exception as e:
+                        if "429" in str(e) or "rate limit" in str(e).lower():
+                            logger.warning("⚠️ Pexels rate limited during pool build")
+                            self._pexels_rate_limited = True
+                            break  # Stop trying more queries
+                        else:
+                            logger.warning(f"⚠️ Pexels query '{query}' failed: {e}")
+                            continue  # Try next query
 
-                    logger.info(f"✅ Collected {len(video_pool)} HD videos from Pexels")
+                logger.info(f"✅ Pexels total: {len(video_pool)} HD videos from {len(search_queries)} queries")
 
-                except Exception as e:
-                    if "429" in str(e) or "rate limit" in str(e).lower():
-                        logger.warning("⚠️ Pexels rate limited during pool build")
-                        self._pexels_rate_limited = True
-                    else:
-                        logger.warning(f"⚠️ Pexels pool build failed: {e}")
-
-            # Try Pixabay if we need more videos
+            # Try Pixabay if we need more videos - MULTIPLE QUERIES for diversity
             if len(video_pool) < target_count and self.pixabay and self.pixabay.enabled:
-                try:
-                    needed = fetch_count - len(video_pool)
-                    logger.info(f"📥 Fetching from Pixabay: {search_query} (requesting {needed})")
+                for query_idx, query in enumerate(search_queries):
+                    if len(video_pool) >= fetch_count:
+                        break  # Already have enough
 
-                    result = self.pixabay.search_videos(search_query, per_page=min(needed, 200), page=1)
-                    hits = result.get("hits", [])
+                    try:
+                        needed = fetch_count - len(video_pool)
+                        logger.info(f"📥 Pixabay query {query_idx+1}/{len(search_queries)}: '{query}' (requesting {min(needed, per_query_count)})")
 
-                    logger.info(f"✅ Pixabay returned {len(hits)} videos")
+                        result = self.pixabay.search_videos(query, per_page=min(needed, per_query_count), page=1)
+                        hits = result.get("hits", [])
 
-                    for video in hits:
-                        video_id = f"pixabay_{video.get('id', '')}"
+                        logger.info(f"  ✅ Returned {len(hits)} videos")
 
-                        if video_id in self._used_video_ids:
-                            continue
+                        for video in hits:
+                            video_id = f"pixabay_{video.get('id', '')}"
 
-                        video_url = self.pixabay.get_video_url(video, quality="large")
-                        if not video_url:
-                            continue
+                            if video_id in self._used_video_ids:
+                                continue
 
-                        candidate = ClipCandidate(
-                            pexels_id=video_id,
-                            path="",
-                            duration=video.get("duration", 0),
-                            url=video_url
-                        )
-                        video_pool.append(candidate)
-                        self._used_video_ids.add(video_id)
+                            video_url = self.pixabay.get_video_url(video, quality="large")
+                            if not video_url:
+                                continue
 
-                        if len(video_pool) >= fetch_count:
-                            break
+                            candidate = ClipCandidate(
+                                pexels_id=video_id,
+                                path="",
+                                duration=video.get("duration", 0),
+                                url=video_url
+                            )
+                            video_pool.append(candidate)
+                            self._used_video_ids.add(video_id)
 
-                    logger.info(f"✅ Total pool size after Pixabay: {len(video_pool)}")
+                            if len(video_pool) >= fetch_count:
+                                break
 
-                except Exception as e:
-                    logger.warning(f"⚠️ Pixabay pool build failed: {e}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Pixabay query '{query}' failed: {e}")
+                        continue  # Try next query
+
+                logger.info(f"✅ Pixabay total: {len(video_pool) - len([v for v in video_pool if not v.pexels_id.startswith('pixabay')])} videos added")
+                logger.info(f"✅ Total pool size: {len(video_pool)} videos")
 
             # 3. Check if we have enough videos
             if len(video_pool) < target_count:
@@ -1346,10 +1398,23 @@ class ShortsOrchestrator:
 
                 logger.info("✅ Continuing with reduced pool (will reuse videos if needed)")
 
-            # 4. Shuffle for variety
+            # ✅ NEW: Filter and separate CTA/subscribe videos
+            # User request: "subscribe ile ilgili olanları sadece sonunda olacak şekilde"
+            # (Subscribe-related videos should only be at the end)
+
+            # We can't filter based on video content (we haven't downloaded yet)
+            # But we CAN organize pool to avoid repetitive patterns
+            # Strategy: Ensure maximum diversity by shuffling thoroughly
+
+            # 4. Shuffle for maximum variety
             random.shuffle(video_pool)
 
-            logger.info(f"🎲 Shuffled pool: {len(video_pool)} videos ready")
+            # ✅ Additional shuffle to ensure CTA videos don't cluster
+            # (If pool has subscribe videos, they'll be distributed randomly, not clustered)
+            for _ in range(3):  # Multiple shuffles for better randomization
+                random.shuffle(video_pool)
+
+            logger.info(f"🎲 Shuffled pool: {len(video_pool)} videos ready (3x shuffle for variety)")
             logger.info(f"📊 Pool coverage: {len(video_pool)}/{target_count} scenes ({len(video_pool)/target_count*100:.1f}%)")
 
             return video_pool

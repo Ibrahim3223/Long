@@ -73,12 +73,12 @@ class MetadataGenerator:
             sentences = [s.get("text", "") for s in script.get("sentences", [])]
             full_script = "\n".join(sentences[:20])  # First 20 sentences for context
 
-            # Build Gemini prompt for SEO metadata (✅ SIMPLIFIED for token efficiency)
+            # Build Gemini prompt for SEO metadata (✅ IMPROVED: Longer description)
             prompt = f"""You are a YouTube SEO expert. Generate viral metadata for this video.
 
 TOPIC: {main_topic}
 LANGUAGE: {lang}
-SCRIPT START: {full_script[:500]}...
+SCRIPT START: {full_script[:600]}...
 
 Generate JSON with:
 1. TITLE (50-70 chars): Click-worthy + SEO-optimized. Use power words (shocking/secret/revealed), numbers if relevant. Must be grammatically correct and accurately describe content.
@@ -86,18 +86,44 @@ Generate JSON with:
    GOOD: "7 Shocking Facts About [Topic] That Will Blow Your Mind"
    BAD: "1 Amazing Facts..." (wrong grammar), "Video About Topic" (boring)
 
-2. DESCRIPTION (300-500 chars): First 150 chars = hook (shows in search). Include key topics + 3-5 search questions + soft CTA.
+2. DESCRIPTION (800-1000 chars - IMPORTANT!):
+   Structure:
+   - First 150 chars = compelling hook (shows in search!)
+   - Next 300 chars = key topics covered (use bullet points with emojis)
+   - Next 200 chars = related questions viewers search for
+   - Final 150 chars = soft CTA + channel info
+
+   Use emojis for visual appeal: 📌 ✅ 🎯 ❓ 💬 🔔
+
+   Example:
+   "Discover amazing facts about [topic]! 🤯 This video reveals...
+
+   📌 Topics covered:
+   • Point 1
+   • Point 2
+   • Point 3
+
+   ❓ Questions answered:
+   - What is X?
+   - How does Y work?
+
+   ✅ Subscribe for more educational content!
+   💬 Comment your thoughts below!"
 
 3. KEYWORDS (5-10 tags): Mix broad + specific + long-tail phrases from actual content.
 
 Return ONLY valid JSON (no markdown):
 {{
   "title": "Your optimized title",
-  "description": "Hook in first 150 chars. Key topics covered. Related questions: What is X? How does X work? Explore more on our channel!",
+  "description": "Your 800-1000 char description with structure and emojis...",
   "keywords": ["keyword1", "keyword2", "long tail phrase"]
 }}
 
-CRITICAL: Title must be grammatically correct. No placeholders. Output ONLY JSON.
+CRITICAL:
+- Title must be grammatically correct
+- Description MUST be 800-1000 characters (current length visible in search!)
+- Use emojis for better engagement
+- Output ONLY JSON
 """
 
             # Call Gemini with safety settings
