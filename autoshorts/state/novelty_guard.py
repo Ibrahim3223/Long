@@ -48,30 +48,72 @@ except ImportError:
 # SUB-TOPIC POOLS - Rotate angles within broad topics (NEW)
 # ============================================================================
 SUB_TOPIC_POOLS = {
+    # ✅ IMPROVED: Specific entities instead of abstract concepts
+    # User feedback: "her gün farklı bir içerik çıkartması mesela ülke kanalına her gün farklı bir ülke seçmesi"
     "country_facts": [
-        "geography", "culture", "history", "economy", "technology",
-        "food", "traditions", "nature", "urban_life", "innovations"
+        # Specific countries (60+ options for daily variety)
+        "Japan", "Iceland", "Norway", "Switzerland", "New Zealand", "Finland",
+        "South Korea", "Singapore", "Netherlands", "Denmark", "Sweden", "Canada",
+        "Australia", "Germany", "Austria", "Ireland", "Belgium", "Portugal",
+        "Spain", "Italy", "Greece", "Croatia", "Poland", "Czech Republic",
+        "Brazil", "Argentina", "Chile", "Peru", "Colombia", "Mexico",
+        "Thailand", "Vietnam", "Indonesia", "Philippines", "Malaysia", "Taiwan",
+        "Egypt", "Morocco", "Kenya", "South Africa", "Tanzania", "Ethiopia",
+        "India", "UAE", "Israel", "Turkey", "Russia", "Ukraine",
+        "Malta", "Luxembourg", "Estonia", "Latvia", "Slovenia", "Montenegro",
+        "Bhutan", "Nepal", "Sri Lanka", "Mongolia", "Kazakhstan", "Georgia"
     ],
     "animal_facts": [
-        "behavior", "habitat", "evolution", "hunting", "communication",
-        "reproduction", "survival", "migration", "social_structure"
+        # Specific animals (50+ options)
+        "octopus", "elephant", "penguin", "dolphin", "cheetah", "snow leopard",
+        "polar bear", "gorilla", "orangutan", "blue whale", "orca", "humpback whale",
+        "eagle", "owl", "falcon", "hummingbird", "parrot", "peacock",
+        "crocodile", "komodo dragon", "python", "cobra", "chameleon", "gecko",
+        "shark", "seahorse", "jellyfish", "sea turtle", "clownfish", "mantis shrimp",
+        "wolf", "fox", "lion", "tiger", "jaguar", "leopard",
+        "bat", "sloth", "kangaroo", "koala", "platypus", "echidna",
+        "meerkat", "lemur", "gibbon", "capybara", "otter", "seal"
+    ],
+    "everyday_objects": [
+        # Specific objects (40+ options)
+        "zipper", "pencil", "lightbulb", "paperclip", "stapler", "scissors",
+        "ballpoint pen", "eraser", "sticky notes", "rubber band", "safety pin",
+        "umbrella", "button", "velcro", "tape", "glue", "shoelaces",
+        "key", "lock", "doorknob", "window", "mirror", "clock",
+        "toothbrush", "comb", "soap", "towel", "cup", "plate",
+        "fork", "spoon", "knife", "can opener", "bottle opener", "corkscrew",
+        "magnet", "battery", "switch", "plug", "thread", "needle"
+    ],
+    "educational": [
+        # Specific topics for educational channels (use same as everyday_objects for now)
+        "zipper", "pencil", "lightbulb", "paperclip", "stapler", "scissors",
+        "ballpoint pen", "eraser", "sticky notes", "rubber band", "safety pin",
+        "umbrella", "button", "velcro", "tape", "glue", "shoelaces",
+        "key", "lock", "doorknob", "window", "mirror", "clock",
+        "toothbrush", "comb", "soap", "towel", "cup", "plate",
+        "fork", "spoon", "knife", "can opener", "bottle opener", "corkscrew",
+        "magnet", "battery", "switch", "plug", "thread", "needle"
     ],
     "history_story": [
-        "battles", "inventions", "discoveries", "leaders", "everyday_life",
-        "art", "architecture", "trade", "conflicts", "cultural_exchange"
+        # Specific historical events/periods
+        "Ancient Egypt", "Roman Empire", "Medieval Europe", "Renaissance", "Industrial Revolution",
+        "World War I", "World War II", "Cold War", "Space Race", "Ancient Greece",
+        "Vikings", "Silk Road", "Crusades", "American Revolution", "French Revolution"
     ],
     "tech_news": [
+        # Keep abstract for news (real-time content)
         "ai", "robotics", "chips", "software", "hardware", "privacy",
         "security", "networking", "quantum", "biotech"
     ],
     "space_news": [
+        # Keep abstract for news (real-time content)
         "missions", "discoveries", "technology", "planets", "stars",
         "commercial", "research", "telescopes", "astronauts"
     ],
-    # Default pool for unknown modes
+    # Default pool for unknown modes (use everyday objects as fallback)
     "_default": [
-        "origin", "science", "culture", "future", "comparison",
-        "hidden_aspect", "impact", "controversy", "innovation"
+        "zipper", "pencil", "lightbulb", "paperclip", "stapler", "umbrella",
+        "button", "velcro", "shoelaces", "key", "mirror", "clock"
     ]
 }
 

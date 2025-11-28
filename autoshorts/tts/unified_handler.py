@@ -116,15 +116,20 @@ class UnifiedTTSHandler:
         return self._last_word_timings
     
     def _get_provider_order(self) -> List[str]:
-        """Get provider priority order based on configuration."""
+        """
+        Get provider priority order based on configuration.
+
+        ✅ FIXED: No fallback when specific provider selected (prevents voice changes!)
+        User feedback: "bazı sahnelerde seslendirme değişiyor" (voice changes in scenes)
+        """
         if self.provider == 'kokoro':
-            return ['kokoro', 'edge', 'google']
+            return ['kokoro']  # ✅ NO fallback - same voice throughout!
         elif self.provider == 'edge':
-            return ['edge', 'kokoro', 'google']
+            return ['edge']  # ✅ NO fallback - same voice throughout!
         elif self.provider == 'google':
-            return ['google', 'edge', 'kokoro']
-        else:  # 'auto' - smart selection
-            # Use Kokoro if available (best quality), otherwise Edge
+            return ['google']  # ✅ NO fallback - same voice throughout!
+        else:  # 'auto' - smart selection with fallback
+            # Use Kokoro if available (best quality), with Edge/Google fallback
             return ['kokoro', 'edge', 'google']
     
     def _generate_with_provider(self, provider: str, text: str) -> Optional[Dict[str, Any]]:
