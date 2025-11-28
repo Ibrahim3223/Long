@@ -110,10 +110,36 @@ SUB_TOPIC_POOLS = {
         "missions", "discoveries", "technology", "planets", "stars",
         "commercial", "research", "telescopes", "astronauts"
     ],
-    # Default pool for unknown modes (use everyday objects as fallback)
+    "storytelling": [
+        # Abstract themes work better for creative storytelling
+        "origin", "journey", "transformation", "conflict", "discovery",
+        "mystery", "adventure", "redemption", "legacy", "revelation"
+    ],
+    "documentary": [
+        # Documentary angles/perspectives
+        "behind_the_scenes", "untold_story", "rise_and_fall", "evolution",
+        "impact", "legacy", "turning_point", "hidden_truth", "controversy"
+    ],
+    "entertainment": [
+        # Entertainment angles
+        "nostalgia", "what_if", "comparison", "ranking", "evolution",
+        "best_moments", "worst_fails", "hidden_details", "fan_theories"
+    ],
+    "sports": [
+        # Keep abstract for sports (game-specific content)
+        "highlights", "upsets", "comebacks", "records", "rivalries",
+        "underdogs", "dynasties", "controversies", "legends"
+    ],
+    "vlog": [
+        # Daily vlog themes
+        "day_in_life", "behind_scenes", "challenges", "experiments",
+        "reactions", "tutorials", "reviews", "updates", "Q&A"
+    ],
+    # ✅ MODULAR: Default pool for unknown modes
+    # Note: Channels can override by adding their own pool here
     "_default": [
-        "zipper", "pencil", "lightbulb", "paperclip", "stapler", "umbrella",
-        "button", "velcro", "shoelaces", "key", "mirror", "clock"
+        "origin", "science", "culture", "future", "comparison",
+        "hidden_aspect", "impact", "controversy", "innovation"
     ]
 }
 
