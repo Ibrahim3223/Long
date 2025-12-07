@@ -349,8 +349,8 @@ class GeminiClient:
             self.model_chain = [m.strip() for m in env_chain.split(",") if m.strip()]
         else:
             self.model_chain = [
-                "gemini-2.5-flash",       # Önerilen varsayılan
-                "gemini-2.0-flash-exp",   # Deneysel, farklı kota olabilir
+                "gemini-2.5-flash-lite",  # API limit dostu, hızlı
+                "gemini-2.5-flash",       # Fallback
             ]
         
         self.attempts_per_model = 2

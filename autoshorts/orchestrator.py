@@ -44,6 +44,66 @@ from autoshorts.state.state_guard import StateGuard
 from autoshorts.content.quality_scorer import QualityScorer
 from autoshorts.metadata.generator import MetadataGenerator
 
+# ============================================================================
+# ✅ NEW: Advanced Content & Video Systems (from WTFAC shorts)
+# ============================================================================
+# Hook Generator - 12 hook types with A/B testing
+try:
+    from autoshorts.content.hook_generator import HookGenerator
+except ImportError:
+    HookGenerator = None
+
+# Emotion Analyzer - 16 emotion types for content optimization
+try:
+    from autoshorts.content.emotion_analyzer import EmotionAnalyzer
+except ImportError:
+    EmotionAnalyzer = None
+
+# Retention Optimizer - curiosity gaps, story arc, pattern interrupts
+try:
+    from autoshorts.video.retention_optimizer import RetentionOptimizer
+except ImportError:
+    RetentionOptimizer = None
+
+# Pacing Engine - dynamic cut timing optimization
+try:
+    from autoshorts.video.pacing_engine import PacingEngine
+except ImportError:
+    PacingEngine = None
+
+# Color Grader - 8 LUT presets with mood-based selection
+try:
+    from autoshorts.video.color_grader import ColorGrader, GradingPlan, GradingIntensity, LUTPreset
+except ImportError:
+    ColorGrader = None
+    GradingPlan = None
+    GradingIntensity = None
+    LUTPreset = None
+
+# Mood Analyzer - AI-powered mood detection for color grading
+try:
+    from autoshorts.video.mood_analyzer import MoodAnalyzer
+except ImportError:
+    MoodAnalyzer = None
+
+# Caption Animator - 9 animation styles
+try:
+    from autoshorts.captions.caption_animator import CaptionAnimator
+except ImportError:
+    CaptionAnimator = None
+
+# Thumbnail Generator - face detection + AI text
+try:
+    from autoshorts.thumbnail.generator import ThumbnailGenerator
+except ImportError:
+    ThumbnailGenerator = None
+
+# Viral Pattern Analyzer - pattern matching for viral content
+try:
+    from autoshorts.content.viral_patterns import ViralPatternAnalyzer
+except ImportError:
+    ViralPatternAnalyzer = None
+
 PEXELS_SEARCH_ENDPOINT = "https://api.pexels.com/videos/search"
 
 logger = logging.getLogger(__name__)
@@ -226,6 +286,110 @@ class ShortsOrchestrator:
         except Exception as exc:
             logger.warning("State guard init failed: %s", exc)
             self.state_guard = None
+
+        # ====================================================================
+        # ✅ NEW: Advanced Content & Video Systems (from WTFAC shorts)
+        # ====================================================================
+        gemini_key = os.getenv("GEMINI_API_KEY")
+
+        # Hook Generator - 12 hook types with A/B testing
+        if HookGenerator is not None:
+            try:
+                self.hook_generator = HookGenerator(gemini_api_key=gemini_key)
+                logger.info("✅ Hook Generator initialized (12 hook types)")
+            except Exception as exc:
+                logger.warning("Hook Generator init failed: %s", exc)
+                self.hook_generator = None
+        else:
+            self.hook_generator = None
+
+        # Emotion Analyzer - 16 emotion types
+        if EmotionAnalyzer is not None:
+            try:
+                self.emotion_analyzer = EmotionAnalyzer(gemini_api_key=gemini_key)
+                logger.info("✅ Emotion Analyzer initialized (16 emotions)")
+            except Exception as exc:
+                logger.warning("Emotion Analyzer init failed: %s", exc)
+                self.emotion_analyzer = None
+        else:
+            self.emotion_analyzer = None
+
+        # Retention Optimizer - curiosity gaps, story arc, pattern interrupts
+        if RetentionOptimizer is not None:
+            try:
+                self.retention_optimizer = RetentionOptimizer(gemini_api_key=gemini_key)
+                logger.info("✅ Retention Optimizer initialized")
+            except Exception as exc:
+                logger.warning("Retention Optimizer init failed: %s", exc)
+                self.retention_optimizer = None
+        else:
+            self.retention_optimizer = None
+
+        # Pacing Engine - dynamic cut timing
+        if PacingEngine is not None:
+            try:
+                self.pacing_engine = PacingEngine(gemini_api_key=gemini_key)
+                logger.info("✅ Pacing Engine initialized")
+            except Exception as exc:
+                logger.warning("Pacing Engine init failed: %s", exc)
+                self.pacing_engine = None
+        else:
+            self.pacing_engine = None
+
+        # Color Grader - 8 LUT presets
+        if ColorGrader is not None:
+            try:
+                self.color_grader = ColorGrader()
+                logger.info("✅ Color Grader initialized (8 LUT presets)")
+            except Exception as exc:
+                logger.warning("Color Grader init failed: %s", exc)
+                self.color_grader = None
+        else:
+            self.color_grader = None
+
+        # Mood Analyzer - AI-powered mood detection
+        if MoodAnalyzer is not None:
+            try:
+                self.mood_analyzer = MoodAnalyzer(gemini_api_key=gemini_key)
+                logger.info("✅ Mood Analyzer initialized")
+            except Exception as exc:
+                logger.warning("Mood Analyzer init failed: %s", exc)
+                self.mood_analyzer = None
+        else:
+            self.mood_analyzer = None
+
+        # Caption Animator - 9 animation styles
+        if CaptionAnimator is not None:
+            try:
+                self.caption_animator = CaptionAnimator()
+                logger.info("✅ Caption Animator initialized (9 styles)")
+            except Exception as exc:
+                logger.warning("Caption Animator init failed: %s", exc)
+                self.caption_animator = None
+        else:
+            self.caption_animator = None
+
+        # Thumbnail Generator - face detection + AI text
+        if ThumbnailGenerator is not None:
+            try:
+                self.thumbnail_generator = ThumbnailGenerator(gemini_api_key=gemini_key)
+                logger.info("✅ Thumbnail Generator initialized")
+            except Exception as exc:
+                logger.warning("Thumbnail Generator init failed: %s", exc)
+                self.thumbnail_generator = None
+        else:
+            self.thumbnail_generator = None
+
+        # Viral Pattern Analyzer - pattern matching
+        if ViralPatternAnalyzer is not None:
+            try:
+                self.viral_analyzer = ViralPatternAnalyzer(gemini_api_key=gemini_key)
+                logger.info("✅ Viral Pattern Analyzer initialized")
+            except Exception as exc:
+                logger.warning("Viral Pattern Analyzer init failed: %s", exc)
+                self.viral_analyzer = None
+        else:
+            self.viral_analyzer = None
 
         # HTTP session for downloads
         self._http = requests.Session()
@@ -560,6 +724,83 @@ class ShortsOrchestrator:
                     logger.warning(f"Metadata generation failed: {e}")
                     logger.debug("", exc_info=True)
 
+            # ================================================================
+            # ✅ NEW: Emotion Analysis for content optimization
+            # ================================================================
+            if self.emotion_analyzer and sentences:
+                try:
+                    sentence_texts = [s["text"] for s in sentences if s.get("text")]
+                    emotion_analysis = self.emotion_analyzer.analyze_emotions(
+                        sentences=sentence_texts,
+                        topic=topic_prompt
+                    )
+
+                    script["emotion_analysis"] = {
+                        "dominant_emotion": emotion_analysis.dominant_emotion.value,
+                        "emotion_arc": [e.value for e in emotion_analysis.emotion_arc],
+                        "emotional_intensity": emotion_analysis.emotional_intensity,
+                        "sentiment_score": emotion_analysis.sentiment_score,
+                    }
+
+                    logger.info(f"😊 Emotion Analysis: {emotion_analysis.dominant_emotion.value}")
+                    logger.info(f"   → Intensity: {emotion_analysis.emotional_intensity:.2f}")
+                    logger.info(f"   → Sentiment: {emotion_analysis.sentiment_score:.2f}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Emotion analysis failed: {e}")
+
+            # ================================================================
+            # ✅ NEW: Hook optimization with HookGenerator
+            # ================================================================
+            if self.hook_generator and script.get("hook"):
+                try:
+                    content_type = os.getenv("CONTENT_TYPE", "education")
+                    hook_variants = self.hook_generator.generate_hook_variants(
+                        topic=topic_prompt,
+                        original_hook=script["hook"],
+                        content_type=content_type,
+                        num_variants=3
+                    )
+
+                    if hook_variants:
+                        # Store variants for A/B testing
+                        script["hook_variants"] = [h.text for h in hook_variants]
+                        script["hook_analysis"] = {
+                            "original_type": hook_variants[0].hook_type.value if hook_variants else "unknown",
+                            "variants_count": len(hook_variants),
+                            "best_score": max(h.engagement_score for h in hook_variants) if hook_variants else 0,
+                        }
+
+                        logger.info(f"🪝 Hook Optimization: {len(hook_variants)} variants generated")
+                        logger.info(f"   → Best hook score: {script['hook_analysis']['best_score']:.2f}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Hook optimization failed: {e}")
+
+            # ================================================================
+            # ✅ NEW: Viral Pattern Analysis
+            # ================================================================
+            if self.viral_analyzer:
+                try:
+                    content_type = os.getenv("CONTENT_TYPE", "education")
+                    pattern_matches = self.viral_analyzer.analyze_content(
+                        topic=topic_prompt,
+                        content_type=content_type
+                    )
+
+                    if pattern_matches:
+                        script["viral_patterns"] = {
+                            "matched_patterns": len(pattern_matches),
+                            "top_patterns": [
+                                {"name": p.pattern.name, "score": p.match_score}
+                                for p in pattern_matches[:3]
+                            ],
+                            "viral_score": sum(p.match_score for p in pattern_matches) / len(pattern_matches),
+                        }
+
+                        logger.info(f"📈 Viral Pattern Analysis: {len(pattern_matches)} patterns matched")
+                        logger.info(f"   → Viral score: {script['viral_patterns']['viral_score']:.2f}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Viral pattern analysis failed: {e}")
+
             return script
         except Exception as exc:
             logger.error("Script generation error: %s", exc)
@@ -795,6 +1036,71 @@ class ShortsOrchestrator:
             self.shot_variety.reset()
             logger.debug("Shot variety manager reset for new video")
 
+        # ====================================================================
+        # ✅ NEW: Mood Analysis for Color Grading
+        # ====================================================================
+        self._current_mood = None
+        self._current_lut = None
+        if self.mood_analyzer:
+            try:
+                topic = script.get("title", "")
+                content_type = os.getenv("CONTENT_TYPE", "education")
+                sentence_texts = [s.get("text", "") for s in sentences]
+
+                mood_analysis = self.mood_analyzer.analyze_mood(
+                    topic=topic,
+                    script=sentence_texts,
+                    content_type=content_type
+                )
+
+                self._current_mood = mood_analysis.primary_mood
+                self._current_lut = mood_analysis.recommended_lut
+
+                logger.info(f"🎨 Mood Analysis: {mood_analysis.primary_mood.value}")
+                logger.info(f"   → Recommended LUT: {mood_analysis.recommended_lut.value}")
+                logger.info(f"   → Confidence: {mood_analysis.confidence:.2f}")
+
+                # Store in script for later use
+                script["mood_analysis"] = {
+                    "primary_mood": mood_analysis.primary_mood.value,
+                    "secondary_moods": [m.value for m in mood_analysis.secondary_moods],
+                    "recommended_lut": mood_analysis.recommended_lut.value,
+                    "confidence": mood_analysis.confidence,
+                }
+            except Exception as e:
+                logger.warning(f"⚠️ Mood analysis failed: {e}")
+
+        # ====================================================================
+        # ✅ NEW: Retention Analysis (curiosity gaps, pacing)
+        # ====================================================================
+        self._retention_plan = None
+        if self.retention_optimizer:
+            try:
+                topic = script.get("title", "")
+                sentence_texts = [s.get("text", "") for s in sentences]
+                content_type = os.getenv("CONTENT_TYPE", "education")
+
+                retention_plan = self.retention_optimizer.optimize_retention(
+                    topic=topic,
+                    sentences=sentence_texts,
+                    content_type=content_type
+                )
+
+                self._retention_plan = retention_plan
+                logger.info(f"📊 Retention Optimization Complete")
+                logger.info(f"   → Estimated Retention: {retention_plan.estimated_retention:.1f}%")
+                logger.info(f"   → Curiosity Gaps: {len(retention_plan.curiosity_gaps)}")
+                logger.info(f"   → Surprise Elements: {len(retention_plan.surprise_elements)}")
+
+                # Store in script
+                script["retention_plan"] = {
+                    "estimated_retention": retention_plan.estimated_retention,
+                    "curiosity_gap_count": len(retention_plan.curiosity_gaps),
+                    "surprise_count": len(retention_plan.surprise_elements),
+                }
+            except Exception as e:
+                logger.warning(f"⚠️ Retention optimization failed: {e}")
+
         logger.info("🎙️ Generating TTS for %d sentences", len(sentences))
         tts_results = self._generate_all_tts(sentences)
 
@@ -981,7 +1287,9 @@ class ShortsOrchestrator:
 
     def _generate_thumbnail(self, script: Dict, video_path: str) -> Optional[str]:
         """
-        Generate thumbnail from Pexels image with VIRAL text overlay.
+        Generate thumbnail from video frames with face detection and AI text.
+
+        Uses the new ThumbnailGenerator if available, falls back to Pexels images.
 
         Args:
             script: Script dictionary
@@ -990,6 +1298,43 @@ class ShortsOrchestrator:
         Returns:
             Path to thumbnail image or None
         """
+        # ====================================================================
+        # ✅ NEW: Try advanced ThumbnailGenerator first (face detection + AI)
+        # ====================================================================
+        if self.thumbnail_generator and os.path.exists(video_path):
+            try:
+                topic = script.get("title", "")
+                thumbnail_text = script.get("thumbnail_text", "")
+
+                logger.info("🖼️ Using advanced ThumbnailGenerator (face detection + AI text)")
+
+                result = self.thumbnail_generator.generate_thumbnail(
+                    video_path=video_path,
+                    topic=topic,
+                    output_dir=str(self.temp_dir),
+                    text_override=thumbnail_text if thumbnail_text else None,
+                    generate_variants=False  # Single thumbnail for now
+                )
+
+                if result and os.path.exists(result.main_thumbnail):
+                    logger.info(f"✅ Advanced thumbnail generated: {result.main_thumbnail}")
+                    logger.info(f"   → Best frame score: {result.best_frame_score:.2f}")
+
+                    # Store metadata
+                    script["thumbnail_metadata"] = {
+                        "method": "face_detection",
+                        "frame_score": result.best_frame_score,
+                        "text_style": result.text_style.value if result.text_style else None,
+                    }
+
+                    return result.main_thumbnail
+
+            except Exception as e:
+                logger.warning(f"⚠️ Advanced thumbnail generation failed: {e}, falling back to Pexels")
+
+        # ====================================================================
+        # Fallback: Generate from Pexels image
+        # ====================================================================
         try:
             import requests
             from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
@@ -1915,24 +2260,50 @@ class ShortsOrchestrator:
         output_path: str,
         target_duration: float
     ) -> None:
-        """Process video clip to target duration and format."""
+        """Process video clip to target duration and format with color grading."""
         try:
             clip_duration = ffprobe_duration(input_path)
-            
+
             # Determine start point (random for variety)
             max_start = max(0, clip_duration - target_duration)
             start_time = random.uniform(0, max_start) if max_start > 0 else 0
-            
+
             # ✅ FIXED: Use settings for video dimensions (supports shorts 1080x1920 and long 1920x1080)
             video_width = settings.VIDEO_WIDTH
             video_height = settings.VIDEO_HEIGHT
+
+            # ✅ NEW: Build video filter with color grading
+            base_filter = f"scale={video_width}:{video_height}:force_original_aspect_ratio=increase,crop={video_width}:{video_height}"
+
+            # Add color grading if available
+            color_filter = None
+            if self.color_grader and self._current_lut and GradingPlan is not None:
+                try:
+                    grading_plan = GradingPlan(
+                        lut_preset=self._current_lut,
+                        intensity=GradingIntensity.MODERATE,
+                        reason="Mood-based color grading"
+                    )
+                    color_filter = self.color_grader.get_ffmpeg_filter(
+                        grading=grading_plan,
+                        mobile_optimized=True
+                    )
+                    logger.debug(f"🎨 Applying color grading: {self._current_lut.value}")
+                except Exception as e:
+                    logger.debug(f"Color grading filter generation failed: {e}")
+
+            # Combine filters
+            if color_filter and color_filter != "null":
+                vf_filter = f"{base_filter},{color_filter}"
+            else:
+                vf_filter = base_filter
 
             run([
                 "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                 "-ss", f"{start_time:.3f}",
                 "-i", input_path,
                 "-t", f"{target_duration:.3f}",
-                "-vf", f"scale={video_width}:{video_height}:force_original_aspect_ratio=increase,crop={video_width}:{video_height}",
+                "-vf", vf_filter,
                 "-r", "30",
                 "-c:v", "libx264",
                 "-preset", self.ffmpeg_preset,

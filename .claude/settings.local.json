@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(bash -c 'find \"\"/c/Users/Dante/Desktop/Yeniden/vs auto/WTFAC/WTFAC/autoshorts\"\" -name \"\"*.py\"\" -type f -print0 | xargs -0 wc -l | tail -1')",
+      "Bash(python -m py_compile:*)",
+      "Bash(python:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []
