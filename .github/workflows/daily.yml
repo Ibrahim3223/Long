@@ -25,6 +25,35 @@ jobs:
     environment: ${{ inputs.environment }}
 
     steps:
+      # ✅ CRITICAL: Free up disk space FIRST (before any installs)
+      # GitHub runners have ~14GB free, but PyTorch+transformers need ~6GB
+      - name: Free Disk Space
+        run: |
+          echo "📊 Disk space BEFORE cleanup:"
+          df -h /
+
+          echo "🧹 Removing unnecessary tools and packages..."
+
+          # Remove large pre-installed packages we don't need
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo rm -rf /usr/share/swift || true
+
+          # Remove Docker images (we don't use Docker)
+          sudo docker image prune -a -f || true
+
+          # Clean apt cache
+          sudo apt-get clean || true
+          sudo rm -rf /var/lib/apt/lists/* || true
+
+          echo "📊 Disk space AFTER cleanup:"
+          df -h /
+
+          echo "✅ Freed up disk space for package installation"
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
