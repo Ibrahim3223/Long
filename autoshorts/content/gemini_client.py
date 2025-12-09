@@ -381,8 +381,22 @@ class GeminiClient:
             self.model = model or settings.GROQ_MODEL
             logger.info(f"✅ [Groq] API key: {groq_api_key[:10]}...{groq_api_key[-4:]}")
             logger.info(f"🚀 [Groq] Model: {self.model} (14.4K req/day free tier!)")
-            self.client = None
-            self.model_chain = []
+
+            # ✅ Also initialize Gemini client for fallback
+            self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
+            if self.api_key and GEMINI_AVAILABLE:
+                try:
+                    self.client = genai.Client(api_key=self.api_key)
+                    logger.info(f"✅ [Gemini] Fallback client ready")
+                    # Fallback model chain
+                    self.model_chain = ["gemini-2.5-flash-lite", "gemini-2.5-flash"]
+                except Exception as e:
+                    logger.warning(f"⚠️ Gemini fallback init failed: {e}")
+                    self.client = None
+                    self.model_chain = []
+            else:
+                self.client = None
+                self.model_chain = []
 
         else:  # gemini
             self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
@@ -590,12 +604,26 @@ Return JSON with: hook, script, cta, search_queries, main_visual_focus, chapters
         max_output_tokens: int = 16000,
         temperature: float = 0.8
     ) -> str:
-        """Call API with retry + fallback logic - supports Gemini and Groq"""
-        # Route to appropriate provider
-        if self.provider == "groq":
-            return self._call_groq_api(prompt, temperature)
-        else:
-            return self._call_gemini_api(prompt, max_output_tokens, temperature)
+        """
+        Call API with retry + fallback logic.
+
+        Priority: Groq → Gemini (if Groq fails)
+        """
+        # Try Groq first (if configured)
+        if self.provider == "groq" and self.groq_client:
+            try:
+                return self._call_groq_api(prompt, temperature)
+            except Exception as e:
+                logger.warning(f"⚠️ Groq failed, falling back to Gemini: {e}")
+                # Fallback to Gemini if available
+                if GEMINI_AVAILABLE and self.client:
+                    logger.info("🔄 Switching to Gemini as fallback...")
+                    return self._call_gemini_api(prompt, max_output_tokens, temperature)
+                else:
+                    raise RuntimeError(f"Groq failed and Gemini not available: {e}")
+
+        # Use Gemini directly
+        return self._call_gemini_api(prompt, max_output_tokens, temperature)
 
     def _call_groq_api(self, prompt: str, temperature: float = 0.8) -> str:
         """Make API call to Groq"""
