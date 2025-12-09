@@ -119,9 +119,34 @@ YT_REFRESH_TOKEN = _env_str("YT_REFRESH_TOKEN", "")
 # GEMINI SETTINGS
 # ============================================================
 
-GEMINI_MODEL = _env_str("GEMINI_MODEL", "flash")
+GEMINI_MODEL = _env_str("GEMINI_MODEL", "gemini-2.5-flash-lite")
 USE_GEMINI = _env_bool("USE_GEMINI", True)
 ADDITIONAL_PROMPT_CONTEXT = _env_str("ADDITIONAL_PROMPT_CONTEXT", "")
+
+# ============================================================
+# GROQ SETTINGS (Alternative LLM - 14.4K req/day free tier!)
+# ============================================================
+
+GROQ_API_KEY = _env_str("GROQ_API_KEY", "")
+GROQ_MODEL = _env_str("GROQ_MODEL", "llama-3.1-8b-instant")
+LLM_PROVIDER = _env_str("LLM_PROVIDER", "auto")  # 'auto', 'gemini', 'groq'
+
+
+def get_active_llm_provider() -> str:
+    """
+    Determine which LLM provider to use.
+
+    Returns:
+        'groq' or 'gemini'
+    """
+    if LLM_PROVIDER == "groq":
+        return "groq"
+    elif LLM_PROVIDER == "gemini":
+        return "gemini"
+    else:  # 'auto' - prefer Groq for higher limits
+        if GROQ_API_KEY:
+            return "groq"
+        return "gemini"
 
 # ============================================================
 # ✅ ULTIMATE VIDEO SETTINGS - LONG-FORM & SHORTS

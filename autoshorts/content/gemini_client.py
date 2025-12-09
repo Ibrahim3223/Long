@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Gemini Client - ENHANCED VERSION with Mode & Sub-Topic Support
+LLM Client - Multi-Provider Support (Gemini + Groq)
 ✅ Kanal mode'una göre içerik üretir (country_facts, history_story, vb.)
 ✅ Sub-topic rotation ile 6+ ay benzersiz içerik
 ✅ Her kanal konseptine uygun prompting
+✅ Groq desteği (14.4K req/gün free tier!)
 """
 
 import json
@@ -15,13 +16,23 @@ import time
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 
+# Gemini imports
 try:
     from google import genai
     from google.genai import types
-except ImportError as e:
-    raise ImportError(
-        "google-genai paketi bulunamadı. Lütfen yükleyin: pip install google-genai>=0.2.0"
-    ) from e
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    genai = None
+    types = None
+
+# Groq imports (Alternative LLM - 14.4K req/day free tier!)
+try:
+    from groq import Groq
+    GROQ_AVAILABLE = True
+except ImportError:
+    GROQ_AVAILABLE = False
+    Groq = None
 
 # ✅ Import settings for TARGET_DURATION, MIN_SENTENCES, MAX_SENTENCES
 from autoshorts.config import settings
@@ -332,33 +343,75 @@ def _ultra_seo_metadata_fixed(
 
 
 class GeminiClient:
-    """Gemini API client for content generation"""
-    
-    def __init__(self, api_key: Optional[str] = None):
-        """Initialize Gemini client"""
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
-        if not self.api_key:
-            raise ValueError("GEMINI_API_KEY is required")
-        
-        self.client = genai.Client(api_key=self.api_key)
-        
-        # Güncel ve destekli model zinciri
-        # (İstersen GEMINI_MODEL_CHAIN env ile "m1,m2,m3" şeklinde override edebilirsin)
-        env_chain = os.getenv("GEMINI_MODEL_CHAIN", "").strip()
-        if env_chain:
-            self.model_chain = [m.strip() for m in env_chain.split(",") if m.strip()]
-        else:
-            self.model_chain = [
-                "gemini-2.5-flash-lite",  # API limit dostu, hızlı
-                "gemini-2.5-flash",       # Fallback
-            ]
-        
+    """LLM client for content generation - supports Gemini and Groq"""
+
+    # Groq models (RECOMMENDED - 14.4K req/day free tier!)
+    GROQ_MODELS = {
+        "llama-3.1-8b-instant": "llama-3.1-8b-instant",  # 14.4K req/day - BEST FOR FREE
+        "llama-3.3-70b-versatile": "llama-3.3-70b-versatile",  # 1K req/day - Higher quality
+        "llama-3.1-70b-versatile": "llama-3.1-70b-versatile",  # Legacy
+        "mixtral-8x7b-32768": "mixtral-8x7b-32768",  # Good alternative
+    }
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        provider: str = "gemini",  # 'gemini' or 'groq'
+        groq_api_key: Optional[str] = None,
+        model: Optional[str] = None
+    ):
+        """
+        Initialize LLM client.
+
+        Args:
+            api_key: Gemini API key (for backward compatibility)
+            provider: LLM provider ('gemini' or 'groq')
+            groq_api_key: Groq API key (if provider is 'groq')
+            model: Model name (optional override)
+        """
+        self.provider = provider
+
+        if provider == "groq":
+            if not groq_api_key:
+                raise ValueError("GROQ_API_KEY is required for Groq provider")
+            if not GROQ_AVAILABLE:
+                raise ImportError("groq package not installed. Run: pip install groq")
+
+            self.groq_client = Groq(api_key=groq_api_key)
+            self.model = model or settings.GROQ_MODEL
+            logger.info(f"✅ [Groq] API key: {groq_api_key[:10]}...{groq_api_key[-4:]}")
+            logger.info(f"🚀 [Groq] Model: {self.model} (14.4K req/day free tier!)")
+            self.client = None
+            self.model_chain = []
+
+        else:  # gemini
+            self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
+            if not self.api_key:
+                raise ValueError("GEMINI_API_KEY is required")
+            if not GEMINI_AVAILABLE:
+                raise ImportError("google-genai package not installed. Run: pip install google-genai")
+
+            self.client = genai.Client(api_key=self.api_key)
+            self.groq_client = None
+
+            # Model zinciri
+            env_chain = os.getenv("GEMINI_MODEL_CHAIN", "").strip()
+            if env_chain:
+                self.model_chain = [m.strip() for m in env_chain.split(",") if m.strip()]
+            else:
+                self.model_chain = [
+                    "gemini-2.5-flash-lite",  # API limit dostu, hızlı
+                    "gemini-2.5-flash",       # Fallback
+                ]
+            self.model = model or self.model_chain[0]
+
+            logger.info(f"✅ [Gemini] API key: {self.api_key[:10]}...{self.api_key[-4:]}")
+            logger.info(f"✅ [Gemini] Model: {self.model}")
+
         self.attempts_per_model = 2
         self.total_attempts = 4
         self.initial_backoff = 2.0
         self.max_backoff = 32.0
-        
-        logger.info(f"✅ GeminiClient initialized with {len(self.model_chain)} models")
     
     def generate(
         self,
@@ -537,7 +590,60 @@ Return JSON with: hook, script, cta, search_queries, main_visual_focus, chapters
         max_output_tokens: int = 16000,
         temperature: float = 0.8
     ) -> str:
-        """Call API with retry + fallback logic"""
+        """Call API with retry + fallback logic - supports Gemini and Groq"""
+        # Route to appropriate provider
+        if self.provider == "groq":
+            return self._call_groq_api(prompt, temperature)
+        else:
+            return self._call_gemini_api(prompt, max_output_tokens, temperature)
+
+    def _call_groq_api(self, prompt: str, temperature: float = 0.8) -> str:
+        """Make API call to Groq"""
+        for attempt in range(self.total_attempts):
+            try:
+                logger.info(f"[Groq] Attempt {attempt+1}/{self.total_attempts} with {self.model}")
+
+                response = self.groq_client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a viral content creator for YouTube long-form videos. Always respond with valid JSON only, no markdown blocks."
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    temperature=temperature,
+                    max_tokens=16000,
+                    top_p=0.95,
+                )
+
+                if response.choices and response.choices[0].message.content:
+                    text = response.choices[0].message.content.strip()
+                    # Sanitize control characters
+                    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
+                    logger.info(f"✅ [Groq] Success with {self.model}")
+                    return text
+
+                raise RuntimeError("Empty response from Groq")
+
+            except Exception as e:
+                logger.warning(f"❌ [Groq] Attempt {attempt+1} failed: {e}")
+                if attempt < self.total_attempts - 1:
+                    time.sleep(self.initial_backoff * (attempt + 1))
+                continue
+
+        raise RuntimeError("All Groq API attempts exhausted")
+
+    def _call_gemini_api(
+        self,
+        prompt: str,
+        max_output_tokens: int = 16000,
+        temperature: float = 0.8
+    ) -> str:
+        """Make API call to Gemini"""
         attempt = 0
         backoff = self.initial_backoff
 
@@ -549,7 +655,7 @@ Return JSON with: hook, script, cta, search_queries, main_visual_focus, chapters
 
                 try:
                     logger.info(f"[Gemini] Attempt {attempt}/{self.total_attempts} with {model_name}")
-                    
+
                     response = self.client.models.generate_content(
                         model=model_name,
                         contents=prompt,
@@ -559,25 +665,24 @@ Return JSON with: hook, script, cta, search_queries, main_visual_focus, chapters
                             response_mime_type="application/json"
                         )
                     )
-                    
+
                     text = response.text.strip()
                     if not text:
                         raise ValueError("Empty response from Gemini")
-                    
-                    # ✅ Sanitize control characters from JSON
-                    import re
-                    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)  # Remove control chars
-                    
-                    logger.info(f"✅ Success with {model_name}")
+
+                    # Sanitize control characters from JSON
+                    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
+
+                    logger.info(f"✅ [Gemini] Success with {model_name}")
                     return text
-                    
+
                 except Exception as e:
-                    logger.warning(f"❌ Attempt {attempt} failed: {e}")
+                    logger.warning(f"❌ [Gemini] Attempt {attempt} failed: {e}")
                     if attempt < self.total_attempts:
                         # 404/NOT_FOUND ise bekleme yapmadan sıradaki modele geç
                         if "404" in str(e) or "NOT_FOUND" in str(e):
                             continue
-                        # 429 için sunucunun önerdiği gecikmeyi uygula (RetryInfo / 'Please retry in Xs')
+                        # 429 için sunucunun önerdiği gecikmeyi uygula
                         delay = self._extract_retry_after_seconds(e)
                         if delay:
                             backoff = max(backoff, float(delay))
@@ -585,8 +690,8 @@ Return JSON with: hook, script, cta, search_queries, main_visual_focus, chapters
                         time.sleep(backoff)
                         backoff = min(backoff * 2, self.max_backoff)
                     continue
-        
-        raise RuntimeError("All API attempts exhausted")
+
+        raise RuntimeError("All Gemini API attempts exhausted")
     
     @staticmethod
     def _extract_retry_after_seconds(err: Exception) -> Optional[float]:

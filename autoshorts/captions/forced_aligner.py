@@ -4,12 +4,89 @@ Forced Alignment - ✅ İYİLEŞTİRİLMİŞ
 - Daha hassas timing
 - Büyük harf desteği
 - Gelişmiş validasyon
+- ✅ SAYI KORUMA: "2" -> "two" sorunu çözüldü
 """
+import os
 import logging
 import warnings
 from typing import List, Tuple, Optional
 
 logger = logging.getLogger(__name__)
+
+# ============================================================
+# NUMBER WORD MAPPINGS - Fix "2" -> "two" issue in captions
+# ============================================================
+NUMBER_WORDS = {
+    "0": ["zero", "o", "oh"],
+    "1": ["one", "won"],
+    "2": ["two", "to", "too"],
+    "3": ["three"],
+    "4": ["four", "for", "fore"],
+    "5": ["five"],
+    "6": ["six"],
+    "7": ["seven"],
+    "8": ["eight", "ate"],
+    "9": ["nine"],
+    "10": ["ten"],
+    "11": ["eleven"],
+    "12": ["twelve"],
+    "13": ["thirteen"],
+    "14": ["fourteen"],
+    "15": ["fifteen"],
+    "16": ["sixteen"],
+    "17": ["seventeen"],
+    "18": ["eighteen"],
+    "19": ["nineteen"],
+    "20": ["twenty"],
+    "30": ["thirty"],
+    "40": ["forty"],
+    "50": ["fifty"],
+    "60": ["sixty"],
+    "70": ["seventy"],
+    "80": ["eighty"],
+    "90": ["ninety"],
+    "100": ["hundred"],
+    "1000": ["thousand"],
+}
+
+# Reverse mapping: word -> digit
+WORD_TO_NUMBER = {}
+for digit, words in NUMBER_WORDS.items():
+    for word in words:
+        WORD_TO_NUMBER[word] = digit
+
+
+def _numbers_match(known: str, trans: str) -> bool:
+    """
+    Check if a number digit matches a transcribed word.
+
+    Examples:
+        _numbers_match("2", "two") -> True
+        _numbers_match("4", "for") -> True
+        _numbers_match("10", "ten") -> True
+    """
+    # Direct match
+    if known == trans:
+        return True
+
+    # Check if known is a digit and trans is its word form
+    if known in NUMBER_WORDS:
+        if trans in NUMBER_WORDS[known]:
+            return True
+
+    # Check if trans is a digit and known is its word form
+    if trans in NUMBER_WORDS:
+        if known in NUMBER_WORDS[trans]:
+            return True
+
+    # Check reverse mapping
+    if known in WORD_TO_NUMBER and WORD_TO_NUMBER[known] == trans:
+        return True
+    if trans in WORD_TO_NUMBER and WORD_TO_NUMBER[trans] == known:
+        return True
+
+    return False
+
 
 # Lazy import / availability flag
 _STABLE_TS_AVAILABLE = False
@@ -46,16 +123,28 @@ class ForcedAligner:
     ) -> List[Tuple[str, float]]:
         """Main alignment entry point with fallback chain."""
         lang = (language or self.language).lower()
-        
+
         # ✅ Metni büyük harfe çevir
         text = (text or "").strip().upper()
 
-        # 1) TTS timings varsa, validate et ve dön
-        if tts_word_timings:
-            logger.debug(f"      Using TTS word timings ({len(tts_word_timings)} words)")
-            # ✅ TTS timings de büyük harfe çevrilsin
-            tts_word_timings = [(w.strip().upper(), d) for w, d in tts_word_timings]
-            return self._validate_timings(tts_word_timings, total_duration)
+        # ✅ CRITICAL: Get KNOWN words from original text (preserves "2", "10", etc.)
+        known_words = [w.strip() for w in text.split() if w.strip()]
+
+        # 1) TTS timings varsa - MAP TO KNOWN WORDS (sayı koruma!)
+        if tts_word_timings and len(tts_word_timings) > 0:
+            logger.debug(f"      📝 TTS provided {len(tts_word_timings)} word timings")
+
+            # ✅ CRITICAL FIX: Map durations to KNOWN WORDS, not transcribed words
+            # This fixes numbers being replaced (e.g., "2" -> "two")
+            mapped_timings = self._map_tts_timings_to_known_words(
+                known_words=known_words,
+                tts_word_timings=tts_word_timings,
+                total_duration=total_duration
+            )
+
+            if mapped_timings:
+                logger.debug(f"      ✅ Mapped TTS timings to {len(mapped_timings)} known words")
+                return self._validate_timings(mapped_timings, total_duration)
 
         # 2) Forced alignment via stable-ts
         if _STABLE_TS_AVAILABLE:
@@ -152,6 +241,92 @@ class ForcedAligner:
             ]
 
         return self._validate_timings(mapped, total_duration)
+
+    def _map_tts_timings_to_known_words(
+        self,
+        known_words: List[str],
+        tts_word_timings: List[Tuple[str, float]],
+        total_duration: Optional[float]
+    ) -> Optional[List[Tuple[str, float]]]:
+        """
+        ✅ CRITICAL: Map TTS word timings to KNOWN words from original text.
+
+        This preserves numbers in captions:
+        - Known text: "PART 2 IS COMING"
+        - TTS output: "PART TWO IS COMING"
+        - Result: ["PART", "2", "IS", "COMING"] with correct durations
+
+        Uses _numbers_match() to handle "2" <-> "two" matching.
+        """
+        if not known_words or not tts_word_timings:
+            return None
+
+        # Normalize TTS words to uppercase
+        tts_words = [(w.strip().upper(), d) for w, d in tts_word_timings if w.strip()]
+
+        if not tts_words:
+            return None
+
+        # ✅ Case 1: Same word count - direct mapping with number preservation
+        if len(known_words) == len(tts_words):
+            result = []
+            for i, known in enumerate(known_words):
+                tts_word, tts_dur = tts_words[i]
+
+                # Use known word (preserves "2") with TTS duration
+                result.append((known, tts_dur))
+
+                # Log if we preserved a number
+                if known != tts_word and _numbers_match(known.lower(), tts_word.lower()):
+                    logger.debug(f"      🔢 Number preserved: '{tts_word}' -> '{known}'")
+
+            return result
+
+        # ✅ Case 2: Different word counts - try smart alignment
+        logger.debug(f"      ⚠️ Word count mismatch: known={len(known_words)}, tts={len(tts_words)}")
+
+        # Try to align words using fuzzy matching
+        result = []
+        tts_idx = 0
+
+        for known in known_words:
+            known_lower = known.lower()
+
+            # Find matching TTS word
+            matched = False
+            search_range = min(3, len(tts_words) - tts_idx)  # Look ahead up to 3 words
+
+            for offset in range(search_range):
+                if tts_idx + offset >= len(tts_words):
+                    break
+
+                tts_word, tts_dur = tts_words[tts_idx + offset]
+                tts_lower = tts_word.lower()
+
+                # Check for exact match or number match
+                if known_lower == tts_lower or _numbers_match(known_lower, tts_lower):
+                    result.append((known, tts_dur))
+                    tts_idx = tts_idx + offset + 1
+                    matched = True
+
+                    if known_lower != tts_lower:
+                        logger.debug(f"      🔢 Number preserved: '{tts_word}' -> '{known}'")
+                    break
+
+            # If no match found, use average duration
+            if not matched:
+                avg_dur = sum(d for _, d in tts_words) / len(tts_words)
+                result.append((known, avg_dur))
+                logger.debug(f"      ⚠️ No TTS match for '{known}', using avg duration {avg_dur:.3f}s")
+
+        # ✅ Scale to total duration if provided
+        if result and total_duration is not None:
+            current_sum = sum(d for _, d in result)
+            if current_sum > 0:
+                scale = total_duration / current_sum
+                result = [(w, d * scale) for w, d in result]
+
+        return result if result else None
 
     # --------------------------- Utilities --------------------------- #
 

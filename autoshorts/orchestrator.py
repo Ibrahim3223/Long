@@ -210,10 +210,29 @@ class ShortsOrchestrator:
         self.ffmpeg_preset = ffmpeg_preset
 
         # ✅ Store API keys
-        self.pexels_key = pexels_key        
+        self.pexels_key = pexels_key
 
-        # API clients
-        self.gemini = GeminiClient(api_key=api_key)
+        # ====================================================================
+        # ✅ LLM Client (Gemini or Groq based on configuration)
+        # ====================================================================
+        llm_provider = settings.get_active_llm_provider()
+        groq_api_key = settings.GROQ_API_KEY
+
+        if llm_provider == "groq":
+            if not groq_api_key:
+                raise ValueError("GROQ_API_KEY not found!")
+            logger.info(f"✅ Groq API key: {groq_api_key[:10]}...")
+            logger.info(f"🚀 Using Groq LLM (14.4K req/day free tier!)")
+            self.gemini = GeminiClient(
+                api_key=api_key,
+                provider="groq",
+                groq_api_key=groq_api_key
+            )
+        else:
+            if not api_key:
+                raise ValueError("GEMINI_API_KEY not found!")
+            logger.info(f"✅ Gemini API key: {api_key[:10]}...")
+            self.gemini = GeminiClient(api_key=api_key, provider="gemini")
         self.pexels = PexelsClient(api_key=pexels_key)
         
         # ✅ Pixabay as backup
