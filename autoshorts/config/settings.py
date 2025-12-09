@@ -152,10 +152,10 @@ def get_active_llm_provider() -> str:
 # ✅ ULTIMATE VIDEO SETTINGS - LONG-FORM & SHORTS
 # ============================================================
 
-# Target duration (seconds) - configurable for shorts (60s) vs long (360s)
-TARGET_DURATION = _env_int("TARGET_DURATION", 360)  # 6 minutes for long, 60s for shorts
-TARGET_MIN_SEC = _env_float("MIN_DURATION", 240.0)  # Min duration
-TARGET_MAX_SEC = _env_float("MAX_DURATION", 480.0)  # Max duration
+# Target duration (seconds) - configurable for shorts (60s) vs long (420s)
+TARGET_DURATION = _env_int("TARGET_DURATION", 420)  # 7 minutes for long-form
+TARGET_MIN_SEC = _env_float("MIN_DURATION", 360.0)  # Min 6 minutes
+TARGET_MAX_SEC = _env_float("MAX_DURATION", 540.0)  # Max 9 minutes
 
 # Video dimensions - configurable for shorts (9:16) vs long (16:9)
 VIDEO_WIDTH = _env_int("VIDEO_WIDTH", 1920)
