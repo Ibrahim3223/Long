@@ -358,6 +358,7 @@ class GeminiClient:
         api_key: Optional[str] = None,
         provider: str = "gemini",  # 'gemini' or 'groq'
         groq_api_key: Optional[str] = None,
+        groq_api_keys: Optional[List[str]] = None,  # Multiple keys for rotation
         model: Optional[str] = None
     ):
         """
@@ -367,20 +368,27 @@ class GeminiClient:
             api_key: Gemini API key (for backward compatibility)
             provider: LLM provider ('gemini' or 'groq')
             groq_api_key: Groq API key (if provider is 'groq')
+            groq_api_keys: List of Groq API keys for rotation on rate limits
             model: Model name (optional override)
         """
         self.provider = provider
 
         if provider == "groq":
-            if not groq_api_key:
+            # ✅ Support multiple Groq API keys for rate limit rotation
+            self.groq_api_keys = groq_api_keys or ([groq_api_key] if groq_api_key else [])
+            self.current_groq_key_index = 0
+
+            if not self.groq_api_keys:
                 raise ValueError("GROQ_API_KEY is required for Groq provider")
             if not GROQ_AVAILABLE:
                 raise ImportError("groq package not installed. Run: pip install groq")
 
-            self.groq_client = Groq(api_key=groq_api_key)
+            # Initialize with first key
+            current_key = self.groq_api_keys[0]
+            self.groq_client = Groq(api_key=current_key)
             self.model = model or settings.GROQ_MODEL
-            logger.info(f"✅ [Groq] API key: {groq_api_key[:10]}...{groq_api_key[-4:]}")
-            logger.info(f"🚀 [Groq] Model: {self.model} (14.4K req/day free tier!)")
+            logger.info(f"✅ [Groq] API key 1/{len(self.groq_api_keys)}: {current_key[:10]}...{current_key[-4:]}")
+            logger.info(f"🚀 [Groq] Model: {self.model} (500K tokens/day per key)")
 
             # ✅ Also initialize Gemini client for fallback
             self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
@@ -626,44 +634,83 @@ Return JSON with: hook, script, cta, search_queries, main_visual_focus, chapters
         return self._call_gemini_api(prompt, max_output_tokens, temperature)
 
     def _call_groq_api(self, prompt: str, temperature: float = 0.8) -> str:
-        """Make API call to Groq"""
-        for attempt in range(self.total_attempts):
-            try:
-                logger.info(f"[Groq] Attempt {attempt+1}/{self.total_attempts} with {self.model}")
+        """
+        Make API call to Groq with multi-key rotation on rate limits.
 
-                response = self.groq_client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "You are a viral content creator for YouTube long-form videos. Always respond with valid JSON only, no markdown blocks."
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
-                    temperature=temperature,
-                    max_tokens=16000,
-                    top_p=0.95,
-                )
+        Rate limit (429) → Try next API key → If all exhausted, raise error
+        """
+        keys_tried = set()
 
-                if response.choices and response.choices[0].message.content:
-                    text = response.choices[0].message.content.strip()
-                    # Sanitize control characters
-                    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
-                    logger.info(f"✅ [Groq] Success with {self.model}")
-                    return text
+        while len(keys_tried) < len(self.groq_api_keys):
+            current_key = self.groq_api_keys[self.current_groq_key_index]
+            key_num = self.current_groq_key_index + 1
 
-                raise RuntimeError("Empty response from Groq")
+            for attempt in range(self.total_attempts):
+                try:
+                    logger.info(f"[Groq] Key {key_num}/{len(self.groq_api_keys)}, Attempt {attempt+1}/{self.total_attempts}")
 
-            except Exception as e:
-                logger.warning(f"❌ [Groq] Attempt {attempt+1} failed: {e}")
-                if attempt < self.total_attempts - 1:
-                    time.sleep(self.initial_backoff * (attempt + 1))
-                continue
+                    response = self.groq_client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": "You are a viral content creator for YouTube long-form videos. Always respond with valid JSON only, no markdown blocks."
+                            },
+                            {
+                                "role": "user",
+                                "content": prompt
+                            }
+                        ],
+                        temperature=temperature,
+                        max_tokens=16000,
+                        top_p=0.95,
+                    )
 
-        raise RuntimeError("All Groq API attempts exhausted")
+                    if response.choices and response.choices[0].message.content:
+                        text = response.choices[0].message.content.strip()
+                        # Sanitize control characters
+                        text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
+                        logger.info(f"✅ [Groq] Success with key {key_num}, model {self.model}")
+                        return text
+
+                    raise RuntimeError("Empty response from Groq")
+
+                except Exception as e:
+                    error_str = str(e)
+                    logger.warning(f"❌ [Groq] Key {key_num}, Attempt {attempt+1} failed: {e}")
+
+                    # ✅ Check for rate limit error (429)
+                    is_rate_limit = "429" in error_str or "rate_limit" in error_str.lower()
+
+                    if is_rate_limit:
+                        logger.warning(f"⚠️ [Groq] Rate limit hit on key {key_num}")
+                        keys_tried.add(self.current_groq_key_index)
+
+                        # Try next key if available
+                        if len(keys_tried) < len(self.groq_api_keys):
+                            self.current_groq_key_index = (self.current_groq_key_index + 1) % len(self.groq_api_keys)
+                            next_key = self.groq_api_keys[self.current_groq_key_index]
+                            logger.info(f"🔄 [Groq] Switching to key {self.current_groq_key_index + 1}/{len(self.groq_api_keys)}")
+                            self.groq_client = Groq(api_key=next_key)
+                            break  # Break inner loop to try new key
+                        else:
+                            # All keys exhausted
+                            raise RuntimeError(f"All {len(self.groq_api_keys)} Groq API keys rate limited")
+
+                    # Not a rate limit error, try again with backoff
+                    if attempt < self.total_attempts - 1:
+                        time.sleep(self.initial_backoff * (attempt + 1))
+                    continue
+            else:
+                # Inner loop completed without break (all attempts failed, not rate limit)
+                keys_tried.add(self.current_groq_key_index)
+                if len(keys_tried) < len(self.groq_api_keys):
+                    self.current_groq_key_index = (self.current_groq_key_index + 1) % len(self.groq_api_keys)
+                    next_key = self.groq_api_keys[self.current_groq_key_index]
+                    logger.info(f"🔄 [Groq] Switching to key {self.current_groq_key_index + 1}/{len(self.groq_api_keys)}")
+                    self.groq_client = Groq(api_key=next_key)
+
+        raise RuntimeError(f"All Groq API keys exhausted ({len(self.groq_api_keys)} keys tried)")
 
     def _call_gemini_api(
         self,

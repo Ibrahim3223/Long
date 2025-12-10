@@ -216,17 +216,17 @@ class ShortsOrchestrator:
         # ✅ LLM Client (Gemini or Groq based on configuration)
         # ====================================================================
         llm_provider = settings.get_active_llm_provider()
-        groq_api_key = settings.GROQ_API_KEY
+        groq_api_keys = settings.get_groq_api_keys()  # List of all available keys
 
         if llm_provider == "groq":
-            if not groq_api_key:
+            if not groq_api_keys:
                 raise ValueError("GROQ_API_KEY not found!")
-            logger.info(f"✅ Groq API key: {groq_api_key[:10]}...")
-            logger.info(f"🚀 Using Groq LLM (14.4K req/day free tier!)")
+            logger.info(f"✅ Groq API keys: {len(groq_api_keys)} key(s) available")
+            logger.info(f"🚀 Using Groq LLM (500K tokens/day per key)")
             self.gemini = GeminiClient(
                 api_key=api_key,
                 provider="groq",
-                groq_api_key=groq_api_key
+                groq_api_keys=groq_api_keys  # Pass all keys for rotation
             )
         else:
             if not api_key:

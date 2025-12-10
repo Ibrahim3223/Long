@@ -124,12 +124,23 @@ USE_GEMINI = _env_bool("USE_GEMINI", True)
 ADDITIONAL_PROMPT_CONTEXT = _env_str("ADDITIONAL_PROMPT_CONTEXT", "")
 
 # ============================================================
-# GROQ SETTINGS (Alternative LLM - 14.4K req/day free tier!)
+# GROQ SETTINGS (Alternative LLM - 500K tokens/day free tier!)
 # ============================================================
 
 GROQ_API_KEY = _env_str("GROQ_API_KEY", "")
+GROQ_API_KEY_2 = _env_str("GROQ_API_KEY_2", "")  # Backup key for rate limits
 GROQ_MODEL = _env_str("GROQ_MODEL", "llama-3.1-8b-instant")
 LLM_PROVIDER = _env_str("LLM_PROVIDER", "auto")  # 'auto', 'gemini', 'groq'
+
+
+def get_groq_api_keys() -> List[str]:
+    """Get all available Groq API keys for rotation on rate limits."""
+    keys = []
+    if GROQ_API_KEY:
+        keys.append(GROQ_API_KEY)
+    if GROQ_API_KEY_2:
+        keys.append(GROQ_API_KEY_2)
+    return keys
 
 
 def get_active_llm_provider() -> str:
